@@ -176,3 +176,49 @@
     color: var(--color-foreground);
   }
 }
+
+/* ---------------- BuildPOS motion + construction textures ---------------- */
+
+@utility blueprint-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--brand) 8%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--brand) 8%, transparent) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+@utility blueprint-grid-dark {
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+@keyframes bp-fade-up {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes bp-fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes bp-pulse-ring {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--critical) 55%, transparent); }
+  70% { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@utility bp-enter {
+  animation: bp-fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@utility bp-fade {
+  animation: bp-fade-in 0.35s ease-out both;
+}
+@utility bp-pulse-dot {
+  animation: bp-pulse-ring 1.8s ease-out infinite;
+}
+@utility stagger-1 { animation-delay: 60ms; }
+@utility stagger-2 { animation-delay: 120ms; }
+@utility stagger-3 { animation-delay: 180ms; }
+@utility stagger-4 { animation-delay: 240ms; }
+@utility stagger-5 { animation-delay: 300ms; }
+@utility stagger-6 { animation-delay: 360ms; }
