@@ -10,33 +10,531 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SuppliersSuppliersRouteImport } from './routes/suppliers.suppliers'
+import { Route as SuppliersRtsRouteImport } from './routes/suppliers.rts'
+import { Route as StockWarehousesRouteImport } from './routes/stock.warehouses'
+import { Route as StockTransfersRouteImport } from './routes/stock.transfers'
+import { Route as StockStocksRouteImport } from './routes/stock.stocks'
+import { Route as StockInventoryRouteImport } from './routes/stock.inventory'
+import { Route as StockExpiryRouteImport } from './routes/stock.expiry'
+import { Route as OperatePosCheckoutRouteImport } from './routes/operate.pos-checkout'
+import { Route as OperateOrdersRouteImport } from './routes/operate.orders'
+import { Route as OperateCustomersRouteImport } from './routes/operate.customers'
+import { Route as OperateControlTowerRouteImport } from './routes/operate.control-tower'
+import { Route as OperateCashierWorkspaceRouteImport } from './routes/operate.cashier-workspace'
+import { Route as OperateCashierShiftRouteImport } from './routes/operate.cashier-shift'
+import { Route as NetworkTerminalsRouteImport } from './routes/network.terminals'
+import { Route as NetworkDevicesRouteImport } from './routes/network.devices'
+import { Route as NetworkBranchesRouteImport } from './routes/network.branches'
+import { Route as InsightsSalesRouteImport } from './routes/insights.sales'
+import { Route as InsightsReportsRouteImport } from './routes/insights.reports'
+import { Route as InsightsKpiRouteImport } from './routes/insights.kpi'
+import { Route as InsightsBiRouteImport } from './routes/insights.bi'
+import { Route as FinanceTaxZatcaRouteImport } from './routes/finance.tax-zatca'
+import { Route as FinanceReturnsRouteImport } from './routes/finance.returns'
+import { Route as FinancePurchaseOrdersRouteImport } from './routes/finance.purchase-orders'
+import { Route as FinancePricingRouteImport } from './routes/finance.pricing'
+import { Route as FinanceExpensesRouteImport } from './routes/finance.expenses'
+import { Route as AdminZatcaSettingsRouteImport } from './routes/admin.zatca-settings'
+import { Route as AdminZatcaInvoicesRouteImport } from './routes/admin.zatca-invoices'
+import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
+import { Route as AdminRulesRouteImport } from './routes/admin.rules'
+import { Route as AdminRolesRouteImport } from './routes/admin.roles'
+import { Route as AdminPosSettingsRouteImport } from './routes/admin.pos-settings'
+import { Route as AdminPlansRouteImport } from './routes/admin.plans'
+import { Route as AdminOverviewRouteImport } from './routes/admin.overview'
+import { Route as AdminMaintenanceRouteImport } from './routes/admin.maintenance'
+import { Route as AdminComplianceRouteImport } from './routes/admin.compliance'
+import { Route as AdminCategoriesRouteImport } from './routes/admin.categories'
+import { Route as AdminAuditLogsRouteImport } from './routes/admin.audit-logs'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SuppliersSuppliersRoute = SuppliersSuppliersRouteImport.update({
+  id: '/suppliers/suppliers',
+  path: '/suppliers/suppliers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SuppliersRtsRoute = SuppliersRtsRouteImport.update({
+  id: '/suppliers/rts',
+  path: '/suppliers/rts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StockWarehousesRoute = StockWarehousesRouteImport.update({
+  id: '/stock/warehouses',
+  path: '/stock/warehouses',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StockTransfersRoute = StockTransfersRouteImport.update({
+  id: '/stock/transfers',
+  path: '/stock/transfers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StockStocksRoute = StockStocksRouteImport.update({
+  id: '/stock/stocks',
+  path: '/stock/stocks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StockInventoryRoute = StockInventoryRouteImport.update({
+  id: '/stock/inventory',
+  path: '/stock/inventory',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StockExpiryRoute = StockExpiryRouteImport.update({
+  id: '/stock/expiry',
+  path: '/stock/expiry',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OperatePosCheckoutRoute = OperatePosCheckoutRouteImport.update({
+  id: '/operate/pos-checkout',
+  path: '/operate/pos-checkout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OperateOrdersRoute = OperateOrdersRouteImport.update({
+  id: '/operate/orders',
+  path: '/operate/orders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OperateCustomersRoute = OperateCustomersRouteImport.update({
+  id: '/operate/customers',
+  path: '/operate/customers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OperateControlTowerRoute = OperateControlTowerRouteImport.update({
+  id: '/operate/control-tower',
+  path: '/operate/control-tower',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OperateCashierWorkspaceRoute = OperateCashierWorkspaceRouteImport.update({
+  id: '/operate/cashier-workspace',
+  path: '/operate/cashier-workspace',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OperateCashierShiftRoute = OperateCashierShiftRouteImport.update({
+  id: '/operate/cashier-shift',
+  path: '/operate/cashier-shift',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NetworkTerminalsRoute = NetworkTerminalsRouteImport.update({
+  id: '/network/terminals',
+  path: '/network/terminals',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NetworkDevicesRoute = NetworkDevicesRouteImport.update({
+  id: '/network/devices',
+  path: '/network/devices',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NetworkBranchesRoute = NetworkBranchesRouteImport.update({
+  id: '/network/branches',
+  path: '/network/branches',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InsightsSalesRoute = InsightsSalesRouteImport.update({
+  id: '/insights/sales',
+  path: '/insights/sales',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InsightsReportsRoute = InsightsReportsRouteImport.update({
+  id: '/insights/reports',
+  path: '/insights/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InsightsKpiRoute = InsightsKpiRouteImport.update({
+  id: '/insights/kpi',
+  path: '/insights/kpi',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InsightsBiRoute = InsightsBiRouteImport.update({
+  id: '/insights/bi',
+  path: '/insights/bi',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FinanceTaxZatcaRoute = FinanceTaxZatcaRouteImport.update({
+  id: '/finance/tax-zatca',
+  path: '/finance/tax-zatca',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FinanceReturnsRoute = FinanceReturnsRouteImport.update({
+  id: '/finance/returns',
+  path: '/finance/returns',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FinancePurchaseOrdersRoute = FinancePurchaseOrdersRouteImport.update({
+  id: '/finance/purchase-orders',
+  path: '/finance/purchase-orders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FinancePricingRoute = FinancePricingRouteImport.update({
+  id: '/finance/pricing',
+  path: '/finance/pricing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FinanceExpensesRoute = FinanceExpensesRouteImport.update({
+  id: '/finance/expenses',
+  path: '/finance/expenses',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminZatcaSettingsRoute = AdminZatcaSettingsRouteImport.update({
+  id: '/admin/zatca-settings',
+  path: '/admin/zatca-settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminZatcaInvoicesRoute = AdminZatcaInvoicesRouteImport.update({
+  id: '/admin/zatca-invoices',
+  path: '/admin/zatca-invoices',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/admin/users',
+  path: '/admin/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminSettingsRoute = AdminSettingsRouteImport.update({
+  id: '/admin/settings',
+  path: '/admin/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRulesRoute = AdminRulesRouteImport.update({
+  id: '/admin/rules',
+  path: '/admin/rules',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRolesRoute = AdminRolesRouteImport.update({
+  id: '/admin/roles',
+  path: '/admin/roles',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminPosSettingsRoute = AdminPosSettingsRouteImport.update({
+  id: '/admin/pos-settings',
+  path: '/admin/pos-settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminPlansRoute = AdminPlansRouteImport.update({
+  id: '/admin/plans',
+  path: '/admin/plans',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminOverviewRoute = AdminOverviewRouteImport.update({
+  id: '/admin/overview',
+  path: '/admin/overview',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminMaintenanceRoute = AdminMaintenanceRouteImport.update({
+  id: '/admin/maintenance',
+  path: '/admin/maintenance',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminComplianceRoute = AdminComplianceRouteImport.update({
+  id: '/admin/compliance',
+  path: '/admin/compliance',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminCategoriesRoute = AdminCategoriesRouteImport.update({
+  id: '/admin/categories',
+  path: '/admin/categories',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminAuditLogsRoute = AdminAuditLogsRouteImport.update({
+  id: '/admin/audit-logs',
+  path: '/admin/audit-logs',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin/audit-logs': typeof AdminAuditLogsRoute
+  '/admin/categories': typeof AdminCategoriesRoute
+  '/admin/compliance': typeof AdminComplianceRoute
+  '/admin/maintenance': typeof AdminMaintenanceRoute
+  '/admin/overview': typeof AdminOverviewRoute
+  '/admin/plans': typeof AdminPlansRoute
+  '/admin/pos-settings': typeof AdminPosSettingsRoute
+  '/admin/roles': typeof AdminRolesRoute
+  '/admin/rules': typeof AdminRulesRoute
+  '/admin/settings': typeof AdminSettingsRoute
+  '/admin/users': typeof AdminUsersRoute
+  '/admin/zatca-invoices': typeof AdminZatcaInvoicesRoute
+  '/admin/zatca-settings': typeof AdminZatcaSettingsRoute
+  '/finance/expenses': typeof FinanceExpensesRoute
+  '/finance/pricing': typeof FinancePricingRoute
+  '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
+  '/finance/returns': typeof FinanceReturnsRoute
+  '/finance/tax-zatca': typeof FinanceTaxZatcaRoute
+  '/insights/bi': typeof InsightsBiRoute
+  '/insights/kpi': typeof InsightsKpiRoute
+  '/insights/reports': typeof InsightsReportsRoute
+  '/insights/sales': typeof InsightsSalesRoute
+  '/network/branches': typeof NetworkBranchesRoute
+  '/network/devices': typeof NetworkDevicesRoute
+  '/network/terminals': typeof NetworkTerminalsRoute
+  '/operate/cashier-shift': typeof OperateCashierShiftRoute
+  '/operate/cashier-workspace': typeof OperateCashierWorkspaceRoute
+  '/operate/control-tower': typeof OperateControlTowerRoute
+  '/operate/customers': typeof OperateCustomersRoute
+  '/operate/orders': typeof OperateOrdersRoute
+  '/operate/pos-checkout': typeof OperatePosCheckoutRoute
+  '/stock/expiry': typeof StockExpiryRoute
+  '/stock/inventory': typeof StockInventoryRoute
+  '/stock/stocks': typeof StockStocksRoute
+  '/stock/transfers': typeof StockTransfersRoute
+  '/stock/warehouses': typeof StockWarehousesRoute
+  '/suppliers/rts': typeof SuppliersRtsRoute
+  '/suppliers/suppliers': typeof SuppliersSuppliersRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin/audit-logs': typeof AdminAuditLogsRoute
+  '/admin/categories': typeof AdminCategoriesRoute
+  '/admin/compliance': typeof AdminComplianceRoute
+  '/admin/maintenance': typeof AdminMaintenanceRoute
+  '/admin/overview': typeof AdminOverviewRoute
+  '/admin/plans': typeof AdminPlansRoute
+  '/admin/pos-settings': typeof AdminPosSettingsRoute
+  '/admin/roles': typeof AdminRolesRoute
+  '/admin/rules': typeof AdminRulesRoute
+  '/admin/settings': typeof AdminSettingsRoute
+  '/admin/users': typeof AdminUsersRoute
+  '/admin/zatca-invoices': typeof AdminZatcaInvoicesRoute
+  '/admin/zatca-settings': typeof AdminZatcaSettingsRoute
+  '/finance/expenses': typeof FinanceExpensesRoute
+  '/finance/pricing': typeof FinancePricingRoute
+  '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
+  '/finance/returns': typeof FinanceReturnsRoute
+  '/finance/tax-zatca': typeof FinanceTaxZatcaRoute
+  '/insights/bi': typeof InsightsBiRoute
+  '/insights/kpi': typeof InsightsKpiRoute
+  '/insights/reports': typeof InsightsReportsRoute
+  '/insights/sales': typeof InsightsSalesRoute
+  '/network/branches': typeof NetworkBranchesRoute
+  '/network/devices': typeof NetworkDevicesRoute
+  '/network/terminals': typeof NetworkTerminalsRoute
+  '/operate/cashier-shift': typeof OperateCashierShiftRoute
+  '/operate/cashier-workspace': typeof OperateCashierWorkspaceRoute
+  '/operate/control-tower': typeof OperateControlTowerRoute
+  '/operate/customers': typeof OperateCustomersRoute
+  '/operate/orders': typeof OperateOrdersRoute
+  '/operate/pos-checkout': typeof OperatePosCheckoutRoute
+  '/stock/expiry': typeof StockExpiryRoute
+  '/stock/inventory': typeof StockInventoryRoute
+  '/stock/stocks': typeof StockStocksRoute
+  '/stock/transfers': typeof StockTransfersRoute
+  '/stock/warehouses': typeof StockWarehousesRoute
+  '/suppliers/rts': typeof SuppliersRtsRoute
+  '/suppliers/suppliers': typeof SuppliersSuppliersRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin/audit-logs': typeof AdminAuditLogsRoute
+  '/admin/categories': typeof AdminCategoriesRoute
+  '/admin/compliance': typeof AdminComplianceRoute
+  '/admin/maintenance': typeof AdminMaintenanceRoute
+  '/admin/overview': typeof AdminOverviewRoute
+  '/admin/plans': typeof AdminPlansRoute
+  '/admin/pos-settings': typeof AdminPosSettingsRoute
+  '/admin/roles': typeof AdminRolesRoute
+  '/admin/rules': typeof AdminRulesRoute
+  '/admin/settings': typeof AdminSettingsRoute
+  '/admin/users': typeof AdminUsersRoute
+  '/admin/zatca-invoices': typeof AdminZatcaInvoicesRoute
+  '/admin/zatca-settings': typeof AdminZatcaSettingsRoute
+  '/finance/expenses': typeof FinanceExpensesRoute
+  '/finance/pricing': typeof FinancePricingRoute
+  '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
+  '/finance/returns': typeof FinanceReturnsRoute
+  '/finance/tax-zatca': typeof FinanceTaxZatcaRoute
+  '/insights/bi': typeof InsightsBiRoute
+  '/insights/kpi': typeof InsightsKpiRoute
+  '/insights/reports': typeof InsightsReportsRoute
+  '/insights/sales': typeof InsightsSalesRoute
+  '/network/branches': typeof NetworkBranchesRoute
+  '/network/devices': typeof NetworkDevicesRoute
+  '/network/terminals': typeof NetworkTerminalsRoute
+  '/operate/cashier-shift': typeof OperateCashierShiftRoute
+  '/operate/cashier-workspace': typeof OperateCashierWorkspaceRoute
+  '/operate/control-tower': typeof OperateControlTowerRoute
+  '/operate/customers': typeof OperateCustomersRoute
+  '/operate/orders': typeof OperateOrdersRoute
+  '/operate/pos-checkout': typeof OperatePosCheckoutRoute
+  '/stock/expiry': typeof StockExpiryRoute
+  '/stock/inventory': typeof StockInventoryRoute
+  '/stock/stocks': typeof StockStocksRoute
+  '/stock/transfers': typeof StockTransfersRoute
+  '/stock/warehouses': typeof StockWarehousesRoute
+  '/suppliers/rts': typeof SuppliersRtsRoute
+  '/suppliers/suppliers': typeof SuppliersSuppliersRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/admin/audit-logs'
+    | '/admin/categories'
+    | '/admin/compliance'
+    | '/admin/maintenance'
+    | '/admin/overview'
+    | '/admin/plans'
+    | '/admin/pos-settings'
+    | '/admin/roles'
+    | '/admin/rules'
+    | '/admin/settings'
+    | '/admin/users'
+    | '/admin/zatca-invoices'
+    | '/admin/zatca-settings'
+    | '/finance/expenses'
+    | '/finance/pricing'
+    | '/finance/purchase-orders'
+    | '/finance/returns'
+    | '/finance/tax-zatca'
+    | '/insights/bi'
+    | '/insights/kpi'
+    | '/insights/reports'
+    | '/insights/sales'
+    | '/network/branches'
+    | '/network/devices'
+    | '/network/terminals'
+    | '/operate/cashier-shift'
+    | '/operate/cashier-workspace'
+    | '/operate/control-tower'
+    | '/operate/customers'
+    | '/operate/orders'
+    | '/operate/pos-checkout'
+    | '/stock/expiry'
+    | '/stock/inventory'
+    | '/stock/stocks'
+    | '/stock/transfers'
+    | '/stock/warehouses'
+    | '/suppliers/rts'
+    | '/suppliers/suppliers'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/admin/audit-logs'
+    | '/admin/categories'
+    | '/admin/compliance'
+    | '/admin/maintenance'
+    | '/admin/overview'
+    | '/admin/plans'
+    | '/admin/pos-settings'
+    | '/admin/roles'
+    | '/admin/rules'
+    | '/admin/settings'
+    | '/admin/users'
+    | '/admin/zatca-invoices'
+    | '/admin/zatca-settings'
+    | '/finance/expenses'
+    | '/finance/pricing'
+    | '/finance/purchase-orders'
+    | '/finance/returns'
+    | '/finance/tax-zatca'
+    | '/insights/bi'
+    | '/insights/kpi'
+    | '/insights/reports'
+    | '/insights/sales'
+    | '/network/branches'
+    | '/network/devices'
+    | '/network/terminals'
+    | '/operate/cashier-shift'
+    | '/operate/cashier-workspace'
+    | '/operate/control-tower'
+    | '/operate/customers'
+    | '/operate/orders'
+    | '/operate/pos-checkout'
+    | '/stock/expiry'
+    | '/stock/inventory'
+    | '/stock/stocks'
+    | '/stock/transfers'
+    | '/stock/warehouses'
+    | '/suppliers/rts'
+    | '/suppliers/suppliers'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin/audit-logs'
+    | '/admin/categories'
+    | '/admin/compliance'
+    | '/admin/maintenance'
+    | '/admin/overview'
+    | '/admin/plans'
+    | '/admin/pos-settings'
+    | '/admin/roles'
+    | '/admin/rules'
+    | '/admin/settings'
+    | '/admin/users'
+    | '/admin/zatca-invoices'
+    | '/admin/zatca-settings'
+    | '/finance/expenses'
+    | '/finance/pricing'
+    | '/finance/purchase-orders'
+    | '/finance/returns'
+    | '/finance/tax-zatca'
+    | '/insights/bi'
+    | '/insights/kpi'
+    | '/insights/reports'
+    | '/insights/sales'
+    | '/network/branches'
+    | '/network/devices'
+    | '/network/terminals'
+    | '/operate/cashier-shift'
+    | '/operate/cashier-workspace'
+    | '/operate/control-tower'
+    | '/operate/customers'
+    | '/operate/orders'
+    | '/operate/pos-checkout'
+    | '/stock/expiry'
+    | '/stock/inventory'
+    | '/stock/stocks'
+    | '/stock/transfers'
+    | '/stock/warehouses'
+    | '/suppliers/rts'
+    | '/suppliers/suppliers'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminAuditLogsRoute: typeof AdminAuditLogsRoute
+  AdminCategoriesRoute: typeof AdminCategoriesRoute
+  AdminComplianceRoute: typeof AdminComplianceRoute
+  AdminMaintenanceRoute: typeof AdminMaintenanceRoute
+  AdminOverviewRoute: typeof AdminOverviewRoute
+  AdminPlansRoute: typeof AdminPlansRoute
+  AdminPosSettingsRoute: typeof AdminPosSettingsRoute
+  AdminRolesRoute: typeof AdminRolesRoute
+  AdminRulesRoute: typeof AdminRulesRoute
+  AdminSettingsRoute: typeof AdminSettingsRoute
+  AdminUsersRoute: typeof AdminUsersRoute
+  AdminZatcaInvoicesRoute: typeof AdminZatcaInvoicesRoute
+  AdminZatcaSettingsRoute: typeof AdminZatcaSettingsRoute
+  FinanceExpensesRoute: typeof FinanceExpensesRoute
+  FinancePricingRoute: typeof FinancePricingRoute
+  FinancePurchaseOrdersRoute: typeof FinancePurchaseOrdersRoute
+  FinanceReturnsRoute: typeof FinanceReturnsRoute
+  FinanceTaxZatcaRoute: typeof FinanceTaxZatcaRoute
+  InsightsBiRoute: typeof InsightsBiRoute
+  InsightsKpiRoute: typeof InsightsKpiRoute
+  InsightsReportsRoute: typeof InsightsReportsRoute
+  InsightsSalesRoute: typeof InsightsSalesRoute
+  NetworkBranchesRoute: typeof NetworkBranchesRoute
+  NetworkDevicesRoute: typeof NetworkDevicesRoute
+  NetworkTerminalsRoute: typeof NetworkTerminalsRoute
+  OperateCashierShiftRoute: typeof OperateCashierShiftRoute
+  OperateCashierWorkspaceRoute: typeof OperateCashierWorkspaceRoute
+  OperateControlTowerRoute: typeof OperateControlTowerRoute
+  OperateCustomersRoute: typeof OperateCustomersRoute
+  OperateOrdersRoute: typeof OperateOrdersRoute
+  OperatePosCheckoutRoute: typeof OperatePosCheckoutRoute
+  StockExpiryRoute: typeof StockExpiryRoute
+  StockInventoryRoute: typeof StockInventoryRoute
+  StockStocksRoute: typeof StockStocksRoute
+  StockTransfersRoute: typeof StockTransfersRoute
+  StockWarehousesRoute: typeof StockWarehousesRoute
+  SuppliersRtsRoute: typeof SuppliersRtsRoute
+  SuppliersSuppliersRoute: typeof SuppliersSuppliersRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +546,315 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/suppliers/suppliers': {
+      id: '/suppliers/suppliers'
+      path: '/suppliers/suppliers'
+      fullPath: '/suppliers/suppliers'
+      preLoaderRoute: typeof SuppliersSuppliersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/suppliers/rts': {
+      id: '/suppliers/rts'
+      path: '/suppliers/rts'
+      fullPath: '/suppliers/rts'
+      preLoaderRoute: typeof SuppliersRtsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stock/warehouses': {
+      id: '/stock/warehouses'
+      path: '/stock/warehouses'
+      fullPath: '/stock/warehouses'
+      preLoaderRoute: typeof StockWarehousesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stock/transfers': {
+      id: '/stock/transfers'
+      path: '/stock/transfers'
+      fullPath: '/stock/transfers'
+      preLoaderRoute: typeof StockTransfersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stock/stocks': {
+      id: '/stock/stocks'
+      path: '/stock/stocks'
+      fullPath: '/stock/stocks'
+      preLoaderRoute: typeof StockStocksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stock/inventory': {
+      id: '/stock/inventory'
+      path: '/stock/inventory'
+      fullPath: '/stock/inventory'
+      preLoaderRoute: typeof StockInventoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stock/expiry': {
+      id: '/stock/expiry'
+      path: '/stock/expiry'
+      fullPath: '/stock/expiry'
+      preLoaderRoute: typeof StockExpiryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/operate/pos-checkout': {
+      id: '/operate/pos-checkout'
+      path: '/operate/pos-checkout'
+      fullPath: '/operate/pos-checkout'
+      preLoaderRoute: typeof OperatePosCheckoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/operate/orders': {
+      id: '/operate/orders'
+      path: '/operate/orders'
+      fullPath: '/operate/orders'
+      preLoaderRoute: typeof OperateOrdersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/operate/customers': {
+      id: '/operate/customers'
+      path: '/operate/customers'
+      fullPath: '/operate/customers'
+      preLoaderRoute: typeof OperateCustomersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/operate/control-tower': {
+      id: '/operate/control-tower'
+      path: '/operate/control-tower'
+      fullPath: '/operate/control-tower'
+      preLoaderRoute: typeof OperateControlTowerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/operate/cashier-workspace': {
+      id: '/operate/cashier-workspace'
+      path: '/operate/cashier-workspace'
+      fullPath: '/operate/cashier-workspace'
+      preLoaderRoute: typeof OperateCashierWorkspaceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/operate/cashier-shift': {
+      id: '/operate/cashier-shift'
+      path: '/operate/cashier-shift'
+      fullPath: '/operate/cashier-shift'
+      preLoaderRoute: typeof OperateCashierShiftRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/network/terminals': {
+      id: '/network/terminals'
+      path: '/network/terminals'
+      fullPath: '/network/terminals'
+      preLoaderRoute: typeof NetworkTerminalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/network/devices': {
+      id: '/network/devices'
+      path: '/network/devices'
+      fullPath: '/network/devices'
+      preLoaderRoute: typeof NetworkDevicesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/network/branches': {
+      id: '/network/branches'
+      path: '/network/branches'
+      fullPath: '/network/branches'
+      preLoaderRoute: typeof NetworkBranchesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/insights/sales': {
+      id: '/insights/sales'
+      path: '/insights/sales'
+      fullPath: '/insights/sales'
+      preLoaderRoute: typeof InsightsSalesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/insights/reports': {
+      id: '/insights/reports'
+      path: '/insights/reports'
+      fullPath: '/insights/reports'
+      preLoaderRoute: typeof InsightsReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/insights/kpi': {
+      id: '/insights/kpi'
+      path: '/insights/kpi'
+      fullPath: '/insights/kpi'
+      preLoaderRoute: typeof InsightsKpiRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/insights/bi': {
+      id: '/insights/bi'
+      path: '/insights/bi'
+      fullPath: '/insights/bi'
+      preLoaderRoute: typeof InsightsBiRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/finance/tax-zatca': {
+      id: '/finance/tax-zatca'
+      path: '/finance/tax-zatca'
+      fullPath: '/finance/tax-zatca'
+      preLoaderRoute: typeof FinanceTaxZatcaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/finance/returns': {
+      id: '/finance/returns'
+      path: '/finance/returns'
+      fullPath: '/finance/returns'
+      preLoaderRoute: typeof FinanceReturnsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/finance/purchase-orders': {
+      id: '/finance/purchase-orders'
+      path: '/finance/purchase-orders'
+      fullPath: '/finance/purchase-orders'
+      preLoaderRoute: typeof FinancePurchaseOrdersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/finance/pricing': {
+      id: '/finance/pricing'
+      path: '/finance/pricing'
+      fullPath: '/finance/pricing'
+      preLoaderRoute: typeof FinancePricingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/finance/expenses': {
+      id: '/finance/expenses'
+      path: '/finance/expenses'
+      fullPath: '/finance/expenses'
+      preLoaderRoute: typeof FinanceExpensesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/zatca-settings': {
+      id: '/admin/zatca-settings'
+      path: '/admin/zatca-settings'
+      fullPath: '/admin/zatca-settings'
+      preLoaderRoute: typeof AdminZatcaSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/zatca-invoices': {
+      id: '/admin/zatca-invoices'
+      path: '/admin/zatca-invoices'
+      fullPath: '/admin/zatca-invoices'
+      preLoaderRoute: typeof AdminZatcaInvoicesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/users': {
+      id: '/admin/users'
+      path: '/admin/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/settings': {
+      id: '/admin/settings'
+      path: '/admin/settings'
+      fullPath: '/admin/settings'
+      preLoaderRoute: typeof AdminSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/rules': {
+      id: '/admin/rules'
+      path: '/admin/rules'
+      fullPath: '/admin/rules'
+      preLoaderRoute: typeof AdminRulesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/roles': {
+      id: '/admin/roles'
+      path: '/admin/roles'
+      fullPath: '/admin/roles'
+      preLoaderRoute: typeof AdminRolesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/pos-settings': {
+      id: '/admin/pos-settings'
+      path: '/admin/pos-settings'
+      fullPath: '/admin/pos-settings'
+      preLoaderRoute: typeof AdminPosSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/plans': {
+      id: '/admin/plans'
+      path: '/admin/plans'
+      fullPath: '/admin/plans'
+      preLoaderRoute: typeof AdminPlansRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/overview': {
+      id: '/admin/overview'
+      path: '/admin/overview'
+      fullPath: '/admin/overview'
+      preLoaderRoute: typeof AdminOverviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/maintenance': {
+      id: '/admin/maintenance'
+      path: '/admin/maintenance'
+      fullPath: '/admin/maintenance'
+      preLoaderRoute: typeof AdminMaintenanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/compliance': {
+      id: '/admin/compliance'
+      path: '/admin/compliance'
+      fullPath: '/admin/compliance'
+      preLoaderRoute: typeof AdminComplianceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/categories': {
+      id: '/admin/categories'
+      path: '/admin/categories'
+      fullPath: '/admin/categories'
+      preLoaderRoute: typeof AdminCategoriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/audit-logs': {
+      id: '/admin/audit-logs'
+      path: '/admin/audit-logs'
+      fullPath: '/admin/audit-logs'
+      preLoaderRoute: typeof AdminAuditLogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminAuditLogsRoute: AdminAuditLogsRoute,
+  AdminCategoriesRoute: AdminCategoriesRoute,
+  AdminComplianceRoute: AdminComplianceRoute,
+  AdminMaintenanceRoute: AdminMaintenanceRoute,
+  AdminOverviewRoute: AdminOverviewRoute,
+  AdminPlansRoute: AdminPlansRoute,
+  AdminPosSettingsRoute: AdminPosSettingsRoute,
+  AdminRolesRoute: AdminRolesRoute,
+  AdminRulesRoute: AdminRulesRoute,
+  AdminSettingsRoute: AdminSettingsRoute,
+  AdminUsersRoute: AdminUsersRoute,
+  AdminZatcaInvoicesRoute: AdminZatcaInvoicesRoute,
+  AdminZatcaSettingsRoute: AdminZatcaSettingsRoute,
+  FinanceExpensesRoute: FinanceExpensesRoute,
+  FinancePricingRoute: FinancePricingRoute,
+  FinancePurchaseOrdersRoute: FinancePurchaseOrdersRoute,
+  FinanceReturnsRoute: FinanceReturnsRoute,
+  FinanceTaxZatcaRoute: FinanceTaxZatcaRoute,
+  InsightsBiRoute: InsightsBiRoute,
+  InsightsKpiRoute: InsightsKpiRoute,
+  InsightsReportsRoute: InsightsReportsRoute,
+  InsightsSalesRoute: InsightsSalesRoute,
+  NetworkBranchesRoute: NetworkBranchesRoute,
+  NetworkDevicesRoute: NetworkDevicesRoute,
+  NetworkTerminalsRoute: NetworkTerminalsRoute,
+  OperateCashierShiftRoute: OperateCashierShiftRoute,
+  OperateCashierWorkspaceRoute: OperateCashierWorkspaceRoute,
+  OperateControlTowerRoute: OperateControlTowerRoute,
+  OperateCustomersRoute: OperateCustomersRoute,
+  OperateOrdersRoute: OperateOrdersRoute,
+  OperatePosCheckoutRoute: OperatePosCheckoutRoute,
+  StockExpiryRoute: StockExpiryRoute,
+  StockInventoryRoute: StockInventoryRoute,
+  StockStocksRoute: StockStocksRoute,
+  StockTransfersRoute: StockTransfersRoute,
+  StockWarehousesRoute: StockWarehousesRoute,
+  SuppliersRtsRoute: SuppliersRtsRoute,
+  SuppliersSuppliersRoute: SuppliersSuppliersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
