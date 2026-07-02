@@ -20,6 +20,19 @@
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-glow: var(--brand-glow);
+  --color-critical: var(--critical);
+  --color-critical-foreground: var(--critical-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
@@ -63,6 +76,17 @@
 
 :root {
   --radius: 0.625rem;
+  --brand: oklch(0.55 0.22 295);
+  --brand-foreground: oklch(0.98 0.01 295);
+  --brand-glow: oklch(0.72 0.18 310);
+  --critical: oklch(0.62 0.24 25);
+  --critical-foreground: oklch(0.98 0 0);
+  --warning: oklch(0.78 0.16 70);
+  --warning-foreground: oklch(0.2 0.05 70);
+  --success: oklch(0.68 0.17 155);
+  --success-foreground: oklch(0.15 0.05 155);
+  --info: oklch(0.68 0.15 235);
+  --info-foreground: oklch(0.15 0.05 235);
   --background: oklch(1 0 0);
   --foreground: oklch(0.129 0.042 264.695);
   --card: oklch(1 0 0);
