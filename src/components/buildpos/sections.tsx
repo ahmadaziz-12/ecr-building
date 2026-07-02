@@ -169,25 +169,45 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
     { label: "Payment", options: filters.payment, def: "Cash" },
     { label: "Stock", options: filters.stockStatus, def: "Available" },
     { label: "Delivery", options: filters.deliveryStatus, def: "Pending" },
+    { label: "Alert Type", options: filters.alertType, def: "Stock" },
   ];
   const shown = compact ? groups.slice(0, 4) : groups;
   return (
-    <div className="flex flex-wrap gap-2 rounded-xl border border-black/5 bg-white p-2 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
-      {shown.map((g) => (
-        <Select key={g.label} defaultValue={g.def}>
-          <SelectTrigger className="h-9 w-auto min-w-[130px] border-black/10 bg-canvas text-xs">
-            <SelectValue placeholder={g.label} />
-          </SelectTrigger>
-          <SelectContent>
-            {g.options.map((o) => (
-              <SelectItem key={o} value={o}>{o}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ))}
-      <Button size="sm" className="ml-auto h-9 bg-brand text-brand-foreground hover:bg-brand/90">
-        Apply
-      </Button>
+    <div className="rounded-2xl border border-brand/15 bg-gradient-to-r from-brand/5 via-white to-teal/5 p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="grid h-6 w-6 place-items-center rounded-md bg-brand/10 text-brand">
+            <Search className="h-3.5 w-3.5" />
+          </span>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/80">Filters</h3>
+          <span className="text-[11px] text-muted-foreground">Controls all cards, charts & tables below</span>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" variant="ghost" className="h-8 text-xs text-muted-foreground hover:text-brand">
+            Reset
+          </Button>
+          <Button size="sm" className="h-8 bg-brand text-brand-foreground hover:bg-brand/90">
+            Apply Filters
+          </Button>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {shown.map((g) => (
+          <div key={g.label} className="flex flex-col gap-1">
+            <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{g.label}</label>
+            <Select defaultValue={g.def}>
+              <SelectTrigger className="h-8 w-auto min-w-[130px] border-black/10 bg-white text-xs transition hover:border-brand/40">
+                <SelectValue placeholder={g.label} />
+              </SelectTrigger>
+              <SelectContent>
+                {g.options.map((o) => (
+                  <SelectItem key={o} value={o}>{o}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
