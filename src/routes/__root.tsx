@@ -85,7 +85,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           "Real-time building materials POS dashboard for KSA: sales, stock, cashier shifts, deliveries, ZATCA compliance.",
       },
       { name: "author", content: "Mi Money" },
-      { property: "og:title", content: "BuildPOS — Building Materials POS Dashboard" },
+      { property: "og:title", content: "BuildPOS — Building Materials POS Dashboard | Mi Money" },
       {
         property: "og:description",
         content:
@@ -93,6 +93,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "BuildPOS — Building Materials POS Dashboard | Mi Money" },
+      { name: "description", content: "BuildMat Hub provides a real-time dashboard for building material retailers in KSA." },
+      { property: "og:description", content: "BuildMat Hub provides a real-time dashboard for building material retailers in KSA." },
+      { name: "twitter:description", content: "BuildMat Hub provides a real-time dashboard for building material retailers in KSA." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/dbe3dfc8-4fb0-470e-8ad3-747475dacd04/id-preview-0b066791--1fd7f3ca-01e1-49cd-8239-80c2ab6ec0f5.lovable.app-1783002209686.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/dbe3dfc8-4fb0-470e-8ad3-747475dacd04/id-preview-0b066791--1fd7f3ca-01e1-49cd-8239-80c2ab6ec0f5.lovable.app-1783002209686.png" },
     ],
     links: [
       {
