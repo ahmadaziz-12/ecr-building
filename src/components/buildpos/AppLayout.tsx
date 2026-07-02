@@ -141,11 +141,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-canvas font-sans text-foreground">
       {/* Sidebar */}
-      <aside className="sticky top-0 hidden h-screen w-64 flex-none flex-col border-r border-black/5 bg-sidebar-bg text-sidebar-fg lg:flex">
-        <div className="flex h-16 items-center border-b border-white/10 px-5">
-          <img src={logoAsset.url} alt="Mi Money" className="h-7 w-auto brightness-0 invert" />
+      <aside className="sticky top-0 hidden h-screen w-64 flex-none flex-col border-r border-black/5 bg-sidebar-bg text-sidebar-fg lg:flex relative">
+        <div className="pointer-events-none absolute inset-0 blueprint-grid-dark opacity-60" />
+        <div className="relative flex h-16 items-center border-b border-white/10 px-4">
+          <div className="flex h-10 w-full items-center justify-center rounded-xl bg-white/95 px-3 shadow-sm">
+            <img src={logoAsset.url} alt="Mi Money" className="h-6 w-auto" />
+          </div>
         </div>
-        <nav className="flex-1 space-y-3 overflow-y-auto p-3">
+        <nav className="relative flex-1 space-y-3 overflow-y-auto p-3">
           {nav.map((g) => {
             const isOpen = open[g.name] ?? true;
             return (
@@ -185,7 +188,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             );
           })}
         </nav>
-        <div className="border-t border-white/10 p-3">
+        <div className="relative border-t border-white/10 p-3">
           <div className="rounded-lg bg-white/5 p-3 text-xs">
             <div className="flex items-center gap-2">
               <div className="grid h-8 w-8 place-items-center rounded-full bg-teal text-teal-foreground font-semibold">
