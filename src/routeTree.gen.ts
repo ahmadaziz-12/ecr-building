@@ -9,8 +9,56 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SalesRouteImport } from './routes/sales'
+import { Route as ReturnsRouteImport } from './routes/returns'
+import { Route as ReportsRouteImport } from './routes/reports'
+import { Route as InventoryRouteImport } from './routes/inventory'
+import { Route as DeliveryRouteImport } from './routes/delivery'
+import { Route as ComplianceRouteImport } from './routes/compliance'
+import { Route as CashierRouteImport } from './routes/cashier'
+import { Route as BranchesRouteImport } from './routes/branches'
 import { Route as IndexRouteImport } from './routes/index'
 
+const SalesRoute = SalesRouteImport.update({
+  id: '/sales',
+  path: '/sales',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReturnsRoute = ReturnsRouteImport.update({
+  id: '/returns',
+  path: '/returns',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsRoute = ReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InventoryRoute = InventoryRouteImport.update({
+  id: '/inventory',
+  path: '/inventory',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryRoute = DeliveryRouteImport.update({
+  id: '/delivery',
+  path: '/delivery',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ComplianceRoute = ComplianceRouteImport.update({
+  id: '/compliance',
+  path: '/compliance',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CashierRoute = CashierRouteImport.update({
+  id: '/cashier',
+  path: '/cashier',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BranchesRoute = BranchesRouteImport.update({
+  id: '/branches',
+  path: '/branches',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -19,28 +67,144 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/branches': typeof BranchesRoute
+  '/cashier': typeof CashierRoute
+  '/compliance': typeof ComplianceRoute
+  '/delivery': typeof DeliveryRoute
+  '/inventory': typeof InventoryRoute
+  '/reports': typeof ReportsRoute
+  '/returns': typeof ReturnsRoute
+  '/sales': typeof SalesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/branches': typeof BranchesRoute
+  '/cashier': typeof CashierRoute
+  '/compliance': typeof ComplianceRoute
+  '/delivery': typeof DeliveryRoute
+  '/inventory': typeof InventoryRoute
+  '/reports': typeof ReportsRoute
+  '/returns': typeof ReturnsRoute
+  '/sales': typeof SalesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/branches': typeof BranchesRoute
+  '/cashier': typeof CashierRoute
+  '/compliance': typeof ComplianceRoute
+  '/delivery': typeof DeliveryRoute
+  '/inventory': typeof InventoryRoute
+  '/reports': typeof ReportsRoute
+  '/returns': typeof ReturnsRoute
+  '/sales': typeof SalesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/branches'
+    | '/cashier'
+    | '/compliance'
+    | '/delivery'
+    | '/inventory'
+    | '/reports'
+    | '/returns'
+    | '/sales'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/branches'
+    | '/cashier'
+    | '/compliance'
+    | '/delivery'
+    | '/inventory'
+    | '/reports'
+    | '/returns'
+    | '/sales'
+  id:
+    | '__root__'
+    | '/'
+    | '/branches'
+    | '/cashier'
+    | '/compliance'
+    | '/delivery'
+    | '/inventory'
+    | '/reports'
+    | '/returns'
+    | '/sales'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BranchesRoute: typeof BranchesRoute
+  CashierRoute: typeof CashierRoute
+  ComplianceRoute: typeof ComplianceRoute
+  DeliveryRoute: typeof DeliveryRoute
+  InventoryRoute: typeof InventoryRoute
+  ReportsRoute: typeof ReportsRoute
+  ReturnsRoute: typeof ReturnsRoute
+  SalesRoute: typeof SalesRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/sales': {
+      id: '/sales'
+      path: '/sales'
+      fullPath: '/sales'
+      preLoaderRoute: typeof SalesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/returns': {
+      id: '/returns'
+      path: '/returns'
+      fullPath: '/returns'
+      preLoaderRoute: typeof ReturnsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports': {
+      id: '/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof ReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/inventory': {
+      id: '/inventory'
+      path: '/inventory'
+      fullPath: '/inventory'
+      preLoaderRoute: typeof InventoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery': {
+      id: '/delivery'
+      path: '/delivery'
+      fullPath: '/delivery'
+      preLoaderRoute: typeof DeliveryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/compliance': {
+      id: '/compliance'
+      path: '/compliance'
+      fullPath: '/compliance'
+      preLoaderRoute: typeof ComplianceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cashier': {
+      id: '/cashier'
+      path: '/cashier'
+      fullPath: '/cashier'
+      preLoaderRoute: typeof CashierRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/branches': {
+      id: '/branches'
+      path: '/branches'
+      fullPath: '/branches'
+      preLoaderRoute: typeof BranchesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -53,6 +217,14 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BranchesRoute: BranchesRoute,
+  CashierRoute: CashierRoute,
+  ComplianceRoute: ComplianceRoute,
+  DeliveryRoute: DeliveryRoute,
+  InventoryRoute: InventoryRoute,
+  ReportsRoute: ReportsRoute,
+  ReturnsRoute: ReturnsRoute,
+  SalesRoute: SalesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
