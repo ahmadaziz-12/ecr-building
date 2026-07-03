@@ -38,7 +38,7 @@ import { useFilters } from "@/lib/buildpos/filter-context";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/dashboard")({
   component: OverviewPage,
 });
 
