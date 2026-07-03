@@ -300,6 +300,7 @@ export function QuickActions() {
           return (
             <button
               key={a.label}
+              onClick={() => toast.info(a.label, { description: "Action triggered." })}
               className="group relative flex flex-col items-center gap-1.5 rounded-xl border border-black/5 bg-canvas p-3 text-center text-xs font-medium text-foreground transition hover:border-brand/40 hover:bg-brand/5 hover:text-brand"
             >
               <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand/10 text-brand transition group-hover:bg-brand group-hover:text-brand-foreground">
@@ -636,8 +637,19 @@ export function OperationalAlerts() {
               </div>
             </div>
             <div className="flex gap-2 pl-12 sm:pl-0">
-              <Button size="sm" variant="ghost" className="h-8 text-xs">Acknowledge</Button>
-              <Button size="sm" className="h-8 bg-brand text-brand-foreground text-xs hover:bg-brand/90">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-xs"
+                onClick={() => toast.success("Acknowledged", { description: a.msg })}
+              >
+                Acknowledge
+              </Button>
+              <Button
+                size="sm"
+                className="h-8 bg-brand text-brand-foreground text-xs hover:bg-brand/90"
+                onClick={() => toast.success(a.action, { description: `${a.module}: ${a.msg}` })}
+              >
                 {a.action}
               </Button>
             </div>
@@ -750,7 +762,12 @@ export function ZatcaCompliance() {
                 <TableCell><Pill tone={toneForStatus(String(z.status))}>{String(z.status)}</Pill></TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{z.err}</TableCell>
                 <TableCell>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs text-brand hover:bg-brand/5 hover:text-brand">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs text-brand hover:bg-brand/5 hover:text-brand"
+                    onClick={() => toast.success(`${z.action}: ${z.no}`, { description: `Order ${z.order}` })}
+                  >
                     {z.action}
                   </Button>
                 </TableCell>
