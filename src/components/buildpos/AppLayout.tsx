@@ -55,7 +55,7 @@ const nav: Group[] = [
   {
     name: "Operate",
     items: [
-      { to: "/", label: "Dashboard", icon: LayoutDashboard },
+      { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { to: "/operate/pos-checkout", label: "POS Checkout", icon: ScanBarcode },
       { to: "/operate/orders", label: "Orders", icon: ShoppingBag },
       { to: "/operate/customers", label: "Customers", icon: Users },
