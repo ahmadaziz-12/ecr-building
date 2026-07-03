@@ -179,3 +179,22 @@ export const filters = {
   stockStatus: ["Available", "Low", "Critical", "Out of Stock", "Quarantine"],
   deliveryStatus: ["Pending", "Assigned", "Dispatched", "Delivered", "Failed"],
 };
+
+export const contractorOrders = [
+  { id: "ORD-8091", customer: "Al Noor Contracting", project: "PRJ-RUH-114", po: "PO-CT-2201", credit: "Approved", value: "24,850 ر.س", delivery: "Site Delivery", invoice: "Full Tax", pay: "Account Credit", status: "Confirmed" as Severity },
+  { id: "ORD-8093", customer: "Modern Villas Est.", project: "PRJ-VLA-089", po: "PO-MV-1487", credit: "Approved", value: "18,420 ر.س", delivery: "Yard Pickup", invoice: "Full Tax", pay: "Bank Transfer", status: "Loading" as Severity },
+  { id: "ORD-8094", customer: "Gulf Build Co.", project: "PRJ-EXT-041", po: "PO-GB-3320", credit: "On Hold", value: "42,300 ر.س", delivery: "Site Delivery", invoice: "Full Tax", pay: "Account Credit", status: "Pending" as Severity },
+  { id: "ORD-8096", customer: "Riyadh Skyline LLC", project: "PRJ-SKY-217", po: "PO-RS-0918", credit: "Approved", value: "9,750 ر.س", delivery: "Site Delivery", invoice: "Full Tax", pay: "Mada / Card", status: "Dispatched" as Severity },
+  { id: "ORD-8097", customer: "Desert Rose Interiors", project: "PRJ-DR-052", po: "PO-DR-1102", credit: "Approved", value: "5,640 ر.س", delivery: "Yard Pickup", invoice: "Simplified", pay: "Cash", status: "Delivered" as Severity },
+];
+
+export const stockYard = [
+  { bin: "A-01", label: "Cement Pallets", branch: "Riyadh · Yard A", capacity: 100, filled: 82, tone: "success" as Severity },
+  { bin: "A-02", label: "Steel Rebar Racks", branch: "Riyadh · Yard A", capacity: 60, filled: 44, tone: "success" as Severity },
+  { bin: "B-11", label: "Tile Pallets", branch: "Riyadh · Yard B", capacity: 80, filled: 18, tone: "warning" as Severity },
+  { bin: "B-12", label: "Paint Cans", branch: "Jeddah · Bay 2", capacity: 200, filled: 42, tone: "critical" as Severity },
+  { bin: "C-05", label: "PVC & Pipes", branch: "Dammam · Bay 1", capacity: 150, filled: 118, tone: "success" as Severity },
+  { bin: "C-08", label: "Electrical Reels", branch: "Riyadh · Yard C", capacity: 90, filled: 71, tone: "info" as Severity },
+  { bin: "D-03", label: "Glass Panels", branch: "Makkah · Bay 3", capacity: 40, filled: 6, tone: "critical" as Severity },
+  { bin: "D-14", label: "Tools & Hardware", branch: "Riyadh · Yard D", capacity: 120, filled: 96, tone: "success" as Severity },
+];
