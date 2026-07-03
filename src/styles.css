@@ -38,6 +38,11 @@
   --color-sidebar-bg: var(--sidebar-bg);
   --color-sidebar-fg: var(--sidebar-fg);
   --color-canvas: var(--canvas);
+  --color-concrete: var(--concrete);
+  --color-steel: var(--steel);
+  --color-steel-foreground: var(--steel-foreground);
+  --color-blueprint: var(--blueprint);
+  --color-safety-amber: var(--safety-amber);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
@@ -88,7 +93,12 @@
   --teal-foreground: oklch(0.99 0.01 185);
   --sidebar-bg: oklch(0.18 0.05 285);
   --sidebar-fg: oklch(0.98 0.01 285);
-  --canvas: oklch(0.985 0.005 285);
+  --canvas: oklch(0.955 0.006 260);
+  --concrete: oklch(0.92 0.008 260);
+  --steel: oklch(0.32 0.02 260);
+  --steel-foreground: oklch(0.98 0.005 260);
+  --blueprint: oklch(0.5 0.14 235);
+  --safety-amber: oklch(0.78 0.17 70);
   --critical: oklch(0.62 0.24 25);
   --critical-foreground: oklch(0.98 0 0);
   --warning: oklch(0.78 0.16 70);
