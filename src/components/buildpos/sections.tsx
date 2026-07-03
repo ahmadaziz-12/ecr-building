@@ -39,7 +39,6 @@ import {
   Zap,
 } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
-import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,7 +62,6 @@ import {
   branches,
   deliveries,
   deliveryChips,
-  filters,
   hourlySales,
   inventorySummary,
   kpis,
@@ -77,6 +75,12 @@ import {
   topCategories,
   zatcaInvoices,
 } from "@/lib/buildpos/data";
+import {
+  categoryToFilter,
+  filterDefaults,
+  filterGroups,
+  useFilters,
+} from "@/lib/buildpos/filter-context";
 import cementImg from "@/assets/cat-cement.jpg";
 import steelImg from "@/assets/cat-steel.jpg";
 import tilesImg from "@/assets/cat-tiles.jpg";
@@ -173,21 +177,9 @@ const iconMap: Record<string, ComponentType<{ className?: string }>> = {
 /* ---------------- Filter Bar ---------------- */
 
 export function FilterBar({ compact = false }: { compact?: boolean }) {
-  const groups: { label: string; options: string[]; def: string }[] = [
-    { label: "Date", options: filters.dateRange, def: "Today" },
-    { label: "Branch", options: filters.branch, def: "Riyadh Main" },
-    { label: "Terminal", options: filters.terminal, def: "POS-01" },
-    { label: "Cashier", options: filters.cashier, def: "Ahmed" },
-    { label: "Category", options: filters.category, def: "Cement" },
-    { label: "Payment", options: filters.payment, def: "Cash" },
-    { label: "Stock", options: filters.stockStatus, def: "Available" },
-    { label: "Delivery", options: filters.deliveryStatus, def: "Pending" },
-    { label: "Alert Type", options: filters.alertType, def: "Stock" },
-  ];
-  const shown = compact ? groups.slice(0, 4) : groups;
-  const defaults = Object.fromEntries(groups.map((g) => [g.label, g.def]));
-  const [values, setValues] = useState<Record<string, string>>(defaults);
-  const dirty = shown.some((g) => values[g.label] !== g.def);
+  const { values, setValue, reset } = useFilters();
+  const shown = compact ? filterGroups.slice(0, 4) : filterGroups;
+  const dirty = shown.some((g) => values[g.label] !== filterDefaults[g.label]);
   return (
     <div className="rounded-2xl border border-brand/15 bg-gradient-to-r from-brand/5 via-white to-teal/5 p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
       <div className="mb-2 flex items-center justify-between">
@@ -199,7 +191,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
           <span className="text-[11px] text-muted-foreground">Controls all cards, charts & tables below</span>
           {dirty && (
             <span className="ml-2 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-semibold text-[oklch(0.4_0.13_70)]">
-              Unsaved changes
+              Active
             </span>
           )}
         </div>
@@ -209,7 +201,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             variant="ghost"
             className="h-8 text-xs text-muted-foreground hover:text-brand"
             onClick={() => {
-              setValues(defaults);
+              reset();
               toast.success("Filters reset", { description: "Showing default view." });
             }}
           >
@@ -220,7 +212,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             className="h-8 bg-brand text-brand-foreground hover:bg-brand/90"
             onClick={() => {
               const active = shown
-                .filter((g) => values[g.label] !== g.def)
+                .filter((g) => values[g.label] !== filterDefaults[g.label])
                 .map((g) => `${g.label}: ${values[g.label]}`);
               toast.success("Filters applied", {
                 description: active.length ? active.join(" · ") : "No changes from defaults.",
@@ -237,7 +229,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{g.label}</label>
             <Select
               value={values[g.label]}
-              onValueChange={(v) => setValues((s) => ({ ...s, [g.label]: v }))}
+              onValueChange={(v) => setValue(g.label, v)}
             >
               <SelectTrigger className="h-8 w-auto min-w-[130px] border-black/10 bg-white text-xs transition hover:border-brand/40">
                 <SelectValue placeholder={g.label} />
@@ -404,17 +396,49 @@ export function PaymentCollection() {
 /* ---------------- Top Categories ---------------- */
 
 export function TopCategories() {
+  const { values, setValue, setActiveTab } = useFilters();
+  const active = values.Category;
   return (
-    <SectionCard title="Top Material Categories" desc="Best-selling building material categories today.">
+    <SectionCard
+      title="Top Material Categories"
+      desc="Click a category to filter inventory, stock alerts & tables."
+      action={
+        active !== "All" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs text-brand hover:bg-brand/5 hover:text-brand"
+            onClick={() => {
+              setValue("Category", "All");
+              toast.info("Category filter cleared");
+            }}
+          >
+            Clear · {active}
+          </Button>
+        ) : undefined
+      }
+    >
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {topCategories.map((c) => {
           const Icon = iconMap[c.icon] ?? Boxes;
           const tone = toneForStatus(c.health);
           const img = categoryImage[c.name];
+          const catValue = categoryToFilter(c.name);
+          const isActive = active === catValue;
           return (
-            <div
+            <button
+              type="button"
               key={c.name}
-              className="group overflow-hidden rounded-xl border border-black/5 bg-canvas transition hover:-translate-y-0.5 hover:border-brand/30 hover:bg-white hover:shadow-md"
+              onClick={() => {
+                setValue("Category", catValue);
+                setActiveTab("inventory");
+                toast.success(`Filtered by ${catValue}`, {
+                  description: "Inventory & stock alerts updated.",
+                });
+              }}
+              className={`group overflow-hidden rounded-xl border bg-canvas text-left transition hover:-translate-y-0.5 hover:border-brand/30 hover:bg-white hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 ${
+                isActive ? "border-brand ring-2 ring-brand/30 bg-white shadow-md" : "border-black/5"
+              }`}
             >
               {img ? (
                 <div className="relative h-24 w-full overflow-hidden bg-black/5">
@@ -429,6 +453,11 @@ export function TopCategories() {
                     <Icon className="h-3.5 w-3.5" />
                   </span>
                   <span className="absolute right-2 top-2"><Pill tone={tone}>{c.health}</Pill></span>
+                  {isActive && (
+                    <span className="absolute bottom-2 left-2 rounded-full bg-brand px-2 py-0.5 text-[10px] font-semibold text-brand-foreground">
+                      Active filter
+                    </span>
+                  )}
                 </div>
               ) : (
                 <div className="relative h-24 w-full overflow-hidden bg-gradient-to-br from-brand/10 via-white to-teal/10">
@@ -437,6 +466,11 @@ export function TopCategories() {
                     <Icon className="h-3.5 w-3.5" />
                   </span>
                   <span className="absolute right-2 top-2"><Pill tone={tone}>{c.health}</Pill></span>
+                  {isActive && (
+                    <span className="absolute bottom-2 left-2 rounded-full bg-brand px-2 py-0.5 text-[10px] font-semibold text-brand-foreground">
+                      Active filter
+                    </span>
+                  )}
                 </div>
               )}
               <div className="p-3">
@@ -447,7 +481,7 @@ export function TopCategories() {
                   <span>Returns {c.ret}</span>
                 </div>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -458,14 +492,34 @@ export function TopCategories() {
 /* ---------------- Inventory Health ---------------- */
 
 export function InventoryHealth() {
+  const { values, setValue } = useFilters();
+  const cat = values.Category;
+  const rows = cat === "All" ? lowStock : lowStock.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
   return (
     <SectionCard
       title="Stock Health & Availability"
-      desc="Availability across branches and warehouses."
+      desc={cat === "All" ? "Availability across branches and warehouses." : `Filtered by category · ${cat} (${rows.length} SKUs)`}
       action={
-        <Button variant="ghost" size="sm" className="text-xs text-brand hover:bg-brand/5 hover:text-brand">
-          Low Stock Report <ChevronRight className="ml-1 h-3 w-3" />
-        </Button>
+        <div className="flex items-center gap-2">
+          {cat !== "All" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs text-muted-foreground hover:text-brand"
+              onClick={() => setValue("Category", "All")}
+            >
+              Clear filter
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-brand hover:bg-brand/5 hover:text-brand"
+            onClick={() => toast.info("Low Stock Report", { description: "Opening report…" })}
+          >
+            Low Stock Report <ChevronRight className="ml-1 h-3 w-3" />
+          </Button>
+        </div>
       }
     >
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
@@ -486,8 +540,15 @@ export function InventoryHealth() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {lowStock.map((r) => (
-              <TableRow key={r.sku} className="hover:bg-canvas">
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
+                  No SKUs in stock alerts for <span className="font-semibold text-foreground">{cat}</span>.
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((r) => (
+              <TableRow key={r.sku} className="bp-enter hover:bg-canvas">
                 <TableCell className="font-mono text-xs">{r.sku}</TableCell>
                 <TableCell className="font-medium">{r.name}</TableCell>
                 <TableCell className="text-muted-foreground">{r.cat}</TableCell>
@@ -497,7 +558,8 @@ export function InventoryHealth() {
                 <TableCell className="text-muted-foreground">{r.supplier}</TableCell>
                 <TableCell><Pill tone={toneForStatus(String(r.status))}>{String(r.status)}</Pill></TableCell>
               </TableRow>
-            ))}
+              ))
+            )}
           </TableBody>
         </Table>
       </div>
