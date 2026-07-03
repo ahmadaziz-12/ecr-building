@@ -32,6 +32,7 @@ import {
   ReturnsRefunds,
 } from "@/components/buildpos/sections";
 import { alerts, deliveryChips, inventorySummary, zatcaInvoices, terminals } from "@/lib/buildpos/data";
+import { useFilters } from "@/lib/buildpos/filter-context";
 
 export const Route = createFileRoute("/")({
   component: OverviewPage,
@@ -81,6 +82,7 @@ function PriorityTile({
 }
 
 function OverviewPage() {
+  const { activeTab, setActiveTab } = useFilters();
   const criticalAlerts = alerts.filter((a) => a.severity === "critical").length;
   const lowStock = inventorySummary.find((s) => /low/i.test(s.label))?.value ?? "0";
   const pendingDeliveries = deliveryChips.find((c) => /pending|queued/i.test(c.label))?.value ?? "0";
@@ -178,7 +180,7 @@ function OverviewPage() {
       </section>
 
       {/* Sectioned operations — 7 grouped tabs matching the operational workflow */}
-      <Tabs defaultValue="overview" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <div className="sticky top-32 z-[4] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/85 backdrop-blur">
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-xl border border-black/5 bg-white p-1 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
             {tabs.map((t) => {
