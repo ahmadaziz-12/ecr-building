@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as SuppliersSuppliersRouteImport } from './routes/suppliers.suppliers'
 import { Route as SuppliersRtsRouteImport } from './routes/suppliers.rts'
 import { Route as StockWarehousesRouteImport } from './routes/stock.warehouses'
@@ -52,6 +53,11 @@ import { Route as AdminAuditLogsRouteImport } from './routes/admin.audit-logs'
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SuppliersSuppliersRoute = SuppliersSuppliersRouteImport.update({
@@ -246,6 +252,7 @@ const AdminAuditLogsRoute = AdminAuditLogsRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
+  '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/categories': typeof AdminCategoriesRoute
@@ -287,6 +294,7 @@ export interface FileRoutesByFullPath {
   '/suppliers/suppliers': typeof SuppliersSuppliersRoute
 }
 export interface FileRoutesByTo {
+  '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/categories': typeof AdminCategoriesRoute
@@ -329,6 +337,7 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/categories': typeof AdminCategoriesRoute
@@ -372,6 +381,7 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/'
     | '/dashboard'
     | '/admin/audit-logs'
     | '/admin/categories'
@@ -413,6 +423,7 @@ export interface FileRouteTypes {
     | '/suppliers/suppliers'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/'
     | '/dashboard'
     | '/admin/audit-logs'
     | '/admin/categories'
@@ -454,6 +465,7 @@ export interface FileRouteTypes {
     | '/suppliers/suppliers'
   id:
     | '__root__'
+    | '/'
     | '/dashboard'
     | '/admin/audit-logs'
     | '/admin/categories'
@@ -496,6 +508,7 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
   AdminAuditLogsRoute: typeof AdminAuditLogsRoute
   AdminCategoriesRoute: typeof AdminCategoriesRoute
@@ -544,6 +557,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/suppliers/suppliers': {
@@ -816,6 +836,7 @@ declare module '@tanstack/react-router' {
 }
 
 const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
   AdminAuditLogsRoute: AdminAuditLogsRoute,
   AdminCategoriesRoute: AdminCategoriesRoute,

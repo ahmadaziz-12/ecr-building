@@ -6,6 +6,7 @@ import {
   useRouter,
   HeadContent,
   Scripts,
+  useRouterState,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
@@ -138,13 +139,19 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isPublic = pathname === "/";
 
   return (
     <QueryClientProvider client={queryClient}>
       <FilterProvider>
-        <AppLayout>
+        {isPublic ? (
           <Outlet />
-        </AppLayout>
+        ) : (
+          <AppLayout>
+            <Outlet />
+          </AppLayout>
+        )}
         <Toaster position="top-right" richColors closeButton />
       </FilterProvider>
     </QueryClientProvider>
