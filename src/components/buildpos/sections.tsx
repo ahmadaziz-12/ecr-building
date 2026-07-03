@@ -60,6 +60,7 @@ import { formatSAR, type Severity } from "@/lib/buildpos/format";
 import {
   alerts,
   branches,
+  contractorOrders,
   deliveries,
   deliveryChips,
   hourlySales,
@@ -71,6 +72,7 @@ import {
   returns as returnsData,
   returnsSummary,
   shifts,
+  stockYard,
   terminals,
   topCategories,
   zatcaInvoices,
