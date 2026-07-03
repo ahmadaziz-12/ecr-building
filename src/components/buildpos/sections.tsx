@@ -397,17 +397,49 @@ export function PaymentCollection() {
 /* ---------------- Top Categories ---------------- */
 
 export function TopCategories() {
+  const { values, setValue, setActiveTab } = useFilters();
+  const active = values.Category;
   return (
-    <SectionCard title="Top Material Categories" desc="Best-selling building material categories today.">
+    <SectionCard
+      title="Top Material Categories"
+      desc="Click a category to filter inventory, stock alerts & tables."
+      action={
+        active !== "All" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs text-brand hover:bg-brand/5 hover:text-brand"
+            onClick={() => {
+              setValue("Category", "All");
+              toast.info("Category filter cleared");
+            }}
+          >
+            Clear · {active}
+          </Button>
+        ) : undefined
+      }
+    >
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {topCategories.map((c) => {
           const Icon = iconMap[c.icon] ?? Boxes;
           const tone = toneForStatus(c.health);
           const img = categoryImage[c.name];
+          const catValue = categoryToFilter(c.name);
+          const isActive = active === catValue;
           return (
-            <div
+            <button
+              type="button"
               key={c.name}
-              className="group overflow-hidden rounded-xl border border-black/5 bg-canvas transition hover:-translate-y-0.5 hover:border-brand/30 hover:bg-white hover:shadow-md"
+              onClick={() => {
+                setValue("Category", catValue);
+                setActiveTab("inventory");
+                toast.success(`Filtered by ${catValue}`, {
+                  description: "Inventory & stock alerts updated.",
+                });
+              }}
+              className={`group overflow-hidden rounded-xl border bg-canvas text-left transition hover:-translate-y-0.5 hover:border-brand/30 hover:bg-white hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 ${
+                isActive ? "border-brand ring-2 ring-brand/30 bg-white shadow-md" : "border-black/5"
+              }`}
             >
               {img ? (
                 <div className="relative h-24 w-full overflow-hidden bg-black/5">
@@ -422,6 +454,11 @@ export function TopCategories() {
                     <Icon className="h-3.5 w-3.5" />
                   </span>
                   <span className="absolute right-2 top-2"><Pill tone={tone}>{c.health}</Pill></span>
+                  {isActive && (
+                    <span className="absolute bottom-2 left-2 rounded-full bg-brand px-2 py-0.5 text-[10px] font-semibold text-brand-foreground">
+                      Active filter
+                    </span>
+                  )}
                 </div>
               ) : (
                 <div className="relative h-24 w-full overflow-hidden bg-gradient-to-br from-brand/10 via-white to-teal/10">
@@ -430,6 +467,11 @@ export function TopCategories() {
                     <Icon className="h-3.5 w-3.5" />
                   </span>
                   <span className="absolute right-2 top-2"><Pill tone={tone}>{c.health}</Pill></span>
+                  {isActive && (
+                    <span className="absolute bottom-2 left-2 rounded-full bg-brand px-2 py-0.5 text-[10px] font-semibold text-brand-foreground">
+                      Active filter
+                    </span>
+                  )}
                 </div>
               )}
               <div className="p-3">
@@ -440,7 +482,7 @@ export function TopCategories() {
                   <span>Returns {c.ret}</span>
                 </div>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -451,14 +493,34 @@ export function TopCategories() {
 /* ---------------- Inventory Health ---------------- */
 
 export function InventoryHealth() {
+  const { values, setValue } = useFilters();
+  const cat = values.Category;
+  const rows = cat === "All" ? lowStock : lowStock.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
   return (
     <SectionCard
       title="Stock Health & Availability"
-      desc="Availability across branches and warehouses."
+      desc={cat === "All" ? "Availability across branches and warehouses." : `Filtered by category · ${cat} (${rows.length} SKUs)`}
       action={
-        <Button variant="ghost" size="sm" className="text-xs text-brand hover:bg-brand/5 hover:text-brand">
-          Low Stock Report <ChevronRight className="ml-1 h-3 w-3" />
-        </Button>
+        <div className="flex items-center gap-2">
+          {cat !== "All" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs text-muted-foreground hover:text-brand"
+              onClick={() => setValue("Category", "All")}
+            >
+              Clear filter
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-brand hover:bg-brand/5 hover:text-brand"
+            onClick={() => toast.info("Low Stock Report", { description: "Opening report…" })}
+          >
+            Low Stock Report <ChevronRight className="ml-1 h-3 w-3" />
+          </Button>
+        </div>
       }
     >
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
@@ -479,8 +541,15 @@ export function InventoryHealth() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {lowStock.map((r) => (
-              <TableRow key={r.sku} className="hover:bg-canvas">
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
+                  No SKUs in stock alerts for <span className="font-semibold text-foreground">{cat}</span>.
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((r) => (
+              <TableRow key={r.sku} className="bp-enter hover:bg-canvas">
                 <TableCell className="font-mono text-xs">{r.sku}</TableCell>
                 <TableCell className="font-medium">{r.name}</TableCell>
                 <TableCell className="text-muted-foreground">{r.cat}</TableCell>
@@ -490,7 +559,8 @@ export function InventoryHealth() {
                 <TableCell className="text-muted-foreground">{r.supplier}</TableCell>
                 <TableCell><Pill tone={toneForStatus(String(r.status))}>{String(r.status)}</Pill></TableCell>
               </TableRow>
-            ))}
+              ))
+            )}
           </TableBody>
         </Table>
       </div>
