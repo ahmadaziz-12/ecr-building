@@ -63,7 +63,6 @@ import {
   branches,
   deliveries,
   deliveryChips,
-  filters,
   hourlySales,
   inventorySummary,
   kpis,
@@ -77,6 +76,12 @@ import {
   topCategories,
   zatcaInvoices,
 } from "@/lib/buildpos/data";
+import {
+  categoryToFilter,
+  filterDefaults,
+  filterGroups,
+  useFilters,
+} from "@/lib/buildpos/filter-context";
 import cementImg from "@/assets/cat-cement.jpg";
 import steelImg from "@/assets/cat-steel.jpg";
 import tilesImg from "@/assets/cat-tiles.jpg";
@@ -173,21 +178,9 @@ const iconMap: Record<string, ComponentType<{ className?: string }>> = {
 /* ---------------- Filter Bar ---------------- */
 
 export function FilterBar({ compact = false }: { compact?: boolean }) {
-  const groups: { label: string; options: string[]; def: string }[] = [
-    { label: "Date", options: filters.dateRange, def: "Today" },
-    { label: "Branch", options: filters.branch, def: "Riyadh Main" },
-    { label: "Terminal", options: filters.terminal, def: "POS-01" },
-    { label: "Cashier", options: filters.cashier, def: "Ahmed" },
-    { label: "Category", options: filters.category, def: "Cement" },
-    { label: "Payment", options: filters.payment, def: "Cash" },
-    { label: "Stock", options: filters.stockStatus, def: "Available" },
-    { label: "Delivery", options: filters.deliveryStatus, def: "Pending" },
-    { label: "Alert Type", options: filters.alertType, def: "Stock" },
-  ];
-  const shown = compact ? groups.slice(0, 4) : groups;
-  const defaults = Object.fromEntries(groups.map((g) => [g.label, g.def]));
-  const [values, setValues] = useState<Record<string, string>>(defaults);
-  const dirty = shown.some((g) => values[g.label] !== g.def);
+  const { values, setValue, reset } = useFilters();
+  const shown = compact ? filterGroups.slice(0, 4) : filterGroups;
+  const dirty = shown.some((g) => values[g.label] !== filterDefaults[g.label]);
   return (
     <div className="rounded-2xl border border-brand/15 bg-gradient-to-r from-brand/5 via-white to-teal/5 p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
       <div className="mb-2 flex items-center justify-between">
@@ -199,7 +192,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
           <span className="text-[11px] text-muted-foreground">Controls all cards, charts & tables below</span>
           {dirty && (
             <span className="ml-2 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-semibold text-[oklch(0.4_0.13_70)]">
-              Unsaved changes
+              Active
             </span>
           )}
         </div>
@@ -209,7 +202,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             variant="ghost"
             className="h-8 text-xs text-muted-foreground hover:text-brand"
             onClick={() => {
-              setValues(defaults);
+              reset();
               toast.success("Filters reset", { description: "Showing default view." });
             }}
           >
@@ -220,7 +213,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             className="h-8 bg-brand text-brand-foreground hover:bg-brand/90"
             onClick={() => {
               const active = shown
-                .filter((g) => values[g.label] !== g.def)
+                .filter((g) => values[g.label] !== filterDefaults[g.label])
                 .map((g) => `${g.label}: ${values[g.label]}`);
               toast.success("Filters applied", {
                 description: active.length ? active.join(" · ") : "No changes from defaults.",
@@ -237,7 +230,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{g.label}</label>
             <Select
               value={values[g.label]}
-              onValueChange={(v) => setValues((s) => ({ ...s, [g.label]: v }))}
+              onValueChange={(v) => setValue(g.label, v)}
             >
               <SelectTrigger className="h-8 w-auto min-w-[130px] border-black/10 bg-white text-xs transition hover:border-brand/40">
                 <SelectValue placeholder={g.label} />
