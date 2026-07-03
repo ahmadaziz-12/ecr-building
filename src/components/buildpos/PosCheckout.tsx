@@ -4,7 +4,6 @@ import {
   CreditCard,
   Minus,
   Plus,
-  Search,
   Trash2,
   UserPlus,
   Pause,
@@ -18,7 +17,6 @@ import {
   RotateCcw,
   FileText,
   Package,
-  Layers,
   PaintBucket,
   Hammer,
   Wrench,
@@ -33,18 +31,10 @@ import {
   Brush,
   Grid3x3,
   Component,
+  Radar,
+  CheckCircle2,
+  ShoppingCart,
 } from "lucide-react";
-
-const categories = [
-  { name: "All", icon: Layers },
-  { name: "Cement", icon: Blocks },
-  { name: "Steel", icon: Component },
-  { name: "Tiles", icon: Square },
-  { name: "Paint", icon: PaintBucket },
-  { name: "Plumbing", icon: Wrench },
-  { name: "Electrical", icon: Zap },
-  { name: "Tools", icon: Hammer },
-];
 
 type IconType = typeof Package;
 
@@ -95,25 +85,17 @@ const toneClass: Record<string, string> = {
 type CartLine = { sku: string; name: string; uom: string; price: number; qty: number };
 
 export function PosCheckout() {
-  const [activeCat, setActiveCat] = useState("All");
   const [query, setQuery] = useState("");
-  const [cart, setCart] = useState<CartLine[]>([
-    { sku: "CEM-OPC-50KG", name: "OPC Cement 50KG", uom: "Bag", price: 22.5, qty: 20 },
-    { sku: "STEEL-RBR-12MM", name: "Steel Rebar 12MM", uom: "Bundle", price: 1950, qty: 2 },
-    { sku: "PAINT-BEIGE-4L", name: "Beige Paint 4L", uom: "Can", price: 68, qty: 4 },
-  ]);
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [lastAdded, setLastAdded] = useState<string | null>(null);
 
-  const shown = useMemo(
-    () =>
-      products.filter(
-        (p) =>
-          (activeCat === "All" || p.cat === activeCat) &&
-          (query === "" ||
-            p.name.toLowerCase().includes(query.toLowerCase()) ||
-            p.sku.toLowerCase().includes(query.toLowerCase()))
-      ),
-    [activeCat, query]
-  );
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return products.filter(
+      (p) => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || p.cat.toLowerCase().includes(q),
+    );
+  }, [query]);
 
   function addToCart(p: (typeof products)[number]) {
     setCart((c) => {
@@ -121,6 +103,9 @@ export function PosCheckout() {
       if (line) return c.map((l) => (l.sku === p.sku ? { ...l, qty: l.qty + 1 } : l));
       return [...c, { sku: p.sku, name: p.name, uom: p.uom, price: p.price, qty: 1 }];
     });
+    setLastAdded(p.sku);
+    setQuery("");
+    window.setTimeout(() => setLastAdded((cur) => (cur === p.sku ? null : cur)), 900);
   }
 
   function updateQty(sku: string, delta: number) {
@@ -133,7 +118,7 @@ export function PosCheckout() {
   }
 
   const subtotal = cart.reduce((s, l) => s + l.price * l.qty, 0);
-  const discount = subtotal * 0.05;
+  const discount = cart.length ? subtotal * 0.05 : 0;
   const taxable = subtotal - discount;
   const vat = taxable * 0.15;
   const total = taxable + vat;
@@ -141,102 +126,153 @@ export function PosCheckout() {
   const money = (n: number) =>
     n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ر.س";
 
+  const idle = query === "" && cart.length === 0;
+
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_420px]">
-      {/* Left — product panel */}
+      {/* Left — scanner-first panel */}
       <div className="flex flex-col gap-3">
-        {/* Search */}
-        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-black/5 bg-white p-2 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
-          <div className="relative flex-1 min-w-[240px]">
-            {/* Scanning device animation — only surface here */}
-            <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
-              <div className="relative grid h-6 w-6 place-items-center rounded-md bg-brand/10 text-brand overflow-hidden">
-                <Barcode className="h-3.5 w-3.5" />
-                {query === "" && (
-                  <span className="pos-scan-line pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-brand shadow-[0_0_6px_var(--brand)]" />
-                )}
+        {/* Scanner hero — the ONLY primary surface */}
+        <div className="relative overflow-hidden rounded-3xl border border-brand/10 bg-gradient-to-br from-[oklch(0.22_0.08_285)] via-[oklch(0.18_0.06_285)] to-[oklch(0.12_0.05_285)] p-6 text-white shadow-[0_10px_40px_-12px_rgba(76,29,149,0.5)]">
+          <div className="blueprint-grid-dark absolute inset-0 opacity-40" />
+          <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-brand/30 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-24 -left-24 h-64 w-64 rounded-full bg-teal/20 blur-3xl" />
+
+          <div className="relative flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="relative grid h-11 w-11 place-items-center rounded-xl bg-white/10 backdrop-blur ring-1 ring-white/15">
+                <Radar className="h-5 w-5 text-white" />
+                {idle && <span className="pos-radar absolute inset-0 rounded-xl ring-2 ring-white/50" />}
+              </span>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/60">Point&nbsp;of&nbsp;Sale · Terminal T-04</p>
+                <p className="font-display text-lg font-semibold">Scanner Ready</p>
               </div>
             </div>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Scan barcode or search product / SKU…"
-              className="h-11 w-full rounded-xl border border-black/10 bg-canvas pl-12 pr-3 text-sm outline-none focus:border-brand"
-              autoFocus
-            />
-            {query === "" && (
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-brand/70">
-                <ScanLine className="h-3 w-3 pos-scan-pulse" />
-                Scanning…
+            <div className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-medium ring-1 ring-white/15">
+              <span className={`h-1.5 w-1.5 rounded-full bg-success ${idle ? "pos-blink" : ""}`} />
+              {idle ? "Awaiting scan" : "Active"}
+            </div>
+          </div>
+
+          {/* Scanning viewport */}
+          <div className="relative mt-5 overflow-hidden rounded-2xl border border-white/10 bg-black/40 p-5 backdrop-blur">
+            {idle && (
+              <>
+                <span className="pos-beam pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-transparent via-brand-glow to-transparent shadow-[0_0_20px_var(--brand-glow)]" />
+                <span className="pointer-events-none absolute left-3 top-3 h-4 w-4 border-l-2 border-t-2 border-brand-glow/70" />
+                <span className="pointer-events-none absolute right-3 top-3 h-4 w-4 border-r-2 border-t-2 border-brand-glow/70" />
+                <span className="pointer-events-none absolute left-3 bottom-3 h-4 w-4 border-l-2 border-b-2 border-brand-glow/70" />
+                <span className="pointer-events-none absolute right-3 bottom-3 h-4 w-4 border-r-2 border-b-2 border-brand-glow/70" />
+              </>
+            )}
+
+            <div className="relative flex items-center gap-3">
+              <span className="grid h-10 w-10 place-items-center rounded-lg bg-brand/25 text-brand-glow">
+                <Barcode className="h-5 w-5" />
               </span>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Scan barcode or search product / SKU…"
+                className="h-11 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-brand-glow focus:bg-white/10"
+                autoFocus
+              />
+              {idle && (
+                <span className="hidden sm:flex items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-brand-glow">
+                  <ScanLine className="h-3 w-3 pos-scan-pulse" />
+                  Scanning
+                </span>
+              )}
+            </div>
+
+            {idle && (
+              <div className="relative mt-4 grid grid-cols-3 gap-3 text-center text-[11px] text-white/60">
+                <div className="rounded-lg bg-white/5 px-2 py-2 ring-1 ring-white/10">
+                  <p className="font-display text-white text-sm">Cash · Mada · STC</p>
+                  <p>Payment ready</p>
+                </div>
+                <div className="rounded-lg bg-white/5 px-2 py-2 ring-1 ring-white/10">
+                  <p className="font-display text-white text-sm">ZATCA Phase 2</p>
+                  <p>Cleared · online</p>
+                </div>
+                <div className="rounded-lg bg-white/5 px-2 py-2 ring-1 ring-white/10">
+                  <p className="font-display text-white text-sm">Shift 03 · 06:12h</p>
+                  <p>Yasser · cashier</p>
+                </div>
+              </div>
             )}
           </div>
-          <button className="flex h-11 items-center gap-2 rounded-xl border border-black/10 bg-white px-3 text-sm font-medium hover:border-brand/40 hover:text-brand">
-            <UserPlus className="h-4 w-4" /> Add Customer
-          </button>
-          <button className="flex h-11 items-center gap-2 rounded-xl border border-black/10 bg-white px-3 text-sm font-medium hover:border-brand/40 hover:text-brand">
-            <Search className="h-4 w-4" /> Stock Check
-          </button>
+
+          {idle && (
+            <p className="relative mt-4 text-center text-[11px] uppercase tracking-[0.3em] text-white/40">
+              Scan an item to open the ticket
+            </p>
+          )}
         </div>
 
-        {/* Categories */}
-        <div className="flex flex-wrap gap-1.5 rounded-2xl border border-black/5 bg-white p-2 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
-          {categories.map((c) => {
-            const Icon = c.icon;
-            const active = activeCat === c.name;
-            return (
-              <button
-                key={c.name}
-                onClick={() => setActiveCat(c.name)}
-                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  active
-                    ? "bg-brand text-brand-foreground shadow-sm"
-                    : "text-foreground hover:bg-canvas hover:text-brand"
-                }`}
-              >
-                <Icon className="h-4 w-4" /> {c.name}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Product grid */}
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
-          {shown.map((p) => {
-            const Icon = productIcon[p.sku] ?? Package;
-            return (
-            <button
-              key={p.sku}
-              onClick={() => addToCart(p)}
-              className="group relative flex flex-col items-start rounded-xl border border-black/5 bg-white p-3 text-left shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md"
-            >
-              <span
-                className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${toneClass[p.tone]}`}
-              >
-                {p.stock} {p.uom}
-              </span>
-              <span className="grid h-10 w-10 place-items-center rounded-lg bg-brand/10 text-brand transition group-hover:bg-brand group-hover:text-brand-foreground">
-                <Icon className="h-5 w-5" />
-              </span>
-              <p className="mt-2 text-sm font-medium text-foreground line-clamp-2">{p.name}</p>
-              <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{p.sku}</p>
-              <p className="mt-2 font-display text-lg font-bold text-foreground">
-                {p.price.toFixed(2)} <span className="text-xs font-medium text-muted-foreground">ر.س / {p.uom}</span>
+        {/* Results appear UNDER the scanner only when searching */}
+        {query !== "" && (
+          <div className="pos-slide-up rounded-2xl border border-black/5 bg-white p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {shown.length} match{shown.length === 1 ? "" : "es"} for "{query}"
               </p>
-            </button>
-            );
-          })}
-        </div>
+              <button onClick={() => setQuery("")} className="text-[11px] font-medium text-brand hover:underline">
+                Clear
+              </button>
+            </div>
+            {shown.length === 0 ? (
+              <div className="p-6 text-center text-sm text-muted-foreground">No product found. Try SKU or name.</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
+                {shown.map((p, i) => {
+                  const Icon = productIcon[p.sku] ?? Package;
+                  return (
+                    <button
+                      key={p.sku}
+                      onClick={() => addToCart(p)}
+                      style={{ animationDelay: `${i * 40}ms` }}
+                      className="pos-slide-up group relative flex flex-col items-start rounded-xl border border-black/5 bg-white p-3 text-left shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md"
+                    >
+                      <span className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${toneClass[p.tone]}`}>
+                        {p.stock} {p.uom}
+                      </span>
+                      <span className="grid h-10 w-10 place-items-center rounded-lg bg-brand/10 text-brand transition group-hover:bg-brand group-hover:text-brand-foreground group-hover:scale-110">
+                        <Icon className="h-5 w-5" />
+                      </span>
+                      <p className="mt-2 text-sm font-medium text-foreground line-clamp-2">{p.name}</p>
+                      <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{p.sku}</p>
+                      <p className="mt-2 font-display text-lg font-bold text-foreground">
+                        {p.price.toFixed(2)} <span className="text-xs font-medium text-muted-foreground">ر.س / {p.uom}</span>
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Right — cart & payment */}
-      <aside className="flex flex-col overflow-hidden rounded-2xl border border-black/5 bg-white shadow-[0_2px_10px_rgba(15,10,50,0.06)]">
+      <aside className="pos-slide-up flex flex-col overflow-hidden rounded-2xl border border-black/5 bg-white shadow-[0_2px_10px_rgba(15,10,50,0.06)]">
         <div className="flex items-center justify-between border-b border-black/5 bg-canvas px-4 py-3">
           <div>
             <p className="text-xs text-muted-foreground">Current Sale</p>
-            <p className="font-display text-base font-semibold text-foreground">Ticket #ORD-8096</p>
+            <p className="font-display text-base font-semibold text-foreground">
+              Ticket #ORD-8096
+              {cart.length > 0 && (
+                <span className="pos-pop ml-2 inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-semibold text-brand">
+                  <ShoppingCart className="h-3 w-3" /> {cart.reduce((s, l) => s + l.qty, 0)}
+                </span>
+              )}
+            </p>
           </div>
           <div className="flex gap-1">
+            <button className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5" title="Add customer">
+              <UserPlus className="h-4 w-4" />
+            </button>
             <button className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5" title="Park sale">
               <Pause className="h-4 w-4" />
             </button>
@@ -256,14 +292,33 @@ export function PosCheckout() {
 
         <div className="max-h-[42vh] flex-1 divide-y divide-black/5 overflow-y-auto">
           {cart.length === 0 && (
-            <div className="p-6 text-center text-sm text-muted-foreground">Scan or tap a product to start.</div>
+            <div className="flex flex-col items-center justify-center gap-2 p-8 text-center">
+              <span className="grid h-12 w-12 place-items-center rounded-full bg-canvas text-muted-foreground">
+                <ShoppingCart className="h-5 w-5" />
+              </span>
+              <p className="text-sm text-muted-foreground">Cart is empty</p>
+              <p className="text-[11px] text-muted-foreground/70">Scanned items will appear here.</p>
+            </div>
           )}
           {cart.map((l) => (
-            <div key={l.sku} className="px-4 py-3">
+            <div key={l.sku} className={`px-4 py-3 ${lastAdded === l.sku ? "pos-pop bg-brand/5" : "pos-slide-up"}`}>
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">{l.name}</p>
-                  <p className="font-mono text-[10px] text-muted-foreground">{l.sku} · {l.uom}</p>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand/10 text-brand">
+                    {(() => {
+                      const Icon = productIcon[l.sku] ?? Package;
+                      return <Icon className="h-4 w-4" />;
+                    })()}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {l.name}
+                      {lastAdded === l.sku && (
+                        <CheckCircle2 className="pos-pop ml-1 inline h-3.5 w-3.5 text-success" />
+                      )}
+                    </p>
+                    <p className="font-mono text-[10px] text-muted-foreground">{l.sku} · {l.uom}</p>
+                  </div>
                 </div>
                 <button
                   onClick={() => removeLine(l.sku)}
@@ -273,17 +328,17 @@ export function PosCheckout() {
                 </button>
               </div>
               <div className="mt-2 flex items-center justify-between">
-                <div className="flex items-center rounded-lg border border-black/10">
+                <div className="flex items-center rounded-lg border border-black/10 overflow-hidden">
                   <button
                     onClick={() => updateQty(l.sku, -1)}
-                    className="grid h-7 w-7 place-items-center text-muted-foreground hover:text-brand"
+                    className="grid h-7 w-7 place-items-center text-muted-foreground transition hover:bg-brand/10 hover:text-brand active:scale-90"
                   >
                     <Minus className="h-3.5 w-3.5" />
                   </button>
                   <span className="w-10 text-center text-sm font-semibold">{l.qty}</span>
                   <button
                     onClick={() => updateQty(l.sku, +1)}
-                    className="grid h-7 w-7 place-items-center text-muted-foreground hover:text-brand"
+                    className="grid h-7 w-7 place-items-center text-muted-foreground transition hover:bg-brand/10 hover:text-brand active:scale-90"
                   >
                     <Plus className="h-3.5 w-3.5" />
                   </button>
@@ -313,7 +368,7 @@ export function PosCheckout() {
           </div>
           <div className="mt-1 flex items-center justify-between border-t border-black/10 pt-2">
             <span className="font-display text-base font-semibold text-foreground">Total</span>
-            <span className="font-display text-2xl font-bold text-brand">{money(total)}</span>
+            <span key={total} className="pos-pop font-display text-2xl font-bold text-brand">{money(total)}</span>
           </div>
         </div>
 
@@ -330,7 +385,8 @@ export function PosCheckout() {
             return (
               <button
                 key={p.label}
-                className="flex flex-col items-center gap-1 rounded-lg border border-black/5 bg-canvas p-2 text-[11px] font-medium text-foreground transition hover:border-brand/40 hover:bg-brand/5 hover:text-brand"
+                disabled={cart.length === 0}
+                className="flex flex-col items-center gap-1 rounded-lg border border-black/5 bg-canvas p-2 text-[11px] font-medium text-foreground transition hover:-translate-y-0.5 hover:border-brand/40 hover:bg-brand/5 hover:text-brand disabled:opacity-40 disabled:hover:translate-y-0 disabled:cursor-not-allowed"
               >
                 <Icon className="h-4 w-4" />
                 {p.label}
@@ -340,10 +396,16 @@ export function PosCheckout() {
         </div>
 
         <div className="grid grid-cols-2 gap-2 border-t border-black/5 p-3">
-          <button className="flex items-center justify-center gap-2 rounded-lg border border-black/10 bg-white px-3 py-2.5 text-sm font-medium text-foreground hover:border-brand/40 hover:text-brand">
+          <button
+            disabled={cart.length === 0}
+            className="flex items-center justify-center gap-2 rounded-lg border border-black/10 bg-white px-3 py-2.5 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand disabled:opacity-40 disabled:cursor-not-allowed"
+          >
             <Printer className="h-4 w-4" /> Print
           </button>
-          <button className="flex items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm hover:bg-brand/90">
+          <button
+            disabled={cart.length === 0}
+            className="flex items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition hover:bg-brand/90 hover:shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-brand"
+          >
             Pay {money(total)}
           </button>
         </div>
