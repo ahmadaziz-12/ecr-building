@@ -272,3 +272,54 @@
 @utility pos-scan-pulse {
   animation: pos-scan-pulse 1.2s ease-in-out infinite;
 }
+
+@keyframes pos-beam {
+  0% { transform: translateY(-100%); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+@utility pos-beam {
+  animation: pos-beam 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pos-radar {
+  0% { transform: scale(0.6); opacity: 0.7; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@utility pos-radar {
+  animation: pos-radar 2.4s ease-out infinite;
+}
+
+@keyframes pos-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+@utility pos-blink {
+  animation: pos-blink 1s ease-in-out infinite;
+}
+
+@keyframes pos-slide-up {
+  0% { opacity: 0; transform: translateY(14px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@utility pos-slide-up {
+  animation: pos-slide-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes pos-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@utility pos-pop {
+  animation: pos-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes pos-ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+@utility pos-ticker {
+  animation: pos-ticker 22s linear infinite;
+}
