@@ -843,3 +843,296 @@ export function ZatcaCompliance() {
     </SectionCard>
   );
 }
+
+/* ---------------- Industrial Command KPIs ---------------- */
+
+export function CommandKpis() {
+  const cementSteel =
+    (topCategories.find((c) => /cement/i.test(c.name))?.sales ?? 0) +
+    (topCategories.find((c) => /steel/i.test(c.name))?.sales ?? 0);
+  const contractorValue = contractorOrders.reduce(
+    (s, o) => s + Number(String(o.value).replace(/[^0-9.-]/g, "")),
+    0
+  );
+  const warehouseValue = inventorySummary.find((s) => /value/i.test(s.label))?.value ?? "—";
+
+  const tiles = [
+    { label: "Today's Material Sales", value: kpis.find((k) => k.key === "sales")?.value ?? "0", hint: "Live from POS", icon: TrendingUp, tone: "brand" },
+    { label: "Contractor Orders", value: `${contractorOrders.length} Orders`, hint: `${formatSAR(contractorValue)} B2B pipeline`, icon: Users, tone: "info" },
+    { label: "Cement & Steel Sales", value: formatSAR(cementSteel), hint: "Bulk material lane", icon: Layers, tone: "brand" },
+    { label: "Pending Deliveries", value: `${deliveryChips.find((c) => /pending/i.test(c.label))?.value ?? 0} DOs`, hint: "Awaiting dispatch", icon: Truck, tone: "warning" },
+    { label: "Low Stock Materials", value: inventorySummary.find((s) => /low/i.test(s.label))?.value ?? "—", hint: "Reorder queue", icon: Package, tone: "warning" },
+    { label: "Warehouse Stock Value", value: warehouseValue, hint: "Across 5 KSA branches", icon: Boxes, tone: "success" },
+    { label: "Open Cashier Shifts", value: `${terminals.filter((t) => String(t.status).toLowerCase().includes("active")).length} Active`, hint: `${terminals.length} terminals total`, icon: Users, tone: "info" },
+    { label: "Failed ZATCA / Sync", value: `${zatcaInvoices.filter((z) => /fail|queued/i.test(String(z.status))).length} Alerts`, hint: "Needs retry", icon: Shield, tone: "critical" },
+  ] as const;
+
+  const toneMap: Record<string, string> = {
+    brand: "border-brand/25 from-brand/10",
+    info: "border-info/25 from-info/10",
+    warning: "border-warning/40 from-warning/15",
+    success: "border-success/30 from-success/10",
+    critical: "border-critical/30 from-critical/10",
+  };
+  const iconTone: Record<string, string> = {
+    brand: "bg-brand text-brand-foreground",
+    info: "bg-info/20 text-[oklch(0.35_0.12_235)]",
+    warning: "bg-warning/25 text-[oklch(0.4_0.13_70)]",
+    success: "bg-success/20 text-[oklch(0.35_0.1_155)]",
+    critical: "bg-critical text-critical-foreground bp-pulse-dot",
+  };
+
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {tiles.map((t, i) => {
+        const Icon = t.icon;
+        const pct = Math.min(100, 25 + i * 9);
+        return (
+          <div
+            key={t.label}
+            className={`bp-enter stagger-${(i % 6) + 1} group relative overflow-hidden rounded-2xl border-2 bg-gradient-to-br ${toneMap[t.tone]} to-white p-4 shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:shadow-lg`}
+          >
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-1 hazard-stripe opacity-70" />
+            <div className="pointer-events-none absolute inset-0 blueprint-grid opacity-25" />
+            <div className="relative flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  {t.label}
+                </p>
+                <p className="mt-1.5 font-display text-[22px] font-bold leading-none text-foreground">
+                  {t.value}
+                </p>
+                <p className="mt-1.5 text-[11px] text-muted-foreground">{t.hint}</p>
+              </div>
+              <div className={`grid h-11 w-11 flex-none place-items-center rounded-xl ${iconTone[t.tone]}`}>
+                <Icon className="h-5 w-5" />
+              </div>
+            </div>
+            <div className="relative mt-3 h-1 w-full overflow-hidden rounded-full bg-black/5">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-brand to-teal transition-all duration-700"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------------- Contractor & B2B Orders ---------------- */
+
+export function ContractorOrders() {
+  return (
+    <SectionCard
+      title="Contractor & B2B Orders"
+      desc="Project-linked orders with PO reference, credit and delivery requirement."
+      action={<Pill tone="info">B2B pipeline</Pill>}
+    >
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              {["Order", "Contractor", "Project", "PO Ref", "Credit", "Value", "Delivery", "Invoice", "Payment", "Status"].map((h) => (
+                <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {contractorOrders.map((o) => (
+              <TableRow key={o.id} className="bp-enter hover:bg-canvas">
+                <TableCell className="font-mono text-xs">{o.id}</TableCell>
+                <TableCell className="font-medium">{o.customer}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{o.project}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{o.po}</TableCell>
+                <TableCell><Pill tone={o.credit === "Approved" ? "success" : "warning"}>{o.credit}</Pill></TableCell>
+                <TableCell className="font-semibold">{o.value}</TableCell>
+                <TableCell className="text-muted-foreground">{o.delivery}</TableCell>
+                <TableCell className="text-muted-foreground">{o.invoice}</TableCell>
+                <TableCell className="text-muted-foreground">{o.pay}</TableCell>
+                <TableCell><Pill tone={toneForStatus(String(o.status))}>{String(o.status)}</Pill></TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </SectionCard>
+  );
+}
+
+/* ---------------- Dispatch Board (visual kanban) ---------------- */
+
+export function DispatchBoard() {
+  const lanes: { key: string; title: string; tone: Severity }[] = [
+    { key: "Pending", title: "Pending", tone: "warning" },
+    { key: "Assigned", title: "Assigned", tone: "info" },
+    { key: "Dispatched", title: "Dispatched", tone: "info" },
+    { key: "Delivered", title: "Delivered", tone: "success" },
+    { key: "Failed", title: "Failed / Returned", tone: "critical" },
+  ];
+  return (
+    <SectionCard
+      title="Dispatch Yard Board"
+      desc="Loading bay, drivers and delivery orders grouped by status."
+      action={
+        <div className="flex flex-wrap gap-1.5">
+          {deliveryChips.map((c) => (
+            <Pill key={c.label} tone={c.tone}>
+              {c.label} · <span className="font-bold">{c.value}</span>
+            </Pill>
+          ))}
+        </div>
+      }
+    >
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {lanes.map((lane) => {
+          const cards = deliveries.filter((d) => String(d.status).toLowerCase() === lane.key.toLowerCase());
+          return (
+            <div key={lane.key} className="rounded-xl border border-black/5 concrete-panel p-2.5">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
+                  <Truck className="h-3.5 w-3.5" /> {lane.title}
+                </span>
+                <Pill tone={lane.tone}>{cards.length}</Pill>
+              </div>
+              <div className="space-y-2">
+                {cards.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-black/10 bg-white/60 p-3 text-center text-[11px] text-muted-foreground">
+                    Empty lane
+                  </div>
+                )}
+                {cards.map((d) => (
+                  <div
+                    key={d.no}
+                    className="bp-enter group cursor-pointer rounded-lg border border-black/5 bg-white p-2.5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand/30 hover:shadow"
+                    onClick={() => toast.info(`${d.no} · ${d.customer}`, { description: `${d.items} · ${d.driver}` })}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-[11px] font-semibold text-brand">{d.no}</span>
+                      <span className="text-[10px] text-muted-foreground">{d.time}</span>
+                    </div>
+                    <p className="mt-0.5 truncate text-xs font-medium text-foreground">{d.customer}</p>
+                    <p className="truncate text-[11px] text-muted-foreground">{d.items} · {d.area}</p>
+                    <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                      <span className="text-muted-foreground">🚚 {d.driver}</span>
+                      <span className="font-semibold text-foreground">{d.amount}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </SectionCard>
+  );
+}
+
+/* ---------------- Stock Yard Health (bin visual) ---------------- */
+
+export function StockYardHealth() {
+  const barTone: Record<Severity, string> = {
+    critical: "bg-critical",
+    warning: "bg-warning",
+    success: "bg-success",
+    info: "bg-info",
+    muted: "bg-foreground/30",
+  };
+  return (
+    <SectionCard
+      title="Warehouse & Bin Occupancy"
+      desc="Yard capacity across bays. Red bins need urgent replenishment."
+      action={<Pill tone="info">8 bays live</Pill>}
+    >
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {stockYard.map((b, i) => {
+          const pct = Math.round((b.filled / b.capacity) * 100);
+          return (
+            <div
+              key={b.bin}
+              className={`bp-enter stagger-${(i % 6) + 1} group relative overflow-hidden rounded-xl border border-black/5 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md`}
+            >
+              <div className="pointer-events-none absolute inset-0 blueprint-grid opacity-30" />
+              <div className="relative flex items-center justify-between">
+                <span className="rounded-md bg-steel px-1.5 py-0.5 font-mono text-[10px] font-bold text-steel-foreground">
+                  BIN {b.bin}
+                </span>
+                <Pill tone={b.tone}>{pct}%</Pill>
+              </div>
+              <p className="relative mt-2 text-sm font-semibold text-foreground">{b.label}</p>
+              <p className="relative text-[11px] text-muted-foreground">{b.branch}</p>
+              <div className="relative mt-3 flex items-end gap-0.5 h-10">
+                {Array.from({ length: 10 }).map((_, k) => {
+                  const on = k < Math.round(pct / 10);
+                  return (
+                    <div
+                      key={k}
+                      className={`flex-1 rounded-sm transition-all ${on ? barTone[b.tone] : "bg-black/5"}`}
+                      style={{ height: `${30 + k * 7}%` }}
+                    />
+                  );
+                })}
+              </div>
+              <div className="relative mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                <span>Filled {b.filled}</span>
+                <span>Cap {b.capacity}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </SectionCard>
+  );
+}
+
+/* ---------------- Alerts Rail (right-side compact) ---------------- */
+
+export function AlertsRail() {
+  const grouped: Record<Severity, typeof alerts> = { critical: [], warning: [], info: [], success: [], muted: [] };
+  alerts.forEach((a) => grouped[a.severity].push(a));
+  const order: Severity[] = ["critical", "warning", "info"];
+  return (
+    <SectionCard
+      title="Control Panel — Alerts"
+      desc="Grouped by severity. Act from here."
+      action={<Pill tone="critical">{grouped.critical.length} critical</Pill>}
+      className="sticky top-32"
+    >
+      <div className="space-y-3">
+        {order.map((sev) =>
+          grouped[sev].length === 0 ? null : (
+            <div key={sev}>
+              <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                <span className={`h-1.5 w-1.5 rounded-full ${sev === "critical" ? "bg-critical bp-pulse-dot" : sev === "warning" ? "bg-warning" : "bg-info"}`} />
+                {sev} · {grouped[sev].length}
+              </div>
+              <div className="space-y-1.5">
+                {grouped[sev].map((a, i) => (
+                  <div key={i} className="rounded-lg border border-black/5 bg-canvas p-2.5 transition hover:bg-white hover:shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <Pill tone={a.severity}>{a.module}</Pill>
+                      <span className="text-[10px] text-muted-foreground">{a.age}</span>
+                    </div>
+                    <p className="mt-1 text-xs font-medium leading-snug text-foreground">{a.msg}</p>
+                    <div className="mt-1.5 flex items-center justify-between">
+                      <span className="text-[10px] text-muted-foreground">→ {a.owner}</span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-[11px] text-brand hover:bg-brand/10 hover:text-brand"
+                        onClick={() => toast.success(a.action, { description: a.msg })}
+                      >
+                        {a.action}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        )}
+      </div>
+    </SectionCard>
+  );
+}
