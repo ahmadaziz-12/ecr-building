@@ -185,6 +185,9 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
     { label: "Alert Type", options: filters.alertType, def: "Stock" },
   ];
   const shown = compact ? groups.slice(0, 4) : groups;
+  const defaults = Object.fromEntries(groups.map((g) => [g.label, g.def]));
+  const [values, setValues] = useState<Record<string, string>>(defaults);
+  const dirty = shown.some((g) => values[g.label] !== g.def);
   return (
     <div className="rounded-2xl border border-brand/15 bg-gradient-to-r from-brand/5 via-white to-teal/5 p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
       <div className="mb-2 flex items-center justify-between">
@@ -194,12 +197,36 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
           </span>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/80">Filters</h3>
           <span className="text-[11px] text-muted-foreground">Controls all cards, charts & tables below</span>
+          {dirty && (
+            <span className="ml-2 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-semibold text-[oklch(0.4_0.13_70)]">
+              Unsaved changes
+            </span>
+          )}
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="ghost" className="h-8 text-xs text-muted-foreground hover:text-brand">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 text-xs text-muted-foreground hover:text-brand"
+            onClick={() => {
+              setValues(defaults);
+              toast.success("Filters reset", { description: "Showing default view." });
+            }}
+          >
             Reset
           </Button>
-          <Button size="sm" className="h-8 bg-brand text-brand-foreground hover:bg-brand/90">
+          <Button
+            size="sm"
+            className="h-8 bg-brand text-brand-foreground hover:bg-brand/90"
+            onClick={() => {
+              const active = shown
+                .filter((g) => values[g.label] !== g.def)
+                .map((g) => `${g.label}: ${values[g.label]}`);
+              toast.success("Filters applied", {
+                description: active.length ? active.join(" · ") : "No changes from defaults.",
+              });
+            }}
+          >
             Apply Filters
           </Button>
         </div>
@@ -208,7 +235,10 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
         {shown.map((g) => (
           <div key={g.label} className="flex flex-col gap-1">
             <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{g.label}</label>
-            <Select defaultValue={g.def}>
+            <Select
+              value={values[g.label]}
+              onValueChange={(v) => setValues((s) => ({ ...s, [g.label]: v }))}
+            >
               <SelectTrigger className="h-8 w-auto min-w-[130px] border-black/10 bg-white text-xs transition hover:border-brand/40">
                 <SelectValue placeholder={g.label} />
               </SelectTrigger>
@@ -379,19 +409,42 @@ export function TopCategories() {
         {topCategories.map((c) => {
           const Icon = iconMap[c.icon] ?? Boxes;
           const tone = toneForStatus(c.health);
+          const img = categoryImage[c.name];
           return (
-            <div key={c.name} className="rounded-xl border border-black/5 bg-canvas p-3 transition hover:border-brand/30 hover:bg-white">
-              <div className="flex items-start justify-between">
-                <span className="grid h-9 w-9 place-items-center rounded-lg bg-brand/10 text-brand">
-                  <Icon className="h-4 w-4" />
-                </span>
-                <Pill tone={tone}>{c.health}</Pill>
-              </div>
-              <p className="mt-3 text-sm font-medium text-foreground">{c.name}</p>
-              <p className="mt-1 font-display text-lg font-bold text-foreground">{formatSAR(c.sales)}</p>
-              <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
-                <span>{c.units}</span>
-                <span>Returns {c.ret}</span>
+            <div
+              key={c.name}
+              className="group overflow-hidden rounded-xl border border-black/5 bg-canvas transition hover:-translate-y-0.5 hover:border-brand/30 hover:bg-white hover:shadow-md"
+            >
+              {img ? (
+                <div className="relative h-24 w-full overflow-hidden bg-black/5">
+                  <img
+                    src={img}
+                    alt={c.name}
+                    loading="lazy"
+                    className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/10 to-transparent" />
+                  <span className="absolute left-2 top-2 grid h-7 w-7 place-items-center rounded-md bg-white/90 text-brand backdrop-blur">
+                    <Icon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="absolute right-2 top-2"><Pill tone={tone}>{c.health}</Pill></span>
+                </div>
+              ) : (
+                <div className="relative h-24 w-full overflow-hidden bg-gradient-to-br from-brand/10 via-white to-teal/10">
+                  <div className="absolute inset-0 blueprint-grid opacity-60" />
+                  <span className="absolute left-2 top-2 grid h-7 w-7 place-items-center rounded-md bg-white/90 text-brand">
+                    <Icon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="absolute right-2 top-2"><Pill tone={tone}>{c.health}</Pill></span>
+                </div>
+              )}
+              <div className="p-3">
+                <p className="text-sm font-medium text-foreground">{c.name}</p>
+                <p className="mt-1 font-display text-lg font-bold text-foreground">{formatSAR(c.sales)}</p>
+                <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>{c.units}</span>
+                  <span>Returns {c.ret}</span>
+                </div>
               </div>
             </div>
           );
