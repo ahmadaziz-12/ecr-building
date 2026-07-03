@@ -255,3 +255,20 @@
     radial-gradient(circle at 45% 85%, rgba(15,10,50,0.04) 1px, transparent 1.5px);
   background-size: 60px 60px, 90px 90px, 75px 75px;
 }
+
+@keyframes pos-scan {
+  0% { transform: translateY(0); opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateY(24px); opacity: 0; }
+}
+@keyframes pos-scan-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+@utility pos-scan-line {
+  animation: pos-scan 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@utility pos-scan-pulse {
+  animation: pos-scan-pulse 1.2s ease-in-out infinite;
+}

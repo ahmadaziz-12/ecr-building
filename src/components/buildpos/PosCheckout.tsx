@@ -24,18 +24,48 @@ import {
   Wrench,
   Zap,
   Square,
+  ScanLine,
+  Blocks,
+  Cable,
+  Cog,
+  Droplet,
+  Pipette,
+  Brush,
+  Grid3x3,
+  Component,
 } from "lucide-react";
 
 const categories = [
   { name: "All", icon: Layers },
-  { name: "Cement", icon: Package },
-  { name: "Steel", icon: Layers },
+  { name: "Cement", icon: Blocks },
+  { name: "Steel", icon: Component },
   { name: "Tiles", icon: Square },
   { name: "Paint", icon: PaintBucket },
   { name: "Plumbing", icon: Wrench },
   { name: "Electrical", icon: Zap },
   { name: "Tools", icon: Hammer },
 ];
+
+type IconType = typeof Package;
+
+const productIcon: Record<string, IconType> = {
+  "CEM-OPC-50KG": Blocks,
+  "CEM-WHT-40KG": Blocks,
+  "STEEL-RBR-12MM": Component,
+  "STEEL-RBR-16MM": Component,
+  "TILE-GRY-60X60": Grid3x3,
+  "TILE-MRB-80X80": Grid3x3,
+  "PAINT-WHT-20L": PaintBucket,
+  "PAINT-BEIGE-4L": Brush,
+  "PVC-PIPE-2IN": Pipette,
+  "PVC-ELB-2IN": Wrench,
+  "ELEC-CBL-2.5MM": Cable,
+  "ELEC-SW-1G": Zap,
+  "TOOL-DRL-18V": Cog,
+  "TOOL-HMR-500": Hammer,
+  "GLASS-6MM-CLR": Square,
+  "SEAL-SILC-300": Droplet,
+};
 
 const products = [
   { sku: "CEM-OPC-50KG", name: "OPC Cement 50KG", cat: "Cement", uom: "Bag", price: 22.5, stock: 42, tone: "warning" },
@@ -118,14 +148,28 @@ export function PosCheckout() {
         {/* Search */}
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-black/5 bg-white p-2 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
           <div className="relative flex-1 min-w-[240px]">
-            <Barcode className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand" />
+            {/* Scanning device animation — only surface here */}
+            <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
+              <div className="relative grid h-6 w-6 place-items-center rounded-md bg-brand/10 text-brand overflow-hidden">
+                <Barcode className="h-3.5 w-3.5" />
+                {query === "" && (
+                  <span className="pos-scan-line pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-brand shadow-[0_0_6px_var(--brand)]" />
+                )}
+              </div>
+            </div>
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Scan barcode or search product / SKU…"
-              className="h-11 w-full rounded-xl border border-black/10 bg-canvas pl-10 pr-3 text-sm outline-none focus:border-brand"
+              className="h-11 w-full rounded-xl border border-black/10 bg-canvas pl-12 pr-3 text-sm outline-none focus:border-brand"
               autoFocus
             />
+            {query === "" && (
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-brand/70">
+                <ScanLine className="h-3 w-3 pos-scan-pulse" />
+                Scanning…
+              </span>
+            )}
           </div>
           <button className="flex h-11 items-center gap-2 rounded-xl border border-black/10 bg-white px-3 text-sm font-medium hover:border-brand/40 hover:text-brand">
             <UserPlus className="h-4 w-4" /> Add Customer
@@ -158,7 +202,9 @@ export function PosCheckout() {
 
         {/* Product grid */}
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
-          {shown.map((p) => (
+          {shown.map((p) => {
+            const Icon = productIcon[p.sku] ?? Package;
+            return (
             <button
               key={p.sku}
               onClick={() => addToCart(p)}
@@ -169,8 +215,8 @@ export function PosCheckout() {
               >
                 {p.stock} {p.uom}
               </span>
-              <span className="grid h-10 w-10 place-items-center rounded-lg bg-brand/10 text-brand">
-                <Package className="h-5 w-5" />
+              <span className="grid h-10 w-10 place-items-center rounded-lg bg-brand/10 text-brand transition group-hover:bg-brand group-hover:text-brand-foreground">
+                <Icon className="h-5 w-5" />
               </span>
               <p className="mt-2 text-sm font-medium text-foreground line-clamp-2">{p.name}</p>
               <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{p.sku}</p>
@@ -178,7 +224,8 @@ export function PosCheckout() {
                 {p.price.toFixed(2)} <span className="text-xs font-medium text-muted-foreground">ر.س / {p.uom}</span>
               </p>
             </button>
-          ))}
+            );
+          })}
         </div>
       </div>
 
