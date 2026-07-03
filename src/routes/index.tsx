@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import heroImg from "@/assets/hero-construction.jpg";
+import warehouseImg from "@/assets/warehouse.jpg";
 import {
   AlertTriangle,
   Package,
@@ -11,6 +13,8 @@ import {
   Boxes,
   Wallet,
   Shield,
+  HardHat,
+  ArrowRight,
 } from "lucide-react";
 import {
   FilterBar,
@@ -95,6 +99,62 @@ function OverviewPage() {
 
   return (
     <div className="space-y-5">
+      {/* Cinematic construction hero */}
+      <section className="bp-fade relative overflow-hidden rounded-3xl border border-brand/15 shadow-[0_10px_40px_-15px_rgba(59,20,120,0.35)]">
+        <img
+          src={heroImg}
+          alt="Construction site at golden hour"
+          className="absolute inset-0 h-full w-full object-cover"
+          width={1920}
+          height={640}
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-[oklch(0.2_0.08_285)]/95 via-[oklch(0.25_0.1_285)]/70 to-transparent" />
+        <div className="absolute inset-0 blueprint-grid-dark opacity-30" />
+        <div className="relative flex flex-col gap-6 p-6 md:flex-row md:items-center md:justify-between md:p-8">
+          <div className="max-w-xl text-white">
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider backdrop-blur">
+              <HardHat className="h-3.5 w-3.5 text-teal" />
+              Building Materials · KSA
+            </span>
+            <h1 className="mt-3 font-display text-2xl font-bold leading-tight md:text-3xl">
+              Every bag of cement, every rebar, every tile — accounted for in real time.
+            </h1>
+            <p className="mt-2 text-sm text-white/80">
+              Riyadh Main Branch · POS-01 · Business date 02 July 2026. All shifts online, ZATCA
+              connected, deliveries dispatching from three warehouses.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <a
+                href="/operate/pos-checkout"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-brand shadow-sm transition hover:bg-white/90"
+              >
+                Open POS Checkout <ArrowRight className="h-3.5 w-3.5" />
+              </a>
+              <a
+                href="/stock/inventory"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/30 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur transition hover:bg-white/20"
+              >
+                View Inventory
+              </a>
+            </div>
+          </div>
+          <div className="relative hidden w-72 flex-none overflow-hidden rounded-2xl border border-white/20 shadow-2xl md:block">
+            <img
+              src={warehouseImg}
+              alt="Mi Money warehouse aisle"
+              className="h-40 w-full object-cover"
+              width={1280}
+              height={720}
+              loading="lazy"
+            />
+            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-white/70">Live Warehouse</p>
+              <p className="text-sm font-bold text-white">3 branches · 12,850 items available</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Sticky filter bar controls all sections */}
       <div className="bp-fade sticky top-16 z-[5] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/80 backdrop-blur">
         <FilterBar />
