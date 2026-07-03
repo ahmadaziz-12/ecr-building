@@ -232,3 +232,26 @@
 @utility stagger-4 { animation-delay: 240ms; }
 @utility stagger-5 { animation-delay: 300ms; }
 @utility stagger-6 { animation-delay: 360ms; }
+
+@utility hazard-stripe {
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in oklab, var(--safety-amber) 90%, transparent) 0 10px,
+    color-mix(in oklab, var(--steel) 90%, transparent) 10px 20px
+  );
+}
+
+@utility steel-plate {
+  background-image:
+    linear-gradient(135deg, color-mix(in oklab, var(--steel) 6%, transparent), transparent 60%),
+    radial-gradient(circle at 20% 20%, color-mix(in oklab, var(--blueprint) 8%, transparent), transparent 55%);
+}
+
+@utility concrete-panel {
+  background-color: var(--concrete);
+  background-image:
+    radial-gradient(circle at 10% 15%, rgba(15,10,50,0.04) 1px, transparent 1.5px),
+    radial-gradient(circle at 80% 65%, rgba(15,10,50,0.03) 1px, transparent 1.5px),
+    radial-gradient(circle at 45% 85%, rgba(15,10,50,0.04) 1px, transparent 1.5px);
+  background-size: 60px 60px, 90px 90px, 75px 75px;
+}
