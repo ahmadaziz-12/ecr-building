@@ -1,20 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import heroImg from "@/assets/hero-construction.jpg";
-import warehouseImg from "@/assets/warehouse.jpg";
+import yardScene from "@/assets/yard-scene.jpg";
 import {
-  AlertTriangle,
-  Package,
-  Truck,
-  UserSquare2,
-  ShieldCheck,
   LayoutDashboard,
   TrendingUp,
   Boxes,
+  Truck,
+  UserSquare2,
   Wallet,
   Shield,
   HardHat,
-  ArrowRight,
+  RefreshCw,
+  Download,
+  Radio,
 } from "lucide-react";
 import {
   FilterBar,
@@ -30,64 +28,22 @@ import {
   ZatcaCompliance,
   CashierActivity,
   ReturnsRefunds,
+  CommandKpis,
+  ContractorOrders,
+  DispatchBoard,
+  StockYardHealth,
+  AlertsRail,
 } from "@/components/buildpos/sections";
-import { alerts, deliveryChips, inventorySummary, zatcaInvoices, terminals } from "@/lib/buildpos/data";
 import { useFilters } from "@/lib/buildpos/filter-context";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/")({
   component: OverviewPage,
 });
 
-function PriorityTile({
-  tone,
-  icon: Icon,
-  label,
-  value,
-  hint,
-  pulse,
-  delay,
-}: {
-  tone: "critical" | "warning" | "success" | "info" | "brand";
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value: string | number;
-  hint: string;
-  pulse?: boolean;
-  delay: string;
-}) {
-  const toneMap = {
-    critical: "from-critical/10 to-critical/0 border-critical/20 text-critical",
-    warning: "from-warning/15 to-warning/0 border-warning/30 text-[oklch(0.4_0.13_70)]",
-    success: "from-success/10 to-success/0 border-success/30 text-[oklch(0.35_0.1_155)]",
-    info: "from-info/10 to-info/0 border-info/30 text-[oklch(0.35_0.12_235)]",
-    brand: "from-brand/10 to-brand/0 border-brand/20 text-brand",
-  } as const;
-  return (
-    <div
-      className={`bp-enter ${delay} relative overflow-hidden rounded-2xl border bg-gradient-to-br ${toneMap[tone]} bg-white p-4 shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:shadow-md`}
-    >
-      <div className="pointer-events-none absolute inset-0 blueprint-grid opacity-40" />
-      <div className="relative flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-          <p className="mt-1 font-display text-2xl font-bold text-foreground">{value}</p>
-          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{hint}</p>
-        </div>
-        <div className={`relative grid h-10 w-10 flex-none place-items-center rounded-xl bg-white/80 ${pulse ? "bp-pulse-dot" : ""}`}>
-          <Icon className="h-5 w-5" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function OverviewPage() {
   const { activeTab, setActiveTab } = useFilters();
-  const criticalAlerts = alerts.filter((a) => a.severity === "critical").length;
-  const lowStock = inventorySummary.find((s) => /low/i.test(s.label))?.value ?? "0";
-  const pendingDeliveries = deliveryChips.find((c) => /pending|queued/i.test(c.label))?.value ?? "0";
-  const activeCashiers = terminals.filter((t) => String(t.status).toLowerCase().includes("active")).length;
-  const zatcaFailed = zatcaInvoices.filter((z) => /fail|error/i.test(String(z.status))).length;
 
   const tabs = [
     { value: "overview", label: "Overview", icon: LayoutDashboard },
@@ -101,86 +57,135 @@ function OverviewPage() {
 
   return (
     <div className="space-y-5">
-      {/* Cinematic construction hero */}
-      <section className="bp-fade relative overflow-hidden rounded-3xl border border-brand/15 shadow-[0_10px_40px_-15px_rgba(59,20,120,0.35)]">
+      {/* Industrial Command Header — narrow, control-room feel */}
+      <section className="bp-fade relative overflow-hidden rounded-2xl border border-brand/20 shadow-[0_10px_30px_-18px_rgba(59,20,120,0.5)]">
+        <div className="absolute inset-0 bg-gradient-to-r from-[oklch(0.22_0.08_285)] via-[oklch(0.3_0.11_285)] to-[oklch(0.35_0.13_285)]" />
         <img
-          src={heroImg}
-          alt="Construction site at golden hour"
-          className="absolute inset-0 h-full w-full object-cover"
-          width={1920}
-          height={640}
+          src={yardScene}
+          alt=""
+          aria-hidden
+          className="absolute right-0 top-0 h-full w-1/2 object-cover opacity-30 mix-blend-luminosity"
+          width={1600}
+          height={900}
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-[oklch(0.2_0.08_285)]/95 via-[oklch(0.25_0.1_285)]/70 to-transparent" />
-        <div className="absolute inset-0 blueprint-grid-dark opacity-30" />
-        <div className="relative flex flex-col gap-6 p-6 md:flex-row md:items-center md:justify-between md:p-8">
-          <div className="max-w-xl text-white">
-            <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider backdrop-blur">
-              <HardHat className="h-3.5 w-3.5 text-teal" />
-              Building Materials · KSA
-            </span>
-            <h1 className="mt-3 font-display text-2xl font-bold leading-tight md:text-3xl">
-              Every bag of cement, every rebar, every tile — accounted for in real time.
-            </h1>
-            <p className="mt-2 text-sm text-white/80">
-              Riyadh Main Branch · POS-01 · Business date 02 July 2026. All shifts online, ZATCA
-              connected, deliveries dispatching from three warehouses.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <a
-                href="/operate/pos-checkout"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-brand shadow-sm transition hover:bg-white/90"
-              >
-                Open POS Checkout <ArrowRight className="h-3.5 w-3.5" />
-              </a>
-              <a
-                href="/stock/inventory"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/30 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur transition hover:bg-white/20"
-              >
-                View Inventory
-              </a>
+        <div className="absolute inset-0 blueprint-grid-dark opacity-40" />
+        <div className="absolute inset-x-0 bottom-0 h-1 hazard-stripe opacity-80" />
+        <div className="relative flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between md:p-6">
+          <div className="flex items-center gap-4 text-white">
+            <div className="grid h-12 w-12 place-items-center rounded-xl bg-white/10 backdrop-blur ring-1 ring-white/20">
+              <Radio className="h-5 w-5 text-teal" />
+            </div>
+            <div>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] backdrop-blur">
+                <HardHat className="h-3 w-3 text-teal" /> BuildPOS · Command Center
+              </span>
+              <h1 className="mt-1 font-display text-xl font-bold leading-tight md:text-2xl">
+                Industrial Operations · Riyadh Main Yard
+              </h1>
+              <p className="text-[12px] text-white/70">
+                Cement · Steel · Tiles · Paint · Plumbing · Electrical · Glass · Tools — live across 5 KSA branches
+              </p>
             </div>
           </div>
-          <div className="relative hidden w-72 flex-none overflow-hidden rounded-2xl border border-white/20 shadow-2xl md:block">
-            <img
-              src={warehouseImg}
-              alt="Mi Money warehouse aisle"
-              className="h-40 w-full object-cover"
-              width={1280}
-              height={720}
-              loading="lazy"
-            />
-            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-white/70">Live Warehouse</p>
-              <p className="text-sm font-bold text-white">3 branches · 12,850 items available</p>
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-9 gap-1.5 border border-white/20 bg-white/10 text-xs text-white backdrop-blur hover:bg-white/20 hover:text-white"
+              onClick={() => toast.success("Dashboard refreshed", { description: "Data pulled from live POS & warehouse feeds." })}
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> Refresh
+            </Button>
+            <Button
+              size="sm"
+              className="h-9 gap-1.5 bg-white text-xs font-semibold text-brand hover:bg-white/90"
+              onClick={() => toast.success("Export queued", { description: "Command Center snapshot will be emailed." })}
+            >
+              <Download className="h-3.5 w-3.5" /> Export
+            </Button>
           </div>
         </div>
       </section>
 
-      {/* Sticky filter bar controls all sections */}
-      <div className="bp-fade sticky top-16 z-[5] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/80 backdrop-blur">
+      {/* Top Command Bar — full-width filter surface */}
+      <div className="bp-fade sticky top-16 z-[5] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/85 backdrop-blur">
         <FilterBar />
       </div>
 
-      {/* Priority strip — what a manager scans first */}
+      {/* Construction Operations Summary — wider industrial KPI tiles */}
       <section>
         <div className="mb-2 flex items-center gap-2">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-critical bp-pulse-dot" />
-          <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Priority · Requires attention
+          <span className="h-2 w-2 rounded-full bg-brand" />
+          <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            01 · Construction Operations Summary
           </h2>
         </div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-          <PriorityTile tone="critical" icon={AlertTriangle} label="Critical alerts" value={criticalAlerts} hint="Escalate now" pulse delay="stagger-1" />
-          <PriorityTile tone="warning" icon={Package} label="Low stock SKUs" value={lowStock} hint="Reorder queue" delay="stagger-2" />
-          <PriorityTile tone="info" icon={Truck} label="Pending deliveries" value={pendingDeliveries} hint="Dispatch backlog" delay="stagger-3" />
-          <PriorityTile tone="success" icon={UserSquare2} label="Active cashiers" value={activeCashiers} hint="Live shifts" delay="stagger-4" />
-          <PriorityTile tone="brand" icon={ShieldCheck} label="ZATCA failures" value={zatcaFailed} hint="Resubmit queue" delay="stagger-5" />
-        </div>
+        <CommandKpis />
       </section>
 
-      {/* Sectioned operations — 7 grouped tabs matching the operational workflow */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      {/* Main grid: operations column + right-side alerts rail */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-4">
+          {/* Material Sales Intelligence */}
+          <section>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-teal" />
+              <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                02 · Material Sales Intelligence
+              </h2>
+            </div>
+            <div className="bp-enter"><TopCategories /></div>
+          </section>
+
+          {/* Stock Yard / Warehouse Health */}
+          <section>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-safety-amber" />
+              <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                03 · Stock Yard & Warehouse Health
+              </h2>
+            </div>
+            <div className="bp-enter"><StockYardHealth /></div>
+          </section>
+
+          {/* Contractor & B2B Orders */}
+          <section>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-info" />
+              <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                04 · Contractor & B2B Orders
+              </h2>
+            </div>
+            <div className="bp-enter"><ContractorOrders /></div>
+          </section>
+
+          {/* Delivery & Dispatch Yard */}
+          <section>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-critical" />
+              <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                05 · Delivery & Dispatch Yard
+              </h2>
+            </div>
+            <div className="bp-enter"><DispatchBoard /></div>
+          </section>
+        </div>
+
+        {/* Right-side control panel */}
+        <aside className="space-y-4">
+          <AlertsRail />
+        </aside>
+      </div>
+
+      {/* Deep Dive tabs — preserves all existing sections & functionality */}
+      <section>
+        <div className="mb-2 flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-brand" />
+          <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            06 · Deep Dive · Operational Detail
+          </h2>
+        </div>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <div className="sticky top-32 z-[4] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/85 backdrop-blur">
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-xl border border-black/5 bg-white p-1 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
             {tabs.map((t) => {
@@ -238,7 +243,8 @@ function OverviewPage() {
           <div className="bp-enter stagger-1"><OperationalAlerts /></div>
           <div className="bp-enter stagger-2"><ZatcaCompliance /></div>
         </TabsContent>
-      </Tabs>
+        </Tabs>
+      </section>
     </div>
   );
 }
