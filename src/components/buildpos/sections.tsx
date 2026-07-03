@@ -39,6 +39,8 @@ import {
   Zap,
 } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -75,6 +77,17 @@ import {
   topCategories,
   zatcaInvoices,
 } from "@/lib/buildpos/data";
+import cementImg from "@/assets/cat-cement.jpg";
+import steelImg from "@/assets/cat-steel.jpg";
+import tilesImg from "@/assets/cat-tiles.jpg";
+import paintImg from "@/assets/cat-paint.jpg";
+
+const categoryImage: Record<string, string> = {
+  "Cement & Aggregates": cementImg,
+  "Steel & Rebar": steelImg,
+  "Tiles & Flooring": tilesImg,
+  "Paint & Chemicals": paintImg,
+};
 
 /* ---------------- tone system ---------------- */
 
