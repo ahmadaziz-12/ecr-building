@@ -35,6 +35,7 @@ import {
   CheckCircle2,
   ShoppingCart,
 } from "lucide-react";
+import { productImage } from "@/lib/buildpos/product-images";
 
 type IconType = typeof Package;
 
@@ -228,19 +229,32 @@ export function PosCheckout() {
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
                 {shown.map((p, i) => {
                   const Icon = productIcon[p.sku] ?? Package;
+                  const img = productImage[p.sku];
                   return (
                     <button
                       key={p.sku}
                       onClick={() => addToCart(p)}
                       style={{ animationDelay: `${i * 40}ms` }}
-                      className="pos-slide-up group relative flex flex-col items-start rounded-xl border border-black/5 bg-white p-3 text-left shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md"
+                      className="pos-slide-up group relative flex flex-col items-start overflow-hidden rounded-xl border border-black/5 bg-white p-3 text-left shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md"
                     >
                       <span className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${toneClass[p.tone]}`}>
                         {p.stock} {p.uom}
                       </span>
-                      <span className="grid h-10 w-10 place-items-center rounded-lg bg-brand/10 text-brand transition group-hover:bg-brand group-hover:text-brand-foreground group-hover:scale-110">
-                        <Icon className="h-5 w-5" />
-                      </span>
+                      <div className="relative mb-2 grid aspect-square w-full place-items-center overflow-hidden rounded-lg bg-gradient-to-br from-canvas to-concrete">
+                        {img ? (
+                          <img
+                            src={img}
+                            alt={p.name}
+                            loading="lazy"
+                            width={200}
+                            height={200}
+                            className="h-full w-full object-contain p-2 transition duration-300 group-hover:scale-110"
+                          />
+                        ) : (
+                          <Icon className="h-8 w-8 text-brand" />
+                        )}
+                        <span className="pointer-events-none absolute inset-0 blueprint-grid opacity-30" />
+                      </div>
                       <p className="mt-2 text-sm font-medium text-foreground line-clamp-2">{p.name}</p>
                       <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{p.sku}</p>
                       <p className="mt-2 font-display text-lg font-bold text-foreground">
@@ -304,10 +318,12 @@ export function PosCheckout() {
             <div key={l.sku} className={`px-4 py-3 ${lastAdded === l.sku ? "pos-pop bg-brand/5" : "pos-slide-up"}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand/10 text-brand">
+                  <span className="grid h-10 w-10 shrink-0 overflow-hidden place-items-center rounded-md bg-canvas ring-1 ring-black/5">
                     {(() => {
+                      const img = productImage[l.sku];
+                      if (img) return <img src={img} alt={l.name} loading="lazy" className="h-full w-full object-contain p-0.5" />;
                       const Icon = productIcon[l.sku] ?? Package;
-                      return <Icon className="h-4 w-4" />;
+                      return <Icon className="h-4 w-4 text-brand" />;
                     })()}
                   </span>
                   <div className="min-w-0">
