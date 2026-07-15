@@ -1,10 +1,13 @@
 import { useRouterState } from "@tanstack/react-router";
 import { Download, Filter, MoreHorizontal, Plus, RefreshCw } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Pill, SectionCard } from "@/components/buildpos/sections";
 import { getModule } from "@/lib/buildpos/modules";
 import type { Severity } from "@/lib/buildpos/format";
+import { getFlow } from "@/lib/buildpos/flows";
+import { FlowDialog } from "@/components/buildpos/FlowDialog";
 
 function tone(status: string): Severity {
   const k = status.toLowerCase();
@@ -26,6 +29,8 @@ const toneKpi: Record<Severity, string> = {
 export function ModulePage() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const m = getModule(pathname);
+  const [flowOpen, setFlowOpen] = useState(false);
+  const flow = getFlow(m?.primaryAction);
 
   if (!m) {
     return (
@@ -52,7 +57,11 @@ export function ModulePage() {
             <Download className="h-4 w-4" /> Export
           </Button>
           {m.primaryAction && (
-            <Button size="sm" className="h-9 gap-1.5 bg-brand text-brand-foreground hover:bg-brand/90">
+            <Button
+              size="sm"
+              onClick={() => flow && setFlowOpen(true)}
+              className="h-9 gap-1.5 bg-brand text-brand-foreground hover:bg-brand/90"
+            >
               <Plus className="h-4 w-4" /> {m.primaryAction}
             </Button>
           )}
@@ -185,6 +194,7 @@ export function ModulePage() {
           </div>
         </div>
       </SectionCard>
+      <FlowDialog flow={flow} open={flowOpen} onOpenChange={setFlowOpen} />
     </div>
   );
 }
