@@ -142,7 +142,7 @@ const nav: Group[] = [
       { to: "/admin/rules", label: "Rules Engine", icon: Sliders },
       { to: "/admin/pos-settings", label: "POS Settings", icon: Cog },
       { to: "/admin/audit-logs", label: "Audit Logs", icon: ScrollText },
-      { to: "/admin/plans", label: "Plans & Pricing", icon: CreditCard },
+      { to: "/admin/plans", label: "Subscriptions", icon: CreditCard },
       { to: "/admin/settings", label: "General Settings", icon: Settings2 },
     ],
   },
