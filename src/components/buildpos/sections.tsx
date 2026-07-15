@@ -17,11 +17,17 @@ import {
   BarChart3,
   Boxes,
   ChevronRight,
+  ChevronDown,
+  Download,
+  Filter,
+  Bookmark,
+  X,
   FileText,
   Hammer,
   History,
   Layers,
   LayoutGrid,
+  Monitor,
   Package,
   PaintBucket,
   Plus,
@@ -37,8 +43,12 @@ import {
   Users,
   Wrench,
   Zap,
+  CheckCircle2,
+  Clock,
+  ArrowRight,
 } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +58,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -60,19 +75,31 @@ import { formatSAR, type Severity } from "@/lib/buildpos/format";
 import {
   alerts,
   branches,
+  cashierKpis,
+  cashierWorkspaceSummary,
   contractorOrders,
   deliveries,
+  deliveryDetail,
   deliveryChips,
+  dispatchPipeline,
+  groupedAlerts,
   hourlySales,
+  inventoryKpis,
   inventorySummary,
   kpis,
   lowStock,
+  overviewKpis,
+  paymentBreakdown,
   payments,
   quickActions,
+  recentOrders,
+  returnBreakdown,
   returns as returnsData,
   returnsSummary,
+  salesPerfKpis,
   shifts,
   stockYard,
+  terminalDetail,
   terminals,
   topCategories,
   zatcaInvoices,
@@ -80,7 +107,8 @@ import {
 import {
   categoryToFilter,
   filterDefaults,
-  filterGroups,
+  moreFilterGroups,
+  primaryFilterGroups,
   useFilters,
 } from "@/lib/buildpos/filter-context";
 import cementImg from "@/assets/cat-cement.jpg";
@@ -173,31 +201,36 @@ const iconMap: Record<string, ComponentType<{ className?: string }>> = {
   layers: Layers, bar: BarChart3, grid: LayoutGrid, paint: PaintBucket,
   pipe: Wrench, zap: Zap, hammer: Hammer, square: Square,
   plus: Plus, history: History, file: FileText, search: Search,
-  chart: BarChart3, refresh: RefreshCw, power: Power,
+  chart: BarChart3, refresh: RefreshCw, power: Power, monitor: Monitor,
 };
 
 /* ---------------- Filter Bar ---------------- */
 
 export function FilterBar({ compact = false }: { compact?: boolean }) {
   const { values, setValue, reset } = useFilters();
-  const shown = compact ? filterGroups.slice(0, 4) : filterGroups;
-  const dirty = shown.some((g) => values[g.label] !== filterDefaults[g.label]);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const shown = compact ? primaryFilterGroups.slice(0, 4) : primaryFilterGroups;
+  const allGroups = [...primaryFilterGroups, ...moreFilterGroups];
+  const activeChips = allGroups
+    .filter((g) => values[g.label] && values[g.label] !== filterDefaults[g.label])
+    .map((g) => ({ label: g.label, value: values[g.label] }));
+
   return (
     <div className="rounded-2xl border border-brand/15 bg-gradient-to-r from-brand/5 via-white to-teal/5 p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="grid h-6 w-6 place-items-center rounded-md bg-brand/10 text-brand">
-            <Search className="h-3.5 w-3.5" />
+            <Filter className="h-3.5 w-3.5" />
           </span>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/80">Filters</h3>
-          <span className="text-[11px] text-muted-foreground">Controls all cards, charts & tables below</span>
-          {dirty && (
-            <span className="ml-2 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-semibold text-[oklch(0.4_0.13_70)]">
-              Active
+          <span className="hidden text-[11px] text-muted-foreground sm:inline">Controls all cards, charts & tables below</span>
+          {activeChips.length > 0 && (
+            <span className="ml-1 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-semibold text-[oklch(0.4_0.13_70)]">
+              {activeChips.length} active
             </span>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           <Button
             size="sm"
             variant="ghost"
@@ -211,13 +244,36 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
           </Button>
           <Button
             size="sm"
+            variant="ghost"
+            className="h-8 gap-1 text-xs text-muted-foreground hover:text-brand"
+            onClick={() => toast.info("View saved", { description: "This filter set has been saved." })}
+          >
+            <Bookmark className="h-3.5 w-3.5" /> Save View
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 gap-1 text-xs text-muted-foreground hover:text-brand"
+            onClick={() => toast.success("Data refreshed", { description: "Latest POS feed pulled." })}
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Refresh
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 gap-1 text-xs text-muted-foreground hover:text-brand"
+            onClick={() => toast.success("Export queued", { description: "CSV export will be emailed." })}
+          >
+            <Download className="h-3.5 w-3.5" /> Export
+          </Button>
+          <Button
+            size="sm"
             className="h-8 bg-brand text-brand-foreground hover:bg-brand/90"
             onClick={() => {
-              const active = shown
-                .filter((g) => values[g.label] !== filterDefaults[g.label])
-                .map((g) => `${g.label}: ${values[g.label]}`);
               toast.success("Filters applied", {
-                description: active.length ? active.join(" · ") : "No changes from defaults.",
+                description: activeChips.length
+                  ? activeChips.map((c) => `${c.label}: ${c.value}`).join(" · ")
+                  : "Default view.",
               });
             }}
           >
@@ -225,15 +281,13 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
           </Button>
         </div>
       </div>
-      <div className="flex flex-wrap gap-2">
+
+      <div className="flex flex-wrap items-end gap-2">
         {shown.map((g) => (
           <div key={g.label} className="flex flex-col gap-1">
             <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{g.label}</label>
-            <Select
-              value={values[g.label]}
-              onValueChange={(v) => setValue(g.label, v)}
-            >
-              <SelectTrigger className="h-8 w-auto min-w-[130px] border-black/10 bg-white text-xs transition hover:border-brand/40">
+            <Select value={values[g.label]} onValueChange={(v) => setValue(g.label, v)}>
+              <SelectTrigger className="h-8 w-auto min-w-[150px] border-black/10 bg-white text-xs transition hover:border-brand/40">
                 <SelectValue placeholder={g.label} />
               </SelectTrigger>
               <SelectContent>
@@ -244,7 +298,51 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             </Select>
           </div>
         ))}
+        <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" className="h-8 gap-1 border-dashed text-xs">
+              <Plus className="h-3.5 w-3.5" /> More Filters
+              <ChevronDown className="h-3.5 w-3.5" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-80 p-3" align="end">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Advanced filters</p>
+            <div className="grid grid-cols-1 gap-2">
+              {moreFilterGroups.map((g) => (
+                <div key={g.label} className="flex items-center justify-between gap-2">
+                  <label className="text-[11px] font-medium text-foreground/80">{g.label}</label>
+                  <Select value={values[g.label]} onValueChange={(v) => setValue(g.label, v)}>
+                    <SelectTrigger className="h-8 w-40 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {g.options.map((o) => (
+                        <SelectItem key={o} value={o}>{o}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
+
+      {activeChips.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {activeChips.map((c) => (
+            <button
+              key={c.label}
+              type="button"
+              onClick={() => setValue(c.label, filterDefaults[c.label])}
+              className="bp-fade group inline-flex items-center gap-1 rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[11px] font-medium text-brand transition hover:bg-brand/15"
+            >
+              <span className="text-brand/70">{c.label}:</span> {c.value}
+              <X className="h-3 w-3 opacity-60 transition group-hover:opacity-100" />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -405,13 +503,13 @@ export function TopCategories() {
       title="Top Material Categories"
       desc="Click a category to filter inventory, stock alerts & tables."
       action={
-        active !== "All" ? (
+        active !== "All Categories" ? (
           <Button
             size="sm"
             variant="ghost"
             className="h-7 text-xs text-brand hover:bg-brand/5 hover:text-brand"
             onClick={() => {
-              setValue("Category", "All");
+              setValue("Category", "All Categories");
               toast.info("Category filter cleared");
             }}
           >
@@ -496,19 +594,19 @@ export function TopCategories() {
 export function InventoryHealth() {
   const { values, setValue } = useFilters();
   const cat = values.Category;
-  const rows = cat === "All" ? lowStock : lowStock.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
+  const rows = cat === "All Categories" ? lowStock : lowStock.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
   return (
     <SectionCard
       title="Stock Health & Availability"
-      desc={cat === "All" ? "Availability across branches and warehouses." : `Filtered by category · ${cat} (${rows.length} SKUs)`}
+      desc={cat === "All Categories" ? "Availability across branches and warehouses." : `Filtered by category · ${cat} (${rows.length} SKUs)`}
       action={
         <div className="flex items-center gap-2">
-          {cat !== "All" && (
+          {cat !== "All Categories" && (
             <Button
               variant="ghost"
               size="sm"
               className="h-7 text-xs text-muted-foreground hover:text-brand"
-              onClick={() => setValue("Category", "All")}
+              onClick={() => setValue("Category", "All Categories")}
             >
               Clear filter
             </Button>
@@ -1134,5 +1232,599 @@ export function AlertsRail() {
         )}
       </div>
     </SectionCard>
+  );
+}
+/* ================================================================
+ * SPEC 7 · DASHBOARD SECTIONS (Building Materials Blueprint)
+ * ================================================================ */
+
+/* ---------- Page header (spec 7.1 title + subtitle) ---------- */
+
+export function DashboardHeader({ subtitle }: { subtitle: string }) {
+  return (
+    <header className="bp-fade flex flex-col gap-1 border-l-4 border-brand pl-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-brand">
+        BuildPOS · Command Center
+      </p>
+      <h1 className="font-display text-2xl font-bold leading-tight text-foreground md:text-[26px]">
+        Building Materials Operations
+      </h1>
+      <p className="max-w-2xl text-[13px] text-muted-foreground">{subtitle}</p>
+    </header>
+  );
+}
+
+/* ---------- 7.1a Overview KPI cards (6) ---------- */
+
+export function OverviewKpis() {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      {overviewKpis.map((k, i) => {
+        const Icon = iconMap[k.icon] ?? Package;
+        return (
+          <div
+            key={k.key}
+            className={`bp-enter stagger-${(i % 6) + 1} group relative overflow-hidden rounded-2xl border border-black/5 bg-white p-4 shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-md`}
+          >
+            <div className="pointer-events-none absolute inset-0 blueprint-grid opacity-25" />
+            <div className="relative flex items-start justify-between">
+              <div className={`grid h-9 w-9 place-items-center rounded-lg ${toneIcon[k.tone]}`}>
+                <Icon className="h-4 w-4" />
+              </div>
+              <Pill tone={k.tone}>{k.sub.split(" ")[0]}</Pill>
+            </div>
+            <p className="relative mt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              {k.title}
+            </p>
+            <p className="relative mt-0.5 font-display text-[22px] font-bold tabular-nums leading-tight text-foreground">
+              {k.value}
+            </p>
+            <p className="relative mt-0.5 text-[11px] text-muted-foreground">{k.sub}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- 7.1b Today's Sales Summary — compact hourly ---------- */
+
+export function HourlySummary() {
+  const gross = hourlySales.reduce((s, h) => s + h.gross, 0);
+  const net = hourlySales.reduce((s, h) => s + h.net, 0);
+  const tx = 286;
+  const basket = Math.round(net / tx);
+  return (
+    <SectionCard
+      title="Today's Sales Summary"
+      desc="Hourly gross vs net across the trading day."
+      action={<Pill tone="success">Live · auto-refresh 60s</Pill>}
+    >
+      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          { l: "Gross sales", v: formatSAR(gross) },
+          { l: "Net sales", v: formatSAR(net) },
+          { l: "Transactions", v: tx.toString() },
+          { l: "Avg basket", v: formatSAR(basket) },
+        ].map((c) => (
+          <div key={c.l} className="rounded-lg border border-black/5 bg-canvas p-2.5">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{c.l}</p>
+            <p className="mt-1 font-display text-base font-bold tabular-nums text-foreground">{c.v}</p>
+          </div>
+        ))}
+      </div>
+      <div className="h-52 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={hourlySales} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+            <defs>
+              <linearGradient id="g-hs-gross" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={BRAND} stopOpacity={0.35} />
+                <stop offset="100%" stopColor={BRAND} stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="g-hs-net" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={TEAL} stopOpacity={0.3} />
+                <stop offset="100%" stopColor={TEAL} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(15,10,50,0.06)" />
+            <XAxis dataKey="time" stroke="rgba(15,10,50,0.5)" fontSize={11} />
+            <YAxis stroke="rgba(15,10,50,0.5)" fontSize={11} />
+            <Tooltip contentStyle={{ background: "white", border: "1px solid rgba(15,10,50,0.1)", borderRadius: 8, fontSize: 12 }} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Area type="monotone" dataKey="gross" stroke={BRAND} strokeWidth={2} fill="url(#g-hs-gross)" name="Gross" />
+            <Area type="monotone" dataKey="net" stroke={TEAL} strokeWidth={2} fill="url(#g-hs-net)" name="Net" />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </SectionCard>
+  );
+}
+
+/* ---------- 7.1c Dispatch Pipeline Preview (horizontal) ---------- */
+
+export function DispatchPipelinePreview({ onViewAll }: { onViewAll?: () => void }) {
+  return (
+    <SectionCard
+      title="Dispatch Pipeline"
+      desc="Live delivery-order stages across the yard."
+      action={
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 gap-1 text-xs text-brand hover:bg-brand/5 hover:text-brand"
+          onClick={onViewAll}
+        >
+          View All <ArrowRight className="h-3 w-3" />
+        </Button>
+      }
+    >
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {dispatchPipeline.map((stage, i) => (
+          <div
+            key={stage.key}
+            className={`bp-enter stagger-${(i % 6) + 1} relative overflow-hidden rounded-xl border border-black/5 bg-canvas p-3 transition hover:-translate-y-0.5 hover:bg-white hover:shadow-sm`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {stage.key}
+              </span>
+              <span className={`h-1.5 w-1.5 rounded-full ${stage.tone === "critical" ? "bg-critical bp-pulse-dot" : stage.tone === "warning" ? "bg-warning" : stage.tone === "success" ? "bg-success" : "bg-info"}`} />
+            </div>
+            <p className="mt-1 font-display text-2xl font-bold tabular-nums text-foreground">{stage.count}</p>
+            <p className="text-[10px] text-muted-foreground">deliveries</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3">
+        {deliveryDetail.slice(0, 3).map((d) => (
+          <div key={d.no} className="bp-enter rounded-lg border border-black/5 bg-white p-2.5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[11px] font-semibold text-brand">{d.no}</span>
+              <Pill tone={toneForStatus(d.status)}>{d.status}</Pill>
+            </div>
+            <p className="mt-1 truncate text-xs font-medium text-foreground">{d.customer}</p>
+            <p className="truncate text-[11px] text-muted-foreground">{d.materials} · {d.area}</p>
+            <div className="mt-1 flex items-center justify-between text-[11px]">
+              <span className="text-muted-foreground"><Clock className="mr-0.5 inline h-2.5 w-2.5" /> {d.promised.replace("Today, ", "")}</span>
+              <span className="font-semibold">{d.amount}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </SectionCard>
+  );
+}
+
+/* ---------- 7.1d Cashier Workspace Summary ---------- */
+
+export function CashierWorkspaceSummary() {
+  const tiles = [
+    { l: "Active terminals", v: cashierWorkspaceSummary.activeTerminals, tone: "success" as Severity },
+    { l: "Open shifts", v: String(cashierWorkspaceSummary.openShifts), tone: "info" as Severity },
+    { l: "Parked sales", v: String(cashierWorkspaceSummary.parkedSales), tone: "warning" as Severity },
+    { l: "Pending approvals", v: String(cashierWorkspaceSummary.pendingApprovals), tone: "warning" as Severity },
+    { l: "Offline terminals", v: cashierWorkspaceSummary.offlineTerminals, tone: "critical" as Severity },
+    { l: "Cash variance", v: cashierWorkspaceSummary.cashVariance, tone: "critical" as Severity },
+  ];
+  return (
+    <SectionCard title="Cashier Workspace Summary" desc="Terminals, shifts and cash reconciliation at a glance.">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {tiles.map((t, i) => (
+          <div
+            key={t.l}
+            className={`bp-enter stagger-${(i % 6) + 1} rounded-lg border border-black/5 bg-canvas p-2.5 transition hover:bg-white hover:shadow-sm`}
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{t.l}</p>
+              <span className={`h-1.5 w-1.5 rounded-full ${t.tone === "critical" ? "bg-critical" : t.tone === "warning" ? "bg-warning" : t.tone === "success" ? "bg-success" : "bg-info"}`} />
+            </div>
+            <p className="mt-1 font-display text-sm font-bold tabular-nums text-foreground">{t.v}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {cashierWorkspaceSummary.quickActions.map((a) => (
+          <Button
+            key={a}
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1 text-xs"
+            onClick={() => toast.info(a, { description: "Cashier action triggered." })}
+          >
+            {a}
+          </Button>
+        ))}
+      </div>
+    </SectionCard>
+  );
+}
+
+/* ---------- 7.1e Top Material Categories (compact) ---------- */
+
+export function TopCategoriesCompact({ onViewAll }: { onViewAll?: () => void }) {
+  return (
+    <SectionCard
+      title="Top Material Categories"
+      desc="Highest-selling categories today with stock health."
+      action={
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 gap-1 text-xs text-brand hover:bg-brand/5 hover:text-brand"
+          onClick={onViewAll}
+        >
+          View All <ArrowRight className="h-3 w-3" />
+        </Button>
+      }
+    >
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            {["Category", "Sales", "Units", "Stock", "Top product"].map((h) => (
+              <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {topCategories.slice(0, 6).map((c) => {
+            const Icon = iconMap[c.icon] ?? Boxes;
+            const tone = toneForStatus(c.health);
+            const top: Record<string, string> = {
+              "Cement & Aggregates": "OPC Cement 50KG",
+              "Steel & Rebar": "Steel Rebar 12MM",
+              "Tiles & Flooring": "Grey Porcelain Tile 60×60",
+              "Paint & Chemicals": "Interior White Paint 20L",
+              "Plumbing": "UPVC Pipe 2 Inch",
+              "Electrical": "Electric Cable 2.5MM",
+            };
+            return (
+              <TableRow key={c.name} className="bp-enter hover:bg-canvas">
+                <TableCell>
+                  <span className="flex items-center gap-2">
+                    <span className={`grid h-6 w-6 place-items-center rounded ${toneIcon.info}`}>
+                      <Icon className="h-3 w-3" />
+                    </span>
+                    <span className="font-medium text-foreground">{c.name}</span>
+                  </span>
+                </TableCell>
+                <TableCell className="font-semibold tabular-nums">{formatSAR(c.sales)}</TableCell>
+                <TableCell className="text-muted-foreground">{c.units}</TableCell>
+                <TableCell><Pill tone={tone}>{c.health}</Pill></TableCell>
+                <TableCell className="text-muted-foreground">{top[c.name] ?? "—"}</TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </SectionCard>
+  );
+}
+
+/* ---------- 7.2 Sales Performance KPIs & Recent Orders ---------- */
+
+export function SalesPerfKpis() {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      {salesPerfKpis.map((k, i) => {
+        const Icon = iconMap[k.icon] ?? Package;
+        return (
+          <div
+            key={k.key}
+            className={`bp-enter stagger-${(i % 6) + 1} rounded-2xl border border-black/5 bg-white p-4 shadow-sm`}
+          >
+            <div className="flex items-start justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{k.title}</p>
+              <div className={`grid h-7 w-7 place-items-center rounded ${toneIcon[k.tone]}`}>
+                <Icon className="h-3.5 w-3.5" />
+              </div>
+            </div>
+            <p className="mt-2 font-display text-xl font-bold tabular-nums text-foreground">{k.value}</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">{k.sub}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function RecentOrdersTable({ onOpenAnalytics }: { onOpenAnalytics?: () => void }) {
+  return (
+    <SectionCard
+      title="Recent Orders"
+      desc="Latest 5 retail, contractor and trade-account tickets."
+      action={
+        <Button
+          size="sm"
+          className="h-8 gap-1 bg-brand text-xs text-brand-foreground hover:bg-brand/90"
+          onClick={onOpenAnalytics}
+        >
+          Open Full Analytics <ArrowRight className="h-3.5 w-3.5" />
+        </Button>
+      }
+    >
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            {["Order", "Customer", "Type", "Value", "Status", "Payment", "Invoice"].map((h) => (
+              <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {recentOrders.map((o) => (
+            <TableRow key={o.id} className="bp-enter hover:bg-canvas">
+              <TableCell className="font-mono text-xs">{o.id}</TableCell>
+              <TableCell className="font-medium">{o.customer}</TableCell>
+              <TableCell>{o.type}</TableCell>
+              <TableCell className="font-semibold tabular-nums">{o.value}</TableCell>
+              <TableCell><Pill tone={toneForStatus(o.status)}>{o.status}</Pill></TableCell>
+              <TableCell className="text-muted-foreground">{o.payment}</TableCell>
+              <TableCell className="text-muted-foreground">{o.invoice}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </SectionCard>
+  );
+}
+
+/* ---------- 7.3 Inventory KPIs ---------- */
+
+export function InventoryKpiGrid() {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      {inventoryKpis.map((k, i) => {
+        const Icon = iconMap[k.icon] ?? Package;
+        return (
+          <div
+            key={k.key}
+            className={`bp-enter stagger-${(i % 6) + 1} rounded-2xl border border-black/5 bg-white p-4 shadow-sm`}
+          >
+            <div className="flex items-start justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{k.title}</p>
+              <div className={`grid h-7 w-7 place-items-center rounded ${toneIcon[k.tone]}`}>
+                <Icon className="h-3.5 w-3.5" />
+              </div>
+            </div>
+            <p className="mt-2 font-display text-xl font-bold tabular-nums text-foreground">{k.value}</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">{k.sub}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- 7.4 Delivery pipeline board (full, 6 lanes) ---------- */
+
+export function DeliveryPipelineBoard() {
+  const lanes: { key: string; tone: Severity }[] = [
+    { key: "Pending", tone: "warning" },
+    { key: "Assigned", tone: "info" },
+    { key: "Loading", tone: "info" },
+    { key: "Dispatched", tone: "info" },
+    { key: "Delivered", tone: "success" },
+    { key: "Failed / Returned", tone: "critical" },
+  ];
+  return (
+    <SectionCard title="Delivery & Dispatch Board" desc="Driver, vehicle, weight and area on every card.">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        {lanes.map((lane) => {
+          const cards = deliveryDetail.filter((d) => d.status === lane.key);
+          return (
+            <div key={lane.key} className="rounded-xl border border-black/5 concrete-panel p-2.5">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
+                  {lane.key}
+                </span>
+                <Pill tone={lane.tone}>{cards.length}</Pill>
+              </div>
+              <div className="space-y-2">
+                {cards.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-black/10 bg-white/60 p-3 text-center text-[11px] text-muted-foreground">
+                    Empty lane
+                  </div>
+                )}
+                {cards.map((d) => (
+                  <div
+                    key={d.no}
+                    className="bp-enter cursor-pointer rounded-lg border border-black/5 bg-white p-2.5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand/30 hover:shadow"
+                    onClick={() => toast.info(`${d.no} · ${d.customer}`, { description: `${d.materials} · ${d.driver}` })}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-[11px] font-semibold text-brand">{d.no}</span>
+                      <span className="text-[10px] text-muted-foreground">{d.priority}</span>
+                    </div>
+                    <p className="mt-0.5 truncate text-xs font-medium text-foreground">{d.customer}</p>
+                    <p className="truncate text-[11px] text-muted-foreground">{d.materials}</p>
+                    <p className="truncate text-[10px] text-muted-foreground">🚚 {d.driver} · {d.vehicle}</p>
+                    <div className="mt-1 flex items-center justify-between text-[11px]">
+                      <span className="text-muted-foreground">{d.area} · {d.weight}</span>
+                      <span className="font-semibold">{d.amount}</span>
+                    </div>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">Promised {d.promised}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+        {["Assign Driver", "Assign Vehicle", "Start Loading", "Mark Dispatched", "Mark Delivered", "Print Delivery Order", "View Timeline"].map((a) => (
+          <Button key={a} size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => toast.info(a)}>
+            {a}
+          </Button>
+        ))}
+      </div>
+    </SectionCard>
+  );
+}
+
+/* ---------- 7.5 Cashier & Terminal ---------- */
+
+export function CashierKpiGrid() {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      {cashierKpis.map((k, i) => {
+        const Icon = iconMap[k.icon] ?? Package;
+        return (
+          <div
+            key={k.key}
+            className={`bp-enter stagger-${(i % 6) + 1} rounded-2xl border border-black/5 bg-white p-4 shadow-sm`}
+          >
+            <div className="flex items-start justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{k.title}</p>
+              <div className={`grid h-7 w-7 place-items-center rounded ${toneIcon[k.tone]}`}>
+                <Icon className="h-3.5 w-3.5" />
+              </div>
+            </div>
+            <p className="mt-2 font-display text-xl font-bold tabular-nums text-foreground">{k.value}</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">{k.sub}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function TerminalDetailTable() {
+  return (
+    <SectionCard title="Terminal Status" desc="Cashier · shift · sales · sync · printer · card terminal.">
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              {["Terminal", "Cashier", "Shift", "Started", "Tx", "Sales", "Expected", "Sync", "Printer", "Card", "Status"].map((h) => (
+                <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {terminalDetail.map((t) => (
+              <TableRow key={t.term} className="bp-enter hover:bg-canvas">
+                <TableCell className="font-mono text-xs">{t.term}</TableCell>
+                <TableCell className="font-medium">{t.cashier}</TableCell>
+                <TableCell className="font-mono text-xs">{t.shift}</TableCell>
+                <TableCell>{t.started}</TableCell>
+                <TableCell className="tabular-nums">{t.tx}</TableCell>
+                <TableCell className="font-semibold tabular-nums">{t.sales}</TableCell>
+                <TableCell className="tabular-nums text-muted-foreground">{t.expected}</TableCell>
+                <TableCell className="text-muted-foreground">{t.sync}</TableCell>
+                <TableCell className="text-muted-foreground">{t.printer}</TableCell>
+                <TableCell className="text-muted-foreground">{t.card}</TableCell>
+                <TableCell><Pill tone={toneForStatus(t.status)}>{t.status}</Pill></TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {["View Shift", "Print X-Report", "Request Cash Count", "Review Variance", "Recall Parked Sale", "Reassign Cashier"].map((a) => (
+          <Button key={a} size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => toast.info(a)}>
+            {a}
+          </Button>
+        ))}
+      </div>
+    </SectionCard>
+  );
+}
+
+/* ---------- 7.6 Payments & Returns ---------- */
+
+export function PaymentBreakdownTiles() {
+  return (
+    <SectionCard title="Payment Summary" desc="Today's collections by method (Card replaces Mada).">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {paymentBreakdown.map((p, i) => {
+          const Icon = iconMap[p.icon] ?? Receipt;
+          return (
+            <div
+              key={p.method}
+              className={`bp-enter stagger-${(i % 6) + 1} rounded-xl border border-black/5 bg-canvas p-3 transition hover:bg-white hover:shadow-sm`}
+            >
+              <div className="flex items-center justify-between">
+                <span className={`grid h-8 w-8 place-items-center rounded-lg ${toneIcon[p.tone]}`}>
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="text-[10px] text-muted-foreground">{p.tx} tx</span>
+              </div>
+              <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">{p.method}</p>
+              <p className="mt-0.5 font-display text-base font-bold tabular-nums text-foreground">{p.amount}</p>
+            </div>
+          );
+        })}
+      </div>
+    </SectionCard>
+  );
+}
+
+export function ReturnBreakdownTiles() {
+  return (
+    <SectionCard title="Return Summary" desc="Standard, damaged, surplus, exchanges, VAT reversal and restocking.">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+        {returnBreakdown.map((r) => (
+          <div key={r.label} className="rounded-lg border border-black/5 bg-canvas p-2.5">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{r.label}</p>
+            <p className="mt-1 font-display text-sm font-bold tabular-nums text-foreground">{r.value}</p>
+          </div>
+        ))}
+      </div>
+    </SectionCard>
+  );
+}
+
+/* ---------- 7.7 Compliance & Alerts grouped ---------- */
+
+export function AlertsByGroup() {
+  const groups: { sev: Severity; title: string }[] = [
+    { sev: "critical", title: "Critical" },
+    { sev: "warning", title: "Warning" },
+    { sev: "info", title: "Information" },
+  ];
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      {groups.map(({ sev, title }) => {
+        const list = groupedAlerts.filter((a) => a.severity === sev);
+        return (
+          <SectionCard
+            key={sev}
+            title={title}
+            desc={`${list.length} ${title.toLowerCase()} alert${list.length === 1 ? "" : "s"}.`}
+            action={<Pill tone={sev}>{list.length}</Pill>}
+          >
+            <div className="space-y-2">
+              {list.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-black/10 bg-canvas p-4 text-center text-xs text-muted-foreground">
+                  <CheckCircle2 className="mx-auto mb-1 h-4 w-4 text-success" />
+                  All clear
+                </div>
+              ) : (
+                list.map((a, i) => (
+                  <div
+                    key={i}
+                    className="bp-enter rounded-lg border border-black/5 bg-canvas p-2.5 transition hover:bg-white hover:shadow-sm"
+                  >
+                    <div className="flex items-center justify-between">
+                      <Pill tone={sev}>{a.module}</Pill>
+                      <span className="text-[10px] text-muted-foreground">{a.age} ago</span>
+                    </div>
+                    <p className="mt-1.5 text-xs font-medium leading-snug text-foreground">{a.msg}</p>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="mt-1 h-7 px-2 text-[11px] text-brand hover:bg-brand/10 hover:text-brand"
+                      onClick={() => toast.success(a.action, { description: a.msg })}
+                    >
+                      {a.action} <ArrowRight className="ml-1 h-3 w-3" />
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+          </SectionCard>
+        );
+      })}
+    </div>
   );
 }
