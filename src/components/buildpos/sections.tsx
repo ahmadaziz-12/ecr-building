@@ -1493,9 +1493,18 @@ export function TopCategoriesCompact({ onViewAll }: { onViewAll?: () => void }) 
               <TableRow key={c.name} className="bp-enter hover:bg-canvas">
                 <TableCell>
                   <span className="flex items-center gap-2">
-                    <span className={`grid h-6 w-6 place-items-center rounded ${toneIcon.info}`}>
-                      <Icon className="h-3 w-3" />
-                    </span>
+                    {categoryImage[c.name] ? (
+                      <img
+                        src={categoryImage[c.name]}
+                        alt=""
+                        loading="lazy"
+                        className="h-8 w-8 rounded-md object-cover ring-1 ring-black/5 transition hover:scale-110"
+                      />
+                    ) : (
+                      <span className={`grid h-8 w-8 place-items-center rounded-md ${toneIcon.info}`}>
+                        <Icon className="h-4 w-4" />
+                      </span>
+                    )}
                     <span className="font-medium text-foreground">{c.name}</span>
                   </span>
                 </TableCell>
