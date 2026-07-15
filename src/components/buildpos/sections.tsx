@@ -208,24 +208,29 @@ const iconMap: Record<string, ComponentType<{ className?: string }>> = {
 
 export function FilterBar({ compact = false }: { compact?: boolean }) {
   const { values, setValue, reset } = useFilters();
-  const shown = compact ? filterGroups.slice(0, 4) : filterGroups;
-  const dirty = shown.some((g) => values[g.label] !== filterDefaults[g.label]);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const shown = compact ? primaryFilterGroups.slice(0, 4) : primaryFilterGroups;
+  const allGroups = [...primaryFilterGroups, ...moreFilterGroups];
+  const activeChips = allGroups
+    .filter((g) => values[g.label] && values[g.label] !== filterDefaults[g.label])
+    .map((g) => ({ label: g.label, value: values[g.label] }));
+
   return (
     <div className="rounded-2xl border border-brand/15 bg-gradient-to-r from-brand/5 via-white to-teal/5 p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="grid h-6 w-6 place-items-center rounded-md bg-brand/10 text-brand">
-            <Search className="h-3.5 w-3.5" />
+            <Filter className="h-3.5 w-3.5" />
           </span>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/80">Filters</h3>
-          <span className="text-[11px] text-muted-foreground">Controls all cards, charts & tables below</span>
-          {dirty && (
-            <span className="ml-2 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-semibold text-[oklch(0.4_0.13_70)]">
-              Active
+          <span className="hidden text-[11px] text-muted-foreground sm:inline">Controls all cards, charts & tables below</span>
+          {activeChips.length > 0 && (
+            <span className="ml-1 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-semibold text-[oklch(0.4_0.13_70)]">
+              {activeChips.length} active
             </span>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           <Button
             size="sm"
             variant="ghost"
@@ -239,13 +244,36 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
           </Button>
           <Button
             size="sm"
+            variant="ghost"
+            className="h-8 gap-1 text-xs text-muted-foreground hover:text-brand"
+            onClick={() => toast.info("View saved", { description: "This filter set has been saved." })}
+          >
+            <Bookmark className="h-3.5 w-3.5" /> Save View
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 gap-1 text-xs text-muted-foreground hover:text-brand"
+            onClick={() => toast.success("Data refreshed", { description: "Latest POS feed pulled." })}
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Refresh
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 gap-1 text-xs text-muted-foreground hover:text-brand"
+            onClick={() => toast.success("Export queued", { description: "CSV export will be emailed." })}
+          >
+            <Download className="h-3.5 w-3.5" /> Export
+          </Button>
+          <Button
+            size="sm"
             className="h-8 bg-brand text-brand-foreground hover:bg-brand/90"
             onClick={() => {
-              const active = shown
-                .filter((g) => values[g.label] !== filterDefaults[g.label])
-                .map((g) => `${g.label}: ${values[g.label]}`);
               toast.success("Filters applied", {
-                description: active.length ? active.join(" · ") : "No changes from defaults.",
+                description: activeChips.length
+                  ? activeChips.map((c) => `${c.label}: ${c.value}`).join(" · ")
+                  : "Default view.",
               });
             }}
           >
@@ -253,15 +281,13 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
           </Button>
         </div>
       </div>
-      <div className="flex flex-wrap gap-2">
+
+      <div className="flex flex-wrap items-end gap-2">
         {shown.map((g) => (
           <div key={g.label} className="flex flex-col gap-1">
             <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{g.label}</label>
-            <Select
-              value={values[g.label]}
-              onValueChange={(v) => setValue(g.label, v)}
-            >
-              <SelectTrigger className="h-8 w-auto min-w-[130px] border-black/10 bg-white text-xs transition hover:border-brand/40">
+            <Select value={values[g.label]} onValueChange={(v) => setValue(g.label, v)}>
+              <SelectTrigger className="h-8 w-auto min-w-[150px] border-black/10 bg-white text-xs transition hover:border-brand/40">
                 <SelectValue placeholder={g.label} />
               </SelectTrigger>
               <SelectContent>
@@ -272,7 +298,51 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             </Select>
           </div>
         ))}
+        <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" className="h-8 gap-1 border-dashed text-xs">
+              <Plus className="h-3.5 w-3.5" /> More Filters
+              <ChevronDown className="h-3.5 w-3.5" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-80 p-3" align="end">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Advanced filters</p>
+            <div className="grid grid-cols-1 gap-2">
+              {moreFilterGroups.map((g) => (
+                <div key={g.label} className="flex items-center justify-between gap-2">
+                  <label className="text-[11px] font-medium text-foreground/80">{g.label}</label>
+                  <Select value={values[g.label]} onValueChange={(v) => setValue(g.label, v)}>
+                    <SelectTrigger className="h-8 w-40 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {g.options.map((o) => (
+                        <SelectItem key={o} value={o}>{o}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
+
+      {activeChips.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {activeChips.map((c) => (
+            <button
+              key={c.label}
+              type="button"
+              onClick={() => setValue(c.label, filterDefaults[c.label])}
+              className="bp-fade group inline-flex items-center gap-1 rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[11px] font-medium text-brand transition hover:bg-brand/15"
+            >
+              <span className="text-brand/70">{c.label}:</span> {c.value}
+              <X className="h-3 w-3 opacity-60 transition group-hover:opacity-100" />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
