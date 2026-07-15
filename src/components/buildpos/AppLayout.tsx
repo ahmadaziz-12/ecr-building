@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 import logoAsset from "@/assets/mimony-logo.png.asset.json";
 import { statusBar } from "@/lib/buildpos/data";
+import { useLocaleStore } from "@/lib/store/locale";
 
 type Item = { to: string; label: string; icon: typeof LayoutDashboard };
 type Group = { name: string; items: Item[]; collapsed?: boolean };
@@ -103,18 +104,26 @@ const nav: Group[] = [
   },
   {
     name: "Delivery",
-    items: [{ to: "/coming-soon", label: "Delivery & Dispatch", icon: Truck }],
+    items: [
+      { to: "/delivery/dashboard", label: "Delivery Dashboard", icon: Truck },
+      { to: "/delivery/pipeline", label: "Delivery Pipeline", icon: ArrowLeftRight },
+      { to: "/delivery/orders", label: "Delivery Orders", icon: ClipboardList },
+      { to: "/delivery/drivers", label: "Driver Assignments", icon: UserRound },
+      { to: "/delivery/vehicles", label: "Vehicle Assignments", icon: Truck },
+      { to: "/delivery/zones", label: "Delivery Zones", icon: Building2 },
+      { to: "/delivery/logs", label: "Delivery Activity Logs", icon: Activity },
+    ],
   },
   {
     name: "HRMS",
     items: [
-      { to: "/coming-soon", label: "HR Dashboard", icon: LayoutDashboard },
-      { to: "/coming-soon", label: "Employees", icon: UserRound },
-      { to: "/coming-soon", label: "Departments", icon: Building2 },
-      { to: "/coming-soon", label: "Shift & Attendance", icon: CalendarDays },
-      { to: "/coming-soon", label: "Leave Management", icon: CalendarClock },
-      { to: "/coming-soon", label: "Documents & Contracts", icon: FileSignature },
-      { to: "/coming-soon", label: "HR Activity Logs", icon: Activity },
+      { to: "/hrms/dashboard", label: "HR Dashboard", icon: LayoutDashboard },
+      { to: "/hrms/employees", label: "Employees", icon: UserRound },
+      { to: "/hrms/departments", label: "Departments", icon: Building2 },
+      { to: "/hrms/attendance", label: "Shift & Attendance", icon: CalendarDays },
+      { to: "/hrms/leave", label: "Leave Management", icon: CalendarClock },
+      { to: "/hrms/documents", label: "Documents & Contracts", icon: FileSignature },
+      { to: "/hrms/logs", label: "HR Activity Logs", icon: Activity },
     ],
   },
   {
@@ -157,6 +166,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(nav.map((g) => [g.name, true]))
   );
+  const locale = useLocaleStore((s) => s.locale);
+  const toggleLocale = useLocaleStore((s) => s.toggle);
 
   return (
     <div className="flex min-h-screen bg-canvas font-sans text-foreground">
@@ -291,8 +302,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <span className="hidden items-center gap-1.5 rounded-full border border-brand/20 bg-brand/10 px-2.5 py-0.5 text-xs font-medium text-brand md:inline-flex">
               <Shield className="h-3 w-3" /> ZATCA {statusBar.zatca}
             </span>
-            <button className="hidden h-9 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 text-xs font-medium text-foreground hover:bg-canvas md:inline-flex">
-              <Languages className="h-3.5 w-3.5 text-brand" /> {statusBar.language}
+            <button
+              onClick={toggleLocale}
+              title="Toggle Arabic / English"
+              className="hidden h-9 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 text-xs font-medium text-foreground hover:bg-canvas md:inline-flex"
+            >
+              <Languages className="h-3.5 w-3.5 text-brand" /> {locale === "ar" ? "العربية" : "English"}
             </button>
             <button className="relative grid h-9 w-9 place-items-center rounded-lg border border-black/10 bg-white text-foreground hover:bg-canvas">
               <Bell className="h-4 w-4" />

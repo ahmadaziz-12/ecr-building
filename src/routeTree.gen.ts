@@ -32,11 +32,25 @@ import { Route as InsightsSalesRouteImport } from './routes/insights.sales'
 import { Route as InsightsReportsRouteImport } from './routes/insights.reports'
 import { Route as InsightsKpiRouteImport } from './routes/insights.kpi'
 import { Route as InsightsBiRouteImport } from './routes/insights.bi'
+import { Route as HrmsLogsRouteImport } from './routes/hrms.logs'
+import { Route as HrmsLeaveRouteImport } from './routes/hrms.leave'
+import { Route as HrmsEmployeesRouteImport } from './routes/hrms.employees'
+import { Route as HrmsDocumentsRouteImport } from './routes/hrms.documents'
+import { Route as HrmsDepartmentsRouteImport } from './routes/hrms.departments'
+import { Route as HrmsDashboardRouteImport } from './routes/hrms.dashboard'
+import { Route as HrmsAttendanceRouteImport } from './routes/hrms.attendance'
 import { Route as FinanceTaxZatcaRouteImport } from './routes/finance.tax-zatca'
 import { Route as FinanceReturnsRouteImport } from './routes/finance.returns'
 import { Route as FinancePurchaseOrdersRouteImport } from './routes/finance.purchase-orders'
 import { Route as FinancePricingRouteImport } from './routes/finance.pricing'
 import { Route as FinanceExpensesRouteImport } from './routes/finance.expenses'
+import { Route as DeliveryZonesRouteImport } from './routes/delivery.zones'
+import { Route as DeliveryVehiclesRouteImport } from './routes/delivery.vehicles'
+import { Route as DeliveryPipelineRouteImport } from './routes/delivery.pipeline'
+import { Route as DeliveryOrdersRouteImport } from './routes/delivery.orders'
+import { Route as DeliveryLogsRouteImport } from './routes/delivery.logs'
+import { Route as DeliveryDriversRouteImport } from './routes/delivery.drivers'
+import { Route as DeliveryDashboardRouteImport } from './routes/delivery.dashboard'
 import { Route as AdminZatcaSettingsRouteImport } from './routes/admin.zatca-settings'
 import { Route as AdminZatcaInvoicesRouteImport } from './routes/admin.zatca-invoices'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
@@ -166,6 +180,41 @@ const InsightsBiRoute = InsightsBiRouteImport.update({
   path: '/insights/bi',
   getParentRoute: () => rootRouteImport,
 } as any)
+const HrmsLogsRoute = HrmsLogsRouteImport.update({
+  id: '/hrms/logs',
+  path: '/hrms/logs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsLeaveRoute = HrmsLeaveRouteImport.update({
+  id: '/hrms/leave',
+  path: '/hrms/leave',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsEmployeesRoute = HrmsEmployeesRouteImport.update({
+  id: '/hrms/employees',
+  path: '/hrms/employees',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsDocumentsRoute = HrmsDocumentsRouteImport.update({
+  id: '/hrms/documents',
+  path: '/hrms/documents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsDepartmentsRoute = HrmsDepartmentsRouteImport.update({
+  id: '/hrms/departments',
+  path: '/hrms/departments',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsDashboardRoute = HrmsDashboardRouteImport.update({
+  id: '/hrms/dashboard',
+  path: '/hrms/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsAttendanceRoute = HrmsAttendanceRouteImport.update({
+  id: '/hrms/attendance',
+  path: '/hrms/attendance',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FinanceTaxZatcaRoute = FinanceTaxZatcaRouteImport.update({
   id: '/finance/tax-zatca',
   path: '/finance/tax-zatca',
@@ -189,6 +238,41 @@ const FinancePricingRoute = FinancePricingRouteImport.update({
 const FinanceExpensesRoute = FinanceExpensesRouteImport.update({
   id: '/finance/expenses',
   path: '/finance/expenses',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryZonesRoute = DeliveryZonesRouteImport.update({
+  id: '/delivery/zones',
+  path: '/delivery/zones',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryVehiclesRoute = DeliveryVehiclesRouteImport.update({
+  id: '/delivery/vehicles',
+  path: '/delivery/vehicles',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryPipelineRoute = DeliveryPipelineRouteImport.update({
+  id: '/delivery/pipeline',
+  path: '/delivery/pipeline',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryOrdersRoute = DeliveryOrdersRouteImport.update({
+  id: '/delivery/orders',
+  path: '/delivery/orders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryLogsRoute = DeliveryLogsRouteImport.update({
+  id: '/delivery/logs',
+  path: '/delivery/logs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryDriversRoute = DeliveryDriversRouteImport.update({
+  id: '/delivery/drivers',
+  path: '/delivery/drivers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryDashboardRoute = DeliveryDashboardRouteImport.update({
+  id: '/delivery/dashboard',
+  path: '/delivery/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminZatcaSettingsRoute = AdminZatcaSettingsRouteImport.update({
@@ -274,11 +358,25 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof AdminUsersRoute
   '/admin/zatca-invoices': typeof AdminZatcaInvoicesRoute
   '/admin/zatca-settings': typeof AdminZatcaSettingsRoute
+  '/delivery/dashboard': typeof DeliveryDashboardRoute
+  '/delivery/drivers': typeof DeliveryDriversRoute
+  '/delivery/logs': typeof DeliveryLogsRoute
+  '/delivery/orders': typeof DeliveryOrdersRoute
+  '/delivery/pipeline': typeof DeliveryPipelineRoute
+  '/delivery/vehicles': typeof DeliveryVehiclesRoute
+  '/delivery/zones': typeof DeliveryZonesRoute
   '/finance/expenses': typeof FinanceExpensesRoute
   '/finance/pricing': typeof FinancePricingRoute
   '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
   '/finance/returns': typeof FinanceReturnsRoute
   '/finance/tax-zatca': typeof FinanceTaxZatcaRoute
+  '/hrms/attendance': typeof HrmsAttendanceRoute
+  '/hrms/dashboard': typeof HrmsDashboardRoute
+  '/hrms/departments': typeof HrmsDepartmentsRoute
+  '/hrms/documents': typeof HrmsDocumentsRoute
+  '/hrms/employees': typeof HrmsEmployeesRoute
+  '/hrms/leave': typeof HrmsLeaveRoute
+  '/hrms/logs': typeof HrmsLogsRoute
   '/insights/bi': typeof InsightsBiRoute
   '/insights/kpi': typeof InsightsKpiRoute
   '/insights/reports': typeof InsightsReportsRoute
@@ -317,11 +415,25 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersRoute
   '/admin/zatca-invoices': typeof AdminZatcaInvoicesRoute
   '/admin/zatca-settings': typeof AdminZatcaSettingsRoute
+  '/delivery/dashboard': typeof DeliveryDashboardRoute
+  '/delivery/drivers': typeof DeliveryDriversRoute
+  '/delivery/logs': typeof DeliveryLogsRoute
+  '/delivery/orders': typeof DeliveryOrdersRoute
+  '/delivery/pipeline': typeof DeliveryPipelineRoute
+  '/delivery/vehicles': typeof DeliveryVehiclesRoute
+  '/delivery/zones': typeof DeliveryZonesRoute
   '/finance/expenses': typeof FinanceExpensesRoute
   '/finance/pricing': typeof FinancePricingRoute
   '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
   '/finance/returns': typeof FinanceReturnsRoute
   '/finance/tax-zatca': typeof FinanceTaxZatcaRoute
+  '/hrms/attendance': typeof HrmsAttendanceRoute
+  '/hrms/dashboard': typeof HrmsDashboardRoute
+  '/hrms/departments': typeof HrmsDepartmentsRoute
+  '/hrms/documents': typeof HrmsDocumentsRoute
+  '/hrms/employees': typeof HrmsEmployeesRoute
+  '/hrms/leave': typeof HrmsLeaveRoute
+  '/hrms/logs': typeof HrmsLogsRoute
   '/insights/bi': typeof InsightsBiRoute
   '/insights/kpi': typeof InsightsKpiRoute
   '/insights/reports': typeof InsightsReportsRoute
@@ -361,11 +473,25 @@ export interface FileRoutesById {
   '/admin/users': typeof AdminUsersRoute
   '/admin/zatca-invoices': typeof AdminZatcaInvoicesRoute
   '/admin/zatca-settings': typeof AdminZatcaSettingsRoute
+  '/delivery/dashboard': typeof DeliveryDashboardRoute
+  '/delivery/drivers': typeof DeliveryDriversRoute
+  '/delivery/logs': typeof DeliveryLogsRoute
+  '/delivery/orders': typeof DeliveryOrdersRoute
+  '/delivery/pipeline': typeof DeliveryPipelineRoute
+  '/delivery/vehicles': typeof DeliveryVehiclesRoute
+  '/delivery/zones': typeof DeliveryZonesRoute
   '/finance/expenses': typeof FinanceExpensesRoute
   '/finance/pricing': typeof FinancePricingRoute
   '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
   '/finance/returns': typeof FinanceReturnsRoute
   '/finance/tax-zatca': typeof FinanceTaxZatcaRoute
+  '/hrms/attendance': typeof HrmsAttendanceRoute
+  '/hrms/dashboard': typeof HrmsDashboardRoute
+  '/hrms/departments': typeof HrmsDepartmentsRoute
+  '/hrms/documents': typeof HrmsDocumentsRoute
+  '/hrms/employees': typeof HrmsEmployeesRoute
+  '/hrms/leave': typeof HrmsLeaveRoute
+  '/hrms/logs': typeof HrmsLogsRoute
   '/insights/bi': typeof InsightsBiRoute
   '/insights/kpi': typeof InsightsKpiRoute
   '/insights/reports': typeof InsightsReportsRoute
@@ -406,11 +532,25 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/admin/zatca-invoices'
     | '/admin/zatca-settings'
+    | '/delivery/dashboard'
+    | '/delivery/drivers'
+    | '/delivery/logs'
+    | '/delivery/orders'
+    | '/delivery/pipeline'
+    | '/delivery/vehicles'
+    | '/delivery/zones'
     | '/finance/expenses'
     | '/finance/pricing'
     | '/finance/purchase-orders'
     | '/finance/returns'
     | '/finance/tax-zatca'
+    | '/hrms/attendance'
+    | '/hrms/dashboard'
+    | '/hrms/departments'
+    | '/hrms/documents'
+    | '/hrms/employees'
+    | '/hrms/leave'
+    | '/hrms/logs'
     | '/insights/bi'
     | '/insights/kpi'
     | '/insights/reports'
@@ -449,11 +589,25 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/admin/zatca-invoices'
     | '/admin/zatca-settings'
+    | '/delivery/dashboard'
+    | '/delivery/drivers'
+    | '/delivery/logs'
+    | '/delivery/orders'
+    | '/delivery/pipeline'
+    | '/delivery/vehicles'
+    | '/delivery/zones'
     | '/finance/expenses'
     | '/finance/pricing'
     | '/finance/purchase-orders'
     | '/finance/returns'
     | '/finance/tax-zatca'
+    | '/hrms/attendance'
+    | '/hrms/dashboard'
+    | '/hrms/departments'
+    | '/hrms/documents'
+    | '/hrms/employees'
+    | '/hrms/leave'
+    | '/hrms/logs'
     | '/insights/bi'
     | '/insights/kpi'
     | '/insights/reports'
@@ -492,11 +646,25 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/admin/zatca-invoices'
     | '/admin/zatca-settings'
+    | '/delivery/dashboard'
+    | '/delivery/drivers'
+    | '/delivery/logs'
+    | '/delivery/orders'
+    | '/delivery/pipeline'
+    | '/delivery/vehicles'
+    | '/delivery/zones'
     | '/finance/expenses'
     | '/finance/pricing'
     | '/finance/purchase-orders'
     | '/finance/returns'
     | '/finance/tax-zatca'
+    | '/hrms/attendance'
+    | '/hrms/dashboard'
+    | '/hrms/departments'
+    | '/hrms/documents'
+    | '/hrms/employees'
+    | '/hrms/leave'
+    | '/hrms/logs'
     | '/insights/bi'
     | '/insights/kpi'
     | '/insights/reports'
@@ -536,11 +704,25 @@ export interface RootRouteChildren {
   AdminUsersRoute: typeof AdminUsersRoute
   AdminZatcaInvoicesRoute: typeof AdminZatcaInvoicesRoute
   AdminZatcaSettingsRoute: typeof AdminZatcaSettingsRoute
+  DeliveryDashboardRoute: typeof DeliveryDashboardRoute
+  DeliveryDriversRoute: typeof DeliveryDriversRoute
+  DeliveryLogsRoute: typeof DeliveryLogsRoute
+  DeliveryOrdersRoute: typeof DeliveryOrdersRoute
+  DeliveryPipelineRoute: typeof DeliveryPipelineRoute
+  DeliveryVehiclesRoute: typeof DeliveryVehiclesRoute
+  DeliveryZonesRoute: typeof DeliveryZonesRoute
   FinanceExpensesRoute: typeof FinanceExpensesRoute
   FinancePricingRoute: typeof FinancePricingRoute
   FinancePurchaseOrdersRoute: typeof FinancePurchaseOrdersRoute
   FinanceReturnsRoute: typeof FinanceReturnsRoute
   FinanceTaxZatcaRoute: typeof FinanceTaxZatcaRoute
+  HrmsAttendanceRoute: typeof HrmsAttendanceRoute
+  HrmsDashboardRoute: typeof HrmsDashboardRoute
+  HrmsDepartmentsRoute: typeof HrmsDepartmentsRoute
+  HrmsDocumentsRoute: typeof HrmsDocumentsRoute
+  HrmsEmployeesRoute: typeof HrmsEmployeesRoute
+  HrmsLeaveRoute: typeof HrmsLeaveRoute
+  HrmsLogsRoute: typeof HrmsLogsRoute
   InsightsBiRoute: typeof InsightsBiRoute
   InsightsKpiRoute: typeof InsightsKpiRoute
   InsightsReportsRoute: typeof InsightsReportsRoute
@@ -726,6 +908,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InsightsBiRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/hrms/logs': {
+      id: '/hrms/logs'
+      path: '/hrms/logs'
+      fullPath: '/hrms/logs'
+      preLoaderRoute: typeof HrmsLogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/leave': {
+      id: '/hrms/leave'
+      path: '/hrms/leave'
+      fullPath: '/hrms/leave'
+      preLoaderRoute: typeof HrmsLeaveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/employees': {
+      id: '/hrms/employees'
+      path: '/hrms/employees'
+      fullPath: '/hrms/employees'
+      preLoaderRoute: typeof HrmsEmployeesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/documents': {
+      id: '/hrms/documents'
+      path: '/hrms/documents'
+      fullPath: '/hrms/documents'
+      preLoaderRoute: typeof HrmsDocumentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/departments': {
+      id: '/hrms/departments'
+      path: '/hrms/departments'
+      fullPath: '/hrms/departments'
+      preLoaderRoute: typeof HrmsDepartmentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/dashboard': {
+      id: '/hrms/dashboard'
+      path: '/hrms/dashboard'
+      fullPath: '/hrms/dashboard'
+      preLoaderRoute: typeof HrmsDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/attendance': {
+      id: '/hrms/attendance'
+      path: '/hrms/attendance'
+      fullPath: '/hrms/attendance'
+      preLoaderRoute: typeof HrmsAttendanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/finance/tax-zatca': {
       id: '/finance/tax-zatca'
       path: '/finance/tax-zatca'
@@ -759,6 +990,55 @@ declare module '@tanstack/react-router' {
       path: '/finance/expenses'
       fullPath: '/finance/expenses'
       preLoaderRoute: typeof FinanceExpensesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/zones': {
+      id: '/delivery/zones'
+      path: '/delivery/zones'
+      fullPath: '/delivery/zones'
+      preLoaderRoute: typeof DeliveryZonesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/vehicles': {
+      id: '/delivery/vehicles'
+      path: '/delivery/vehicles'
+      fullPath: '/delivery/vehicles'
+      preLoaderRoute: typeof DeliveryVehiclesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/pipeline': {
+      id: '/delivery/pipeline'
+      path: '/delivery/pipeline'
+      fullPath: '/delivery/pipeline'
+      preLoaderRoute: typeof DeliveryPipelineRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/orders': {
+      id: '/delivery/orders'
+      path: '/delivery/orders'
+      fullPath: '/delivery/orders'
+      preLoaderRoute: typeof DeliveryOrdersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/logs': {
+      id: '/delivery/logs'
+      path: '/delivery/logs'
+      fullPath: '/delivery/logs'
+      preLoaderRoute: typeof DeliveryLogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/drivers': {
+      id: '/delivery/drivers'
+      path: '/delivery/drivers'
+      fullPath: '/delivery/drivers'
+      preLoaderRoute: typeof DeliveryDriversRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/dashboard': {
+      id: '/delivery/dashboard'
+      path: '/delivery/dashboard'
+      fullPath: '/delivery/dashboard'
+      preLoaderRoute: typeof DeliveryDashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/zatca-settings': {
@@ -872,11 +1152,25 @@ const rootRouteChildren: RootRouteChildren = {
   AdminUsersRoute: AdminUsersRoute,
   AdminZatcaInvoicesRoute: AdminZatcaInvoicesRoute,
   AdminZatcaSettingsRoute: AdminZatcaSettingsRoute,
+  DeliveryDashboardRoute: DeliveryDashboardRoute,
+  DeliveryDriversRoute: DeliveryDriversRoute,
+  DeliveryLogsRoute: DeliveryLogsRoute,
+  DeliveryOrdersRoute: DeliveryOrdersRoute,
+  DeliveryPipelineRoute: DeliveryPipelineRoute,
+  DeliveryVehiclesRoute: DeliveryVehiclesRoute,
+  DeliveryZonesRoute: DeliveryZonesRoute,
   FinanceExpensesRoute: FinanceExpensesRoute,
   FinancePricingRoute: FinancePricingRoute,
   FinancePurchaseOrdersRoute: FinancePurchaseOrdersRoute,
   FinanceReturnsRoute: FinanceReturnsRoute,
   FinanceTaxZatcaRoute: FinanceTaxZatcaRoute,
+  HrmsAttendanceRoute: HrmsAttendanceRoute,
+  HrmsDashboardRoute: HrmsDashboardRoute,
+  HrmsDepartmentsRoute: HrmsDepartmentsRoute,
+  HrmsDocumentsRoute: HrmsDocumentsRoute,
+  HrmsEmployeesRoute: HrmsEmployeesRoute,
+  HrmsLeaveRoute: HrmsLeaveRoute,
+  HrmsLogsRoute: HrmsLogsRoute,
   InsightsBiRoute: InsightsBiRoute,
   InsightsKpiRoute: InsightsKpiRoute,
   InsightsReportsRoute: InsightsReportsRoute,
@@ -901,3 +1195,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
