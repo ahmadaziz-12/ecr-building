@@ -15,6 +15,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AppLayout } from "../components/buildpos/AppLayout";
 import { Toaster } from "@/components/ui/sonner";
 import { FilterProvider } from "@/lib/buildpos/filter-context";
+import { LocaleEffect } from "@/lib/store/locale";
 
 function NotFoundComponent() {
   return (
@@ -145,6 +146,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <FilterProvider>
+        <LocaleEffect />
         {isPublic ? (
           <Outlet />
         ) : (
