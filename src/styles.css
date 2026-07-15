@@ -324,6 +324,59 @@
   animation: pos-ticker 22s linear infinite;
 }
 
+/* Construction-themed motion */
+@keyframes bp-float {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(-12px) translateX(6px); }
+}
+@utility bp-float {
+  animation: bp-float 6s ease-in-out infinite;
+}
+@utility bp-float-slow {
+  animation: bp-float 10s ease-in-out infinite;
+}
+
+@keyframes bp-crane-swing {
+  0%, 100% { transform: rotate(-2deg); }
+  50% { transform: rotate(2deg); }
+}
+@utility bp-crane-swing {
+  animation: bp-crane-swing 5s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+@keyframes bp-gear-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@utility bp-gear-spin {
+  animation: bp-gear-spin 8s linear infinite;
+}
+@utility bp-gear-spin-reverse {
+  animation: bp-gear-spin 8s linear infinite reverse;
+}
+
+@keyframes bp-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@utility bp-shimmer {
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--brand-glow) 30%, transparent), transparent);
+  background-size: 200% 100%;
+  animation: bp-shimmer 2.5s linear infinite;
+}
+
+@keyframes bp-hammer-tap {
+  0%, 100% { transform: rotate(0deg); }
+  40% { transform: rotate(-25deg); }
+  55% { transform: rotate(5deg); }
+  70% { transform: rotate(0deg); }
+}
+@utility bp-hammer-tap {
+  animation: bp-hammer-tap 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  transform-origin: bottom center;
+}
+
 /* Accessibility — honor user's reduced-motion preference for BuildPOS anims. */
 @media (prefers-reduced-motion: reduce) {
   .bp-enter,
@@ -336,7 +389,14 @@
   .pos-blink,
   .pos-slide-up,
   .pos-pop,
-  .pos-ticker {
+  .pos-ticker,
+  .bp-float,
+  .bp-float-slow,
+  .bp-crane-swing,
+  .bp-gear-spin,
+  .bp-gear-spin-reverse,
+  .bp-shimmer,
+  .bp-hammer-tap {
     animation: none !important;
     transition: none !important;
   }
