@@ -1,18 +1,148 @@
 import type { Severity } from "./format";
 
 export const statusBar = {
-  business: "Mi Money Mart ECR — Building Materials",
+  business: "Al Binaa Building Materials Trading",
   branch: "Riyadh Main Branch",
+  branchCode: "B-RYD-001",
   terminal: "POS-01",
   user: "Ahmed Al-Harbi",
   role: "Store Manager",
   businessDate: "02 July 2026",
-  shift: "Open",
+  shift: "Open since 08:00 AM",
   sync: "Online",
+  pendingSync: 2,
   zatca: "Connected",
   currency: "SAR / ر.س",
+  language: "EN",
   lastUpdated: "02:45 PM",
 };
+
+/* ================= Dashboard Overview (spec 7.1) ================= */
+
+export const overviewKpis = [
+  { key: "sales", title: "Today's Material Sales", value: "SAR 48,920", sub: "+18.2% vs yesterday", tone: "success" as Severity, icon: "trending" },
+  { key: "net", title: "Net Sales", value: "SAR 44,380", sub: "After discounts & returns", tone: "info" as Severity, icon: "receipt" },
+  { key: "tx", title: "Transactions", value: "286", sub: "Avg basket SAR 171", tone: "info" as Severity, icon: "cart" },
+  { key: "low", title: "Low Stock Materials", value: "34 SKUs", sub: "12 require replenishment", tone: "warning" as Severity, icon: "package" },
+  { key: "del", title: "Pending Deliveries", value: "18", sub: "5 due before 6:00 PM", tone: "warning" as Severity, icon: "truck" },
+  { key: "shift", title: "Open Shifts", value: "6", sub: "1 shift requires review", tone: "info" as Severity, icon: "users" },
+];
+
+export const dispatchPipeline = [
+  { key: "Pending", count: 7, tone: "warning" as Severity },
+  { key: "Assigned", count: 4, tone: "info" as Severity },
+  { key: "Loading", count: 3, tone: "info" as Severity },
+  { key: "Dispatched", count: 4, tone: "info" as Severity },
+  { key: "Delivered", count: 22, tone: "success" as Severity },
+  { key: "Failed / Returned", count: 2, tone: "critical" as Severity },
+];
+
+export const cashierWorkspaceSummary = {
+  activeTerminals: "5 of 6",
+  openShifts: 6,
+  parkedSales: 7,
+  pendingApprovals: 3,
+  offlineTerminals: "POS-03",
+  cashVariance: "SH-1044 · SAR -40",
+  quickActions: ["Start Sale", "Recall Parked Sale", "Create Quotation", "Stock Check", "Open Cashier Workspace"],
+};
+
+/* ================= Sales Performance tab (spec 7.2) ================= */
+
+export const salesPerfKpis = [
+  { key: "gross", title: "Gross Sales", value: "SAR 51,860", sub: "Today", tone: "success" as Severity, icon: "trending" },
+  { key: "net", title: "Net Sales", value: "SAR 44,380", sub: "After discounts", tone: "info" as Severity, icon: "receipt" },
+  { key: "discounts", title: "Discounts", value: "SAR 1,980", sub: "3.8% of gross", tone: "info" as Severity, icon: "chart" },
+  { key: "returns", title: "Completed Returns", value: "SAR 3,240", sub: "12 items", tone: "warning" as Severity, icon: "history" },
+  { key: "basket", title: "Average Basket", value: "SAR 171", sub: "Retail + contractor", tone: "info" as Severity, icon: "cart" },
+  { key: "contractor", title: "Contractor Sales", value: "SAR 21,430", sub: "41% of gross", tone: "success" as Severity, icon: "users" },
+];
+
+export const recentOrders = [
+  { id: "ORD-2026-8091", customer: "Al Noor Contracting", type: "Contractor", value: "SAR 11,850", status: "Delivery Planned", payment: "Account Credit", invoice: "Full Tax Invoice" },
+  { id: "ORD-2026-8092", customer: "Walk-in Customer", type: "Retail", value: "SAR 2,300", status: "Completed", payment: "Card", invoice: "Simplified Invoice" },
+  { id: "ORD-2026-8093", customer: "Modern Villas Est.", type: "Contractor", value: "SAR 4,780", status: "Pick Ready", payment: "Bank Transfer", invoice: "Full Tax Invoice" },
+  { id: "ORD-2026-8094", customer: "Gulf Build Company", type: "Contractor", value: "SAR 22,400", status: "Credit Hold", payment: "Account Credit", invoice: "Pending" },
+  { id: "ORD-2026-8095", customer: "Abdullah Trading", type: "Trade Account", value: "SAR 1,950", status: "Completed", payment: "Cash", invoice: "Simplified Invoice" },
+];
+
+/* ================= Inventory Health tab (spec 7.3) ================= */
+
+export const inventoryKpis = [
+  { key: "avail", title: "Available Stock", value: "12,850", sub: "units on hand", tone: "success" as Severity, icon: "package" },
+  { key: "res", title: "Reserved Stock", value: "1,240", sub: "units held", tone: "info" as Severity, icon: "layers" },
+  { key: "low", title: "Low Stock", value: "34", sub: "SKUs below reorder", tone: "warning" as Severity, icon: "alert" },
+  { key: "oos", title: "Out of Stock", value: "11", sub: "SKUs unavailable", tone: "critical" as Severity, icon: "alert" },
+  { key: "quar", title: "Quarantine", value: "27", sub: "units on hold", tone: "warning" as Severity, icon: "shield" },
+  { key: "trf", title: "Pending Transfers", value: "9", sub: "between branches", tone: "info" as Severity, icon: "truck" },
+];
+
+/* ================= Delivery pipeline detail (spec 7.4) ================= */
+
+export const deliveryDetail = [
+  { no: "DO-1021", order: "ORD-2026-8091", customer: "Al Noor Contracting", materials: "Cement + Steel", qty: "40 bags + 12 bundles", weight: "7.8 t", area: "Riyadh North", promised: "Today, 4:00 PM", driver: "Hamad Al-Qahtani", vehicle: "TRK-07 · Flatbed", status: "Assigned", amount: "SAR 7,850", priority: "High" },
+  { no: "DO-1022", order: "ORD-2026-8092", customer: "Walk-in Customer", materials: "Grey Tiles", qty: "32 boxes", weight: "1.9 t", area: "Olaya", promised: "Today, 6:00 PM", driver: "Unassigned", vehicle: "Unassigned", status: "Pending", amount: "SAR 2,300", priority: "Standard" },
+  { no: "DO-1023", order: "ORD-2026-8093", customer: "Modern Villas Est.", materials: "Paint + Tools", qty: "16 tins + 8 units", weight: "0.85 t", area: "Al Malqa", promised: "Today, 5:30 PM", driver: "Saad Al-Dossari", vehicle: "VAN-02", status: "Dispatched", amount: "SAR 4,780", priority: "High" },
+  { no: "DO-1024", order: "ORD-2026-8084", customer: "Gulf Build Company", materials: "Cement Pallets", qty: "5 pallets", weight: "10 t", area: "Exit 8", promised: "Today, 3:00 PM", driver: "Khaled Al-Harthi", vehicle: "TRK-03 · Flatbed", status: "Delivered", amount: "SAR 11,500", priority: "High" },
+  { no: "DO-1025", order: "ORD-2026-8088", customer: "Abdullah Trading", materials: "Plumbing Materials", qty: "48 pieces", weight: "0.55 t", area: "Dammam Road", promised: "Today, 2:30 PM", driver: "Faisal Al-Mutairi", vehicle: "VAN-05", status: "Failed / Returned", amount: "SAR 1,950", priority: "Standard" },
+];
+
+/* ================= Cashier & Terminal tab (spec 7.5) ================= */
+
+export const cashierKpis = [
+  { key: "act", title: "Active Terminals", value: "5", sub: "of 6 total", tone: "success" as Severity, icon: "monitor" },
+  { key: "off", title: "Offline Terminals", value: "1", sub: "POS-03", tone: "critical" as Severity, icon: "alert" },
+  { key: "op", title: "Open Shifts", value: "6", sub: "in progress", tone: "info" as Severity, icon: "users" },
+  { key: "park", title: "Parked Sales", value: "7", sub: "awaiting resume", tone: "warning" as Severity, icon: "history" },
+  { key: "apr", title: "Pending Approvals", value: "3", sub: "supervisor PIN", tone: "warning" as Severity, icon: "shield" },
+  { key: "var", title: "Cash Variance", value: "SAR -40", sub: "SH-1044", tone: "critical" as Severity, icon: "receipt" },
+];
+
+export const terminalDetail = [
+  { term: "POS-01", cashier: "Ahmed Al-Harbi", shift: "SH-1041", started: "08:00 AM", tx: 72, sales: "SAR 12,400", expected: "SAR 6,500", sync: "Now", printer: "Ready", card: "Connected", status: "Active" },
+  { term: "POS-02", cashier: "Fahad Al-Qahtani", shift: "SH-1042", started: "09:00 AM", tx: 46, sales: "SAR 8,900", expected: "SAR 3,200", sync: "Now", printer: "Ready", card: "Connected", status: "Active" },
+  { term: "POS-03", cashier: "Sara Al-Otaibi", shift: "SH-1043", started: "08:30 AM", tx: 0, sales: "SAR 0", expected: "SAR 1,000", sync: "45 min ago", printer: "Unknown", card: "Offline", status: "Offline" },
+  { term: "POS-04", cashier: "Khalid Al-Mutairi", shift: "SH-1044", started: "10:00 AM", tx: 58, sales: "SAR 9,750", expected: "SAR 4,800", sync: "Now", printer: "Ready", card: "Connected", status: "Review Required" },
+  { term: "POS-05", cashier: "Noura Al-Salem", shift: "SH-1045", started: "11:00 AM", tx: 34, sales: "SAR 5,850", expected: "SAR 2,100", sync: "Now", printer: "Ready", card: "Connected", status: "Idle" },
+];
+
+/* ================= Payments & Returns tab (spec 7.6) ================= */
+
+export const paymentBreakdown = [
+  { method: "Cash", amount: "SAR 16,200", tx: 96, tone: "success" as Severity, icon: "receipt" },
+  { method: "Card", amount: "SAR 21,450", tx: 122, tone: "info" as Severity, icon: "cart" },
+  { method: "Wallet", amount: "SAR 3,800", tx: 24, tone: "info" as Severity, icon: "receipt" },
+  { method: "Bank Transfer", amount: "SAR 2,100", tx: 7, tone: "info" as Severity, icon: "receipt" },
+  { method: "Account Credit", amount: "SAR 5,370", tx: 18, tone: "warning" as Severity, icon: "receipt" },
+  { method: "Loyalty Points", amount: "SAR 620", tx: 19, tone: "success" as Severity, icon: "shield" },
+];
+
+export const returnBreakdown = [
+  { label: "Standard Returns", value: "SAR 1,350" },
+  { label: "Damaged Claims", value: "9 items" },
+  { label: "Surplus / Excess", value: "14 items" },
+  { label: "Exchanges", value: "5" },
+  { label: "VAT Reversal", value: "SAR 422" },
+  { label: "Restocking Fees", value: "SAR 180" },
+  { label: "Pending PIN Auth", value: "3" },
+];
+
+/* ================= Compliance & Alerts tab (spec 7.7) ================= */
+
+export const groupedAlerts: {
+  severity: Severity;
+  module: string;
+  msg: string;
+  age: string;
+  action: string;
+}[] = [
+  { severity: "critical", module: "ZATCA", msg: "Invoice INV-2026-00891 failed transmission", age: "18 minutes", action: "Retry" },
+  { severity: "critical", module: "Network", msg: "POS-03 has been offline for 45 minutes", age: "45 minutes", action: "Open Terminal" },
+  { severity: "warning", module: "Cashier Shift", msg: "Shift SH-1044 has SAR -40 cash variance", age: "25 minutes", action: "Review" },
+  { severity: "warning", module: "Returns", msg: "Return request RET-224 requires manager PIN", age: "35 minutes", action: "Authorise" },
+  { severity: "warning", module: "Stock", msg: "OPC Cement 50KG is below reorder level", age: "12 minutes", action: "Create Purchase Order" },
+  { severity: "info", module: "Procurement", msg: "Purchase Order PO-558 is expected today", age: "2 hours", action: "View PO" },
+];
 
 export const kpis = [
   { key: "sales", title: "Today's Sales", value: "48,920 ر.س", sub: "+18% vs yesterday", tone: "success" as Severity, icon: "trending" },
