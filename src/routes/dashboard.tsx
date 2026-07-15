@@ -13,6 +13,8 @@ import {
   RefreshCw,
   Download,
   Radio,
+  Layers,
+  Warehouse,
 } from "lucide-react";
 import {
   FilterBar,
@@ -28,13 +30,10 @@ import {
   ZatcaCompliance,
   CashierActivity,
   ReturnsRefunds,
-  CommandKpis,
-  ContractorOrders,
-  DispatchBoard,
-  StockYardHealth,
-  AlertsRail,
 } from "@/components/buildpos/sections";
 import { useFilters } from "@/lib/buildpos/filter-context";
+import { topCategories, inventorySummary } from "@/lib/buildpos/data";
+import { formatSAR } from "@/lib/buildpos/format";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
@@ -54,6 +53,38 @@ function OverviewPage() {
     { value: "payments", label: "Payments & Returns", icon: Wallet },
     { value: "compliance", label: "Compliance & Alerts", icon: Shield },
   ];
+
+  const cementSteel =
+    (topCategories.find((c) => /cement/i.test(c.name))?.sales ?? 0) +
+    (topCategories.find((c) => /steel/i.test(c.name))?.sales ?? 0);
+  const warehouseValue = inventorySummary.find((s) => /value/i.test(s.label))?.value ?? "—";
+
+  const headlineCards = [
+    {
+      label: "Cement & Steel Sales",
+      value: formatSAR(cementSteel),
+      hint: "Bulk material lane · live POS",
+      icon: Layers,
+      tone: "brand",
+    },
+    {
+      label: "Warehouse Stock Value",
+      value: warehouseValue,
+      hint: "Across 5 KSA branches",
+      icon: Warehouse,
+      tone: "success",
+    },
+  ];
+
+  const toneMap: Record<string, string> = {
+    brand: "border-brand/25 from-brand/10",
+    success: "border-success/30 from-success/10",
+  };
+
+  const iconTone: Record<string, string> = {
+    brand: "bg-brand text-brand-foreground",
+    success: "bg-success/20 text-[oklch(0.35_0.1_155)]",
+  };
 
   return (
     <div className="space-y-5">
@@ -112,7 +143,7 @@ function OverviewPage() {
         <FilterBar />
       </div>
 
-      {/* Construction Operations Summary — wider industrial KPI tiles */}
+      {/* Headline KPIs — only two cards */}
       <section>
         <div className="mb-2 flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-brand" />
@@ -120,69 +151,42 @@ function OverviewPage() {
             01 · Construction Operations Summary
           </h2>
         </div>
-        <CommandKpis />
-      </section>
-
-      {/* Main grid: operations column + right-side alerts rail */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="space-y-4">
-          {/* Material Sales Intelligence */}
-          <section>
-            <div className="mb-2 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-teal" />
-              <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                02 · Material Sales Intelligence
-              </h2>
-            </div>
-            <div className="bp-enter"><TopCategories /></div>
-          </section>
-
-          {/* Stock Yard / Warehouse Health */}
-          <section>
-            <div className="mb-2 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-safety-amber" />
-              <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                03 · Stock Yard & Warehouse Health
-              </h2>
-            </div>
-            <div className="bp-enter"><StockYardHealth /></div>
-          </section>
-
-          {/* Contractor & B2B Orders */}
-          <section>
-            <div className="mb-2 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-info" />
-              <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                04 · Contractor & B2B Orders
-              </h2>
-            </div>
-            <div className="bp-enter"><ContractorOrders /></div>
-          </section>
-
-          {/* Delivery & Dispatch Yard */}
-          <section>
-            <div className="mb-2 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-critical" />
-              <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                05 · Delivery & Dispatch Yard
-              </h2>
-            </div>
-            <div className="bp-enter"><DispatchBoard /></div>
-          </section>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {headlineCards.map((t, i) => {
+            const Icon = t.icon;
+            return (
+              <div
+                key={t.label}
+                className={`bp-enter stagger-${i + 1} group relative overflow-hidden rounded-2xl border-2 bg-gradient-to-br ${toneMap[t.tone]} to-white p-5 shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:shadow-lg`}
+              >
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-1 hazard-stripe opacity-70" />
+                <div className="pointer-events-none absolute inset-0 blueprint-grid opacity-25" />
+                <div className="relative flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                      {t.label}
+                    </p>
+                    <p className="mt-2 font-display text-3xl font-bold leading-none text-foreground">
+                      {t.value}
+                    </p>
+                    <p className="mt-2 text-[11px] text-muted-foreground">{t.hint}</p>
+                  </div>
+                  <div className={`grid h-12 w-12 flex-none place-items-center rounded-xl ${iconTone[t.tone]}`}>
+                    <Icon className="h-6 w-6" />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
-
-        {/* Right-side control panel */}
-        <aside className="space-y-4">
-          <AlertsRail />
-        </aside>
-      </div>
+      </section>
 
       {/* Deep Dive tabs — preserves all existing sections & functionality */}
       <section>
         <div className="mb-2 flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-brand" />
           <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            06 · Deep Dive · Operational Detail
+            02 · Deep Dive · Operational Detail
           </h2>
         </div>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
