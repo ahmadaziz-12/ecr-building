@@ -201,7 +201,7 @@ const iconMap: Record<string, ComponentType<{ className?: string }>> = {
   layers: Layers, bar: BarChart3, grid: LayoutGrid, paint: PaintBucket,
   pipe: Wrench, zap: Zap, hammer: Hammer, square: Square,
   plus: Plus, history: History, file: FileText, search: Search,
-  chart: BarChart3, refresh: RefreshCw, power: Power,
+  chart: BarChart3, refresh: RefreshCw, power: Power, monitor: Monitor,
 };
 
 /* ---------------- Filter Bar ---------------- */
