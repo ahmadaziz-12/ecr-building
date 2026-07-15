@@ -1242,14 +1242,25 @@ export function AlertsRail() {
 
 export function DashboardHeader({ subtitle }: { subtitle: string }) {
   return (
-    <header className="bp-fade flex flex-col gap-1 border-l-4 border-brand pl-3">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-brand">
-        BuildPOS · Command Center
-      </p>
-      <h1 className="font-display text-2xl font-bold leading-tight text-foreground md:text-[26px]">
-        Building Materials Operations
-      </h1>
-      <p className="max-w-2xl text-[13px] text-muted-foreground">{subtitle}</p>
+    <header className="bp-fade relative overflow-hidden rounded-2xl border border-black/5 bg-gradient-to-br from-[oklch(0.22_0.08_285)] via-[oklch(0.18_0.06_285)] to-[oklch(0.12_0.05_285)] px-5 py-6 text-white shadow-[0_10px_40px_-12px_rgba(76,29,149,0.35)]">
+      <img
+        src="/src/assets/construction-hero.jpg"
+        alt=""
+        aria-hidden
+        className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-25 mix-blend-luminosity"
+      />
+      <div className="pointer-events-none absolute inset-0 blueprint-grid-dark opacity-40" />
+      <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-brand/30 blur-3xl bp-float-slow" />
+      <div className="pointer-events-none absolute -bottom-24 -left-24 h-64 w-64 rounded-full bg-teal/20 blur-3xl bp-float" />
+      <div className="relative flex flex-col gap-1">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-brand-glow">
+          BuildPOS · Command Center
+        </p>
+        <h1 className="font-display text-2xl font-bold leading-tight md:text-[28px]">
+          Building Materials Operations
+        </h1>
+        <p className="max-w-2xl text-[13px] text-white/70">{subtitle}</p>
+      </div>
     </header>
   );
 }
