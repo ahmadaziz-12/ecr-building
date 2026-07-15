@@ -323,3 +323,21 @@
 @utility pos-ticker {
   animation: pos-ticker 22s linear infinite;
 }
+
+/* Accessibility — honor user's reduced-motion preference for BuildPOS anims. */
+@media (prefers-reduced-motion: reduce) {
+  .bp-enter,
+  .bp-fade,
+  .bp-pulse-dot,
+  .pos-scan-line,
+  .pos-scan-pulse,
+  .pos-beam,
+  .pos-radar,
+  .pos-blink,
+  .pos-slide-up,
+  .pos-pop,
+  .pos-ticker {
+    animation: none !important;
+    transition: none !important;
+  }
+}
