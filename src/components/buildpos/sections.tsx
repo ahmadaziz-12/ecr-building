@@ -17,11 +17,17 @@ import {
   BarChart3,
   Boxes,
   ChevronRight,
+  ChevronDown,
+  Download,
+  Filter,
+  Bookmark,
+  X,
   FileText,
   Hammer,
   History,
   Layers,
   LayoutGrid,
+  Monitor,
   Package,
   PaintBucket,
   Plus,
@@ -37,8 +43,12 @@ import {
   Users,
   Wrench,
   Zap,
+  CheckCircle2,
+  Clock,
+  ArrowRight,
 } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +58,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -60,19 +75,31 @@ import { formatSAR, type Severity } from "@/lib/buildpos/format";
 import {
   alerts,
   branches,
+  cashierKpis,
+  cashierWorkspaceSummary,
   contractorOrders,
   deliveries,
+  deliveryDetail,
   deliveryChips,
+  dispatchPipeline,
+  groupedAlerts,
   hourlySales,
+  inventoryKpis,
   inventorySummary,
   kpis,
   lowStock,
+  overviewKpis,
+  paymentBreakdown,
   payments,
   quickActions,
+  recentOrders,
+  returnBreakdown,
   returns as returnsData,
   returnsSummary,
+  salesPerfKpis,
   shifts,
   stockYard,
+  terminalDetail,
   terminals,
   topCategories,
   zatcaInvoices,
@@ -80,7 +107,8 @@ import {
 import {
   categoryToFilter,
   filterDefaults,
-  filterGroups,
+  moreFilterGroups,
+  primaryFilterGroups,
   useFilters,
 } from "@/lib/buildpos/filter-context";
 import cementImg from "@/assets/cat-cement.jpg";
