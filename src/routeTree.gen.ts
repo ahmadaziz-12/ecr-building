@@ -32,6 +32,13 @@ import { Route as InsightsSalesRouteImport } from './routes/insights.sales'
 import { Route as InsightsReportsRouteImport } from './routes/insights.reports'
 import { Route as InsightsKpiRouteImport } from './routes/insights.kpi'
 import { Route as InsightsBiRouteImport } from './routes/insights.bi'
+import { Route as HrmsLogsRouteImport } from './routes/hrms.logs'
+import { Route as HrmsLeaveRouteImport } from './routes/hrms.leave'
+import { Route as HrmsEmployeesRouteImport } from './routes/hrms.employees'
+import { Route as HrmsDocumentsRouteImport } from './routes/hrms.documents'
+import { Route as HrmsDepartmentsRouteImport } from './routes/hrms.departments'
+import { Route as HrmsDashboardRouteImport } from './routes/hrms.dashboard'
+import { Route as HrmsAttendanceRouteImport } from './routes/hrms.attendance'
 import { Route as FinanceTaxZatcaRouteImport } from './routes/finance.tax-zatca'
 import { Route as FinanceReturnsRouteImport } from './routes/finance.returns'
 import { Route as FinancePurchaseOrdersRouteImport } from './routes/finance.purchase-orders'
@@ -171,6 +178,41 @@ const InsightsKpiRoute = InsightsKpiRouteImport.update({
 const InsightsBiRoute = InsightsBiRouteImport.update({
   id: '/insights/bi',
   path: '/insights/bi',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsLogsRoute = HrmsLogsRouteImport.update({
+  id: '/hrms/logs',
+  path: '/hrms/logs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsLeaveRoute = HrmsLeaveRouteImport.update({
+  id: '/hrms/leave',
+  path: '/hrms/leave',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsEmployeesRoute = HrmsEmployeesRouteImport.update({
+  id: '/hrms/employees',
+  path: '/hrms/employees',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsDocumentsRoute = HrmsDocumentsRouteImport.update({
+  id: '/hrms/documents',
+  path: '/hrms/documents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsDepartmentsRoute = HrmsDepartmentsRouteImport.update({
+  id: '/hrms/departments',
+  path: '/hrms/departments',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsDashboardRoute = HrmsDashboardRouteImport.update({
+  id: '/hrms/dashboard',
+  path: '/hrms/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HrmsAttendanceRoute = HrmsAttendanceRouteImport.update({
+  id: '/hrms/attendance',
+  path: '/hrms/attendance',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FinanceTaxZatcaRoute = FinanceTaxZatcaRouteImport.update({
@@ -328,6 +370,13 @@ export interface FileRoutesByFullPath {
   '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
   '/finance/returns': typeof FinanceReturnsRoute
   '/finance/tax-zatca': typeof FinanceTaxZatcaRoute
+  '/hrms/attendance': typeof HrmsAttendanceRoute
+  '/hrms/dashboard': typeof HrmsDashboardRoute
+  '/hrms/departments': typeof HrmsDepartmentsRoute
+  '/hrms/documents': typeof HrmsDocumentsRoute
+  '/hrms/employees': typeof HrmsEmployeesRoute
+  '/hrms/leave': typeof HrmsLeaveRoute
+  '/hrms/logs': typeof HrmsLogsRoute
   '/insights/bi': typeof InsightsBiRoute
   '/insights/kpi': typeof InsightsKpiRoute
   '/insights/reports': typeof InsightsReportsRoute
@@ -378,6 +427,13 @@ export interface FileRoutesByTo {
   '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
   '/finance/returns': typeof FinanceReturnsRoute
   '/finance/tax-zatca': typeof FinanceTaxZatcaRoute
+  '/hrms/attendance': typeof HrmsAttendanceRoute
+  '/hrms/dashboard': typeof HrmsDashboardRoute
+  '/hrms/departments': typeof HrmsDepartmentsRoute
+  '/hrms/documents': typeof HrmsDocumentsRoute
+  '/hrms/employees': typeof HrmsEmployeesRoute
+  '/hrms/leave': typeof HrmsLeaveRoute
+  '/hrms/logs': typeof HrmsLogsRoute
   '/insights/bi': typeof InsightsBiRoute
   '/insights/kpi': typeof InsightsKpiRoute
   '/insights/reports': typeof InsightsReportsRoute
@@ -429,6 +485,13 @@ export interface FileRoutesById {
   '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
   '/finance/returns': typeof FinanceReturnsRoute
   '/finance/tax-zatca': typeof FinanceTaxZatcaRoute
+  '/hrms/attendance': typeof HrmsAttendanceRoute
+  '/hrms/dashboard': typeof HrmsDashboardRoute
+  '/hrms/departments': typeof HrmsDepartmentsRoute
+  '/hrms/documents': typeof HrmsDocumentsRoute
+  '/hrms/employees': typeof HrmsEmployeesRoute
+  '/hrms/leave': typeof HrmsLeaveRoute
+  '/hrms/logs': typeof HrmsLogsRoute
   '/insights/bi': typeof InsightsBiRoute
   '/insights/kpi': typeof InsightsKpiRoute
   '/insights/reports': typeof InsightsReportsRoute
@@ -481,6 +544,13 @@ export interface FileRouteTypes {
     | '/finance/purchase-orders'
     | '/finance/returns'
     | '/finance/tax-zatca'
+    | '/hrms/attendance'
+    | '/hrms/dashboard'
+    | '/hrms/departments'
+    | '/hrms/documents'
+    | '/hrms/employees'
+    | '/hrms/leave'
+    | '/hrms/logs'
     | '/insights/bi'
     | '/insights/kpi'
     | '/insights/reports'
@@ -531,6 +601,13 @@ export interface FileRouteTypes {
     | '/finance/purchase-orders'
     | '/finance/returns'
     | '/finance/tax-zatca'
+    | '/hrms/attendance'
+    | '/hrms/dashboard'
+    | '/hrms/departments'
+    | '/hrms/documents'
+    | '/hrms/employees'
+    | '/hrms/leave'
+    | '/hrms/logs'
     | '/insights/bi'
     | '/insights/kpi'
     | '/insights/reports'
@@ -581,6 +658,13 @@ export interface FileRouteTypes {
     | '/finance/purchase-orders'
     | '/finance/returns'
     | '/finance/tax-zatca'
+    | '/hrms/attendance'
+    | '/hrms/dashboard'
+    | '/hrms/departments'
+    | '/hrms/documents'
+    | '/hrms/employees'
+    | '/hrms/leave'
+    | '/hrms/logs'
     | '/insights/bi'
     | '/insights/kpi'
     | '/insights/reports'
@@ -632,6 +716,13 @@ export interface RootRouteChildren {
   FinancePurchaseOrdersRoute: typeof FinancePurchaseOrdersRoute
   FinanceReturnsRoute: typeof FinanceReturnsRoute
   FinanceTaxZatcaRoute: typeof FinanceTaxZatcaRoute
+  HrmsAttendanceRoute: typeof HrmsAttendanceRoute
+  HrmsDashboardRoute: typeof HrmsDashboardRoute
+  HrmsDepartmentsRoute: typeof HrmsDepartmentsRoute
+  HrmsDocumentsRoute: typeof HrmsDocumentsRoute
+  HrmsEmployeesRoute: typeof HrmsEmployeesRoute
+  HrmsLeaveRoute: typeof HrmsLeaveRoute
+  HrmsLogsRoute: typeof HrmsLogsRoute
   InsightsBiRoute: typeof InsightsBiRoute
   InsightsKpiRoute: typeof InsightsKpiRoute
   InsightsReportsRoute: typeof InsightsReportsRoute
@@ -815,6 +906,55 @@ declare module '@tanstack/react-router' {
       path: '/insights/bi'
       fullPath: '/insights/bi'
       preLoaderRoute: typeof InsightsBiRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/logs': {
+      id: '/hrms/logs'
+      path: '/hrms/logs'
+      fullPath: '/hrms/logs'
+      preLoaderRoute: typeof HrmsLogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/leave': {
+      id: '/hrms/leave'
+      path: '/hrms/leave'
+      fullPath: '/hrms/leave'
+      preLoaderRoute: typeof HrmsLeaveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/employees': {
+      id: '/hrms/employees'
+      path: '/hrms/employees'
+      fullPath: '/hrms/employees'
+      preLoaderRoute: typeof HrmsEmployeesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/documents': {
+      id: '/hrms/documents'
+      path: '/hrms/documents'
+      fullPath: '/hrms/documents'
+      preLoaderRoute: typeof HrmsDocumentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/departments': {
+      id: '/hrms/departments'
+      path: '/hrms/departments'
+      fullPath: '/hrms/departments'
+      preLoaderRoute: typeof HrmsDepartmentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/dashboard': {
+      id: '/hrms/dashboard'
+      path: '/hrms/dashboard'
+      fullPath: '/hrms/dashboard'
+      preLoaderRoute: typeof HrmsDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hrms/attendance': {
+      id: '/hrms/attendance'
+      path: '/hrms/attendance'
+      fullPath: '/hrms/attendance'
+      preLoaderRoute: typeof HrmsAttendanceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/finance/tax-zatca': {
@@ -1024,6 +1164,13 @@ const rootRouteChildren: RootRouteChildren = {
   FinancePurchaseOrdersRoute: FinancePurchaseOrdersRoute,
   FinanceReturnsRoute: FinanceReturnsRoute,
   FinanceTaxZatcaRoute: FinanceTaxZatcaRoute,
+  HrmsAttendanceRoute: HrmsAttendanceRoute,
+  HrmsDashboardRoute: HrmsDashboardRoute,
+  HrmsDepartmentsRoute: HrmsDepartmentsRoute,
+  HrmsDocumentsRoute: HrmsDocumentsRoute,
+  HrmsEmployeesRoute: HrmsEmployeesRoute,
+  HrmsLeaveRoute: HrmsLeaveRoute,
+  HrmsLogsRoute: HrmsLogsRoute,
   InsightsBiRoute: InsightsBiRoute,
   InsightsKpiRoute: InsightsKpiRoute,
   InsightsReportsRoute: InsightsReportsRoute,
