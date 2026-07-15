@@ -1,6 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import yardScene from "@/assets/yard-scene.jpg";
 import {
   LayoutDashboard,
   TrendingUp,
@@ -9,41 +8,54 @@ import {
   UserSquare2,
   Wallet,
   Shield,
-  HardHat,
-  RefreshCw,
-  Download,
-  Radio,
 } from "lucide-react";
 import {
   FilterBar,
-  KpiGrid,
-  QuickActions,
-  SalesPerformance,
-  PaymentCollection,
-  TopCategories,
+  DashboardHeader,
+  OverviewKpis,
+  HourlySummary,
+  TopCategoriesCompact,
+  DispatchPipelinePreview,
+  CashierWorkspaceSummary,
+  SalesPerfKpis,
+  RecentOrdersTable,
+  InventoryKpiGrid,
   InventoryHealth,
-  OperationalAlerts,
-  DeliveryQueue,
+  DeliveryPipelineBoard,
+  CashierKpiGrid,
+  TerminalDetailTable,
+  PaymentBreakdownTiles,
+  ReturnBreakdownTiles,
+  AlertsByGroup,
+  SalesPerformance,
   BranchPerformance,
-  ZatcaCompliance,
-  CashierActivity,
-  ReturnsRefunds,
-  CommandKpis,
-  ContractorOrders,
-  DispatchBoard,
-  StockYardHealth,
-  AlertsRail,
 } from "@/components/buildpos/sections";
 import { useFilters } from "@/lib/buildpos/filter-context";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/dashboard")({
+  head: () => ({
+    meta: [
+      { title: "Building Materials Operations — BuildPOS" },
+      {
+        name: "description",
+        content:
+          "BuildPOS Command Center — sales, inventory, dispatch, cashiers, payments and ZATCA compliance for KSA building-material retailers.",
+      },
+      { property: "og:title", content: "Building Materials Operations — BuildPOS" },
+      {
+        property: "og:description",
+        content:
+          "Live dashboard for construction retail: cement, steel, tiles, paint, plumbing, electrical across every branch.",
+      },
+    ],
+  }),
   component: OverviewPage,
 });
 
 function OverviewPage() {
   const { activeTab, setActiveTab } = useFilters();
+  const navigate = useNavigate();
 
   const tabs = [
     { value: "overview", label: "Overview", icon: LayoutDashboard },
@@ -57,6 +69,81 @@ function OverviewPage() {
 
   return (
     <div className="space-y-5">
+      <DashboardHeader subtitle="Monitor today's sales, transactions, stock risks, deliveries, and active shifts across your building-material branches." />
+
+      {/* Global filter bar */}
+      <div className="bp-fade sticky top-16 z-[5] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/85 backdrop-blur">
+        <FilterBar />
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <div className="sticky top-[7.5rem] z-[4] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/85 backdrop-blur">
+          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-xl border border-black/5 bg-white p-1 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
+            {tabs.map((t) => {
+              const Icon = t.icon;
+              return (
+                <TabsTrigger
+                  key={t.value}
+                  value={t.value}
+                  className="gap-1.5 px-3 text-xs data-[state=active]:bg-brand data-[state=active]:text-brand-foreground data-[state=active]:shadow-sm"
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {t.label}
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+        </div>
+
+        {/* 1. Overview */}
+        <TabsContent value="overview" className="bp-fade space-y-4">
+          <OverviewKpis />
+          <HourlySummary />
+          <TopCategoriesCompact onViewAll={() => { setActiveTab("sales"); toast.info("Opening full category performance"); }} />
+          <DispatchPipelinePreview onViewAll={() => setActiveTab("delivery")} />
+          <CashierWorkspaceSummary />
+        </TabsContent>
+
+        {/* 2. Sales Performance */}
+        <TabsContent value="sales" className="bp-fade space-y-4">
+          <SalesPerfKpis />
+          <SalesPerformance />
+          <TopCategoriesCompact />
+          <BranchPerformance />
+          <RecentOrdersTable onOpenAnalytics={() => { navigate({ to: "/insights/bi" }); }} />
+        </TabsContent>
+
+        {/* 3. Inventory Health */}
+        <TabsContent value="inventory" className="bp-fade space-y-4">
+          <InventoryKpiGrid />
+          <InventoryHealth />
+        </TabsContent>
+
+        {/* 4. Delivery & Dispatch */}
+        <TabsContent value="delivery" className="bp-fade space-y-4">
+          <DeliveryPipelineBoard />
+        </TabsContent>
+
+        {/* 5. Cashier & Terminal */}
+        <TabsContent value="cashier" className="bp-fade space-y-4">
+          <CashierKpiGrid />
+          <TerminalDetailTable />
+        </TabsContent>
+
+        {/* 6. Payments & Returns */}
+        <TabsContent value="payments" className="bp-fade space-y-4">
+          <PaymentBreakdownTiles />
+          <ReturnBreakdownTiles />
+        </TabsContent>
+
+        {/* 7. Compliance & Alerts */}
+        <TabsContent value="compliance" className="bp-fade space-y-4">
+          <AlertsByGroup />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
       {/* Industrial Command Header — narrow, control-room feel */}
       <section className="bp-fade relative overflow-hidden rounded-2xl border border-brand/20 shadow-[0_10px_30px_-18px_rgba(59,20,120,0.5)]">
         <div className="absolute inset-0 bg-gradient-to-r from-[oklch(0.22_0.08_285)] via-[oklch(0.3_0.11_285)] to-[oklch(0.35_0.13_285)]" />
