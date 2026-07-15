@@ -125,7 +125,7 @@ export function HrDashboard() {
           <div className="space-y-2 text-xs">
             {[...docs, ...contracts].filter((r) => (r as { status: string }).status === "Expiring Soon").map((r) => {
               const emp = employees.find((e) => e.id === (r as { empId: string }).empId);
-              const isDoc = "type" in r && "number" in r;
+              const isDoc = r.id.startsWith("DOC-");
               return (
                 <div key={r.id} className="flex items-center gap-2 rounded-lg border border-black/5 bg-canvas p-2">
                   <FileText className="h-3.5 w-3.5 text-warning" />
@@ -133,7 +133,7 @@ export function HrDashboard() {
                   <span className="font-medium">{employeeName(emp)}</span>
                   <span className="text-muted-foreground">{isDoc ? (r as { type: string }).type : (r as { jobTitle: string }).jobTitle + " contract"}</span>
                   <span className="ml-auto text-[11px] text-warning">
-                    Expiring {isDoc ? (r as { expiryDate?: string }).expiryDate : (r as { end: string }).end}
+                    Expiring {isDoc ? ((r as { expiryDate?: string }).expiryDate ?? "—") : (r as { end: string }).end}
                   </span>
                 </div>
               );
