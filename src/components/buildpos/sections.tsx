@@ -1245,10 +1245,10 @@ export function DashboardHeader({ subtitle }: { subtitle: string }) {
   return (
     <header className="bp-fade relative overflow-hidden rounded-2xl border border-black/5 bg-gradient-to-br from-[oklch(0.22_0.08_285)] via-[oklch(0.18_0.06_285)] to-[oklch(0.12_0.05_285)] px-5 py-6 text-white shadow-[0_10px_40px_-12px_rgba(76,29,149,0.35)]">
       <img
-        src="/src/assets/construction-hero.jpg"
+        src={constructionHero}
         alt=""
         aria-hidden
-        className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-25 mix-blend-luminosity"
+        className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-30 mix-blend-luminosity"
       />
       <div className="pointer-events-none absolute inset-0 blueprint-grid-dark opacity-40" />
       <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-brand/30 blur-3xl bp-float-slow" />
