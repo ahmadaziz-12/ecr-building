@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 import logoAsset from "@/assets/mimony-logo.png.asset.json";
 import { statusBar } from "@/lib/buildpos/data";
+import { useLocaleStore } from "@/lib/store/locale";
 
 type Item = { to: string; label: string; icon: typeof LayoutDashboard };
 type Group = { name: string; items: Item[]; collapsed?: boolean };
@@ -165,6 +166,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(nav.map((g) => [g.name, true]))
   );
+  const locale = useLocaleStore((s) => s.locale);
+  const toggleLocale = useLocaleStore((s) => s.toggle);
 
   return (
     <div className="flex min-h-screen bg-canvas font-sans text-foreground">
@@ -299,8 +302,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <span className="hidden items-center gap-1.5 rounded-full border border-brand/20 bg-brand/10 px-2.5 py-0.5 text-xs font-medium text-brand md:inline-flex">
               <Shield className="h-3 w-3" /> ZATCA {statusBar.zatca}
             </span>
-            <button className="hidden h-9 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 text-xs font-medium text-foreground hover:bg-canvas md:inline-flex">
-              <Languages className="h-3.5 w-3.5 text-brand" /> {statusBar.language}
+            <button
+              onClick={toggleLocale}
+              title="Toggle Arabic / English"
+              className="hidden h-9 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 text-xs font-medium text-foreground hover:bg-canvas md:inline-flex"
+            >
+              <Languages className="h-3.5 w-3.5 text-brand" /> {locale === "ar" ? "العربية" : "English"}
             </button>
             <button className="relative grid h-9 w-9 place-items-center rounded-lg border border-black/10 bg-white text-foreground hover:bg-canvas">
               <Bell className="h-4 w-4" />
