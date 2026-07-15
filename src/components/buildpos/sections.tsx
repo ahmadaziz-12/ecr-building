@@ -503,13 +503,13 @@ export function TopCategories() {
       title="Top Material Categories"
       desc="Click a category to filter inventory, stock alerts & tables."
       action={
-        active !== "All" ? (
+        active !== "All Categories" ? (
           <Button
             size="sm"
             variant="ghost"
             className="h-7 text-xs text-brand hover:bg-brand/5 hover:text-brand"
             onClick={() => {
-              setValue("Category", "All");
+              setValue("Category", "All Categories");
               toast.info("Category filter cleared");
             }}
           >
@@ -594,19 +594,19 @@ export function TopCategories() {
 export function InventoryHealth() {
   const { values, setValue } = useFilters();
   const cat = values.Category;
-  const rows = cat === "All" ? lowStock : lowStock.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
+  const rows = cat === "All Categories" ? lowStock : lowStock.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
   return (
     <SectionCard
       title="Stock Health & Availability"
-      desc={cat === "All" ? "Availability across branches and warehouses." : `Filtered by category · ${cat} (${rows.length} SKUs)`}
+      desc={cat === "All Categories" ? "Availability across branches and warehouses." : `Filtered by category · ${cat} (${rows.length} SKUs)`}
       action={
         <div className="flex items-center gap-2">
-          {cat !== "All" && (
+          {cat !== "All Categories" && (
             <Button
               variant="ghost"
               size="sm"
               className="h-7 text-xs text-muted-foreground hover:text-brand"
-              onClick={() => setValue("Category", "All")}
+              onClick={() => setValue("Category", "All Categories")}
             >
               Clear filter
             </Button>
