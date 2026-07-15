@@ -12,13 +12,18 @@ export function StageActionDialog({
   order: DeliveryOrder | null;
   onClose: () => void;
 }) {
+  if (!order) return null;
+  return <StageActionInner order={order} onClose={onClose} />;
+}
+
+function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: () => void }) {
   const [target, setTarget] = useState<Stage | "">("");
   const [reason, setReason] = useState("");
   const [receivedBy, setReceivedBy] = useState("");
   const [linesLoaded, setLinesLoaded] = useState<Record<string, number>>({});
   const [linesDelivered, setLinesDelivered] = useState<Record<string, number>>({});
-  const [driverEmpId, setDriverEmpId] = useState(order?.driverEmpId ?? "");
-  const [vehicleId, setVehicleId] = useState(order?.vehicleId ?? "");
+  const [driverEmpId, setDriverEmpId] = useState(order.driverEmpId ?? "");
+  const [vehicleId, setVehicleId] = useState(order.vehicleId ?? "");
   const [signature, setSignature] = useState("");
 
   const moveStage = useDeliveryStore((s) => s.moveStage);
@@ -27,9 +32,7 @@ export function StageActionDialog({
   const vehicles = useDeliveryStore((s) => s.vehicles);
   const employees = useHrStore((s) => s.employees);
 
-  const next = useMemo(() => (order ? allowedNext(order.stage) : []), [order]);
-
-  if (!order) return null;
+  const next = useMemo(() => allowedNext(order.stage), [order.stage]);
   const driverEmp = employees.find((e) => e.id === driverEmpId);
   const chk = driverEmpId ? driverAvailable(driverEmpId) : null;
 
