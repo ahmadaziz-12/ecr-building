@@ -115,6 +115,7 @@ import cementImg from "@/assets/cat-cement.jpg";
 import steelImg from "@/assets/cat-steel.jpg";
 import tilesImg from "@/assets/cat-tiles.jpg";
 import paintImg from "@/assets/cat-paint.jpg";
+import constructionHero from "@/assets/construction-hero.jpg";
 
 const categoryImage: Record<string, string> = {
   "Cement & Aggregates": cementImg,
