@@ -37,6 +37,13 @@ import { Route as FinanceReturnsRouteImport } from './routes/finance.returns'
 import { Route as FinancePurchaseOrdersRouteImport } from './routes/finance.purchase-orders'
 import { Route as FinancePricingRouteImport } from './routes/finance.pricing'
 import { Route as FinanceExpensesRouteImport } from './routes/finance.expenses'
+import { Route as DeliveryZonesRouteImport } from './routes/delivery.zones'
+import { Route as DeliveryVehiclesRouteImport } from './routes/delivery.vehicles'
+import { Route as DeliveryPipelineRouteImport } from './routes/delivery.pipeline'
+import { Route as DeliveryOrdersRouteImport } from './routes/delivery.orders'
+import { Route as DeliveryLogsRouteImport } from './routes/delivery.logs'
+import { Route as DeliveryDriversRouteImport } from './routes/delivery.drivers'
+import { Route as DeliveryDashboardRouteImport } from './routes/delivery.dashboard'
 import { Route as AdminZatcaSettingsRouteImport } from './routes/admin.zatca-settings'
 import { Route as AdminZatcaInvoicesRouteImport } from './routes/admin.zatca-invoices'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
@@ -191,6 +198,41 @@ const FinanceExpensesRoute = FinanceExpensesRouteImport.update({
   path: '/finance/expenses',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DeliveryZonesRoute = DeliveryZonesRouteImport.update({
+  id: '/delivery/zones',
+  path: '/delivery/zones',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryVehiclesRoute = DeliveryVehiclesRouteImport.update({
+  id: '/delivery/vehicles',
+  path: '/delivery/vehicles',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryPipelineRoute = DeliveryPipelineRouteImport.update({
+  id: '/delivery/pipeline',
+  path: '/delivery/pipeline',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryOrdersRoute = DeliveryOrdersRouteImport.update({
+  id: '/delivery/orders',
+  path: '/delivery/orders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryLogsRoute = DeliveryLogsRouteImport.update({
+  id: '/delivery/logs',
+  path: '/delivery/logs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryDriversRoute = DeliveryDriversRouteImport.update({
+  id: '/delivery/drivers',
+  path: '/delivery/drivers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeliveryDashboardRoute = DeliveryDashboardRouteImport.update({
+  id: '/delivery/dashboard',
+  path: '/delivery/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminZatcaSettingsRoute = AdminZatcaSettingsRouteImport.update({
   id: '/admin/zatca-settings',
   path: '/admin/zatca-settings',
@@ -274,6 +316,13 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof AdminUsersRoute
   '/admin/zatca-invoices': typeof AdminZatcaInvoicesRoute
   '/admin/zatca-settings': typeof AdminZatcaSettingsRoute
+  '/delivery/dashboard': typeof DeliveryDashboardRoute
+  '/delivery/drivers': typeof DeliveryDriversRoute
+  '/delivery/logs': typeof DeliveryLogsRoute
+  '/delivery/orders': typeof DeliveryOrdersRoute
+  '/delivery/pipeline': typeof DeliveryPipelineRoute
+  '/delivery/vehicles': typeof DeliveryVehiclesRoute
+  '/delivery/zones': typeof DeliveryZonesRoute
   '/finance/expenses': typeof FinanceExpensesRoute
   '/finance/pricing': typeof FinancePricingRoute
   '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
@@ -317,6 +366,13 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersRoute
   '/admin/zatca-invoices': typeof AdminZatcaInvoicesRoute
   '/admin/zatca-settings': typeof AdminZatcaSettingsRoute
+  '/delivery/dashboard': typeof DeliveryDashboardRoute
+  '/delivery/drivers': typeof DeliveryDriversRoute
+  '/delivery/logs': typeof DeliveryLogsRoute
+  '/delivery/orders': typeof DeliveryOrdersRoute
+  '/delivery/pipeline': typeof DeliveryPipelineRoute
+  '/delivery/vehicles': typeof DeliveryVehiclesRoute
+  '/delivery/zones': typeof DeliveryZonesRoute
   '/finance/expenses': typeof FinanceExpensesRoute
   '/finance/pricing': typeof FinancePricingRoute
   '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
@@ -361,6 +417,13 @@ export interface FileRoutesById {
   '/admin/users': typeof AdminUsersRoute
   '/admin/zatca-invoices': typeof AdminZatcaInvoicesRoute
   '/admin/zatca-settings': typeof AdminZatcaSettingsRoute
+  '/delivery/dashboard': typeof DeliveryDashboardRoute
+  '/delivery/drivers': typeof DeliveryDriversRoute
+  '/delivery/logs': typeof DeliveryLogsRoute
+  '/delivery/orders': typeof DeliveryOrdersRoute
+  '/delivery/pipeline': typeof DeliveryPipelineRoute
+  '/delivery/vehicles': typeof DeliveryVehiclesRoute
+  '/delivery/zones': typeof DeliveryZonesRoute
   '/finance/expenses': typeof FinanceExpensesRoute
   '/finance/pricing': typeof FinancePricingRoute
   '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
@@ -406,6 +469,13 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/admin/zatca-invoices'
     | '/admin/zatca-settings'
+    | '/delivery/dashboard'
+    | '/delivery/drivers'
+    | '/delivery/logs'
+    | '/delivery/orders'
+    | '/delivery/pipeline'
+    | '/delivery/vehicles'
+    | '/delivery/zones'
     | '/finance/expenses'
     | '/finance/pricing'
     | '/finance/purchase-orders'
@@ -449,6 +519,13 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/admin/zatca-invoices'
     | '/admin/zatca-settings'
+    | '/delivery/dashboard'
+    | '/delivery/drivers'
+    | '/delivery/logs'
+    | '/delivery/orders'
+    | '/delivery/pipeline'
+    | '/delivery/vehicles'
+    | '/delivery/zones'
     | '/finance/expenses'
     | '/finance/pricing'
     | '/finance/purchase-orders'
@@ -492,6 +569,13 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/admin/zatca-invoices'
     | '/admin/zatca-settings'
+    | '/delivery/dashboard'
+    | '/delivery/drivers'
+    | '/delivery/logs'
+    | '/delivery/orders'
+    | '/delivery/pipeline'
+    | '/delivery/vehicles'
+    | '/delivery/zones'
     | '/finance/expenses'
     | '/finance/pricing'
     | '/finance/purchase-orders'
@@ -536,6 +620,13 @@ export interface RootRouteChildren {
   AdminUsersRoute: typeof AdminUsersRoute
   AdminZatcaInvoicesRoute: typeof AdminZatcaInvoicesRoute
   AdminZatcaSettingsRoute: typeof AdminZatcaSettingsRoute
+  DeliveryDashboardRoute: typeof DeliveryDashboardRoute
+  DeliveryDriversRoute: typeof DeliveryDriversRoute
+  DeliveryLogsRoute: typeof DeliveryLogsRoute
+  DeliveryOrdersRoute: typeof DeliveryOrdersRoute
+  DeliveryPipelineRoute: typeof DeliveryPipelineRoute
+  DeliveryVehiclesRoute: typeof DeliveryVehiclesRoute
+  DeliveryZonesRoute: typeof DeliveryZonesRoute
   FinanceExpensesRoute: typeof FinanceExpensesRoute
   FinancePricingRoute: typeof FinancePricingRoute
   FinancePurchaseOrdersRoute: typeof FinancePurchaseOrdersRoute
@@ -761,6 +852,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FinanceExpensesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/delivery/zones': {
+      id: '/delivery/zones'
+      path: '/delivery/zones'
+      fullPath: '/delivery/zones'
+      preLoaderRoute: typeof DeliveryZonesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/vehicles': {
+      id: '/delivery/vehicles'
+      path: '/delivery/vehicles'
+      fullPath: '/delivery/vehicles'
+      preLoaderRoute: typeof DeliveryVehiclesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/pipeline': {
+      id: '/delivery/pipeline'
+      path: '/delivery/pipeline'
+      fullPath: '/delivery/pipeline'
+      preLoaderRoute: typeof DeliveryPipelineRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/orders': {
+      id: '/delivery/orders'
+      path: '/delivery/orders'
+      fullPath: '/delivery/orders'
+      preLoaderRoute: typeof DeliveryOrdersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/logs': {
+      id: '/delivery/logs'
+      path: '/delivery/logs'
+      fullPath: '/delivery/logs'
+      preLoaderRoute: typeof DeliveryLogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/drivers': {
+      id: '/delivery/drivers'
+      path: '/delivery/drivers'
+      fullPath: '/delivery/drivers'
+      preLoaderRoute: typeof DeliveryDriversRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/delivery/dashboard': {
+      id: '/delivery/dashboard'
+      path: '/delivery/dashboard'
+      fullPath: '/delivery/dashboard'
+      preLoaderRoute: typeof DeliveryDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/zatca-settings': {
       id: '/admin/zatca-settings'
       path: '/admin/zatca-settings'
@@ -872,6 +1012,13 @@ const rootRouteChildren: RootRouteChildren = {
   AdminUsersRoute: AdminUsersRoute,
   AdminZatcaInvoicesRoute: AdminZatcaInvoicesRoute,
   AdminZatcaSettingsRoute: AdminZatcaSettingsRoute,
+  DeliveryDashboardRoute: DeliveryDashboardRoute,
+  DeliveryDriversRoute: DeliveryDriversRoute,
+  DeliveryLogsRoute: DeliveryLogsRoute,
+  DeliveryOrdersRoute: DeliveryOrdersRoute,
+  DeliveryPipelineRoute: DeliveryPipelineRoute,
+  DeliveryVehiclesRoute: DeliveryVehiclesRoute,
+  DeliveryZonesRoute: DeliveryZonesRoute,
   FinanceExpensesRoute: FinanceExpensesRoute,
   FinancePricingRoute: FinancePricingRoute,
   FinancePurchaseOrdersRoute: FinancePurchaseOrdersRoute,
