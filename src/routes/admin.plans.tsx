@@ -1,7 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ModulePage } from "@/components/buildpos/ModulePage";
+import { SubscriptionsPage } from "@/components/buildpos/SubscriptionsPage";
 
 export const Route = createFileRoute("/admin/plans")({
-  head: () => ({ meta: [{ title: "Plans & Pricing — BuildPOS" }, { name: "description", content: "Plans & Pricing module of the BuildPOS building materials retail platform." }] }),
-  component: ModulePage,
+  head: () => ({
+    meta: [
+      { title: "Subscriptions — BuildPOS" },
+      { name: "description", content: "Choose the BuildPOS subscription that fits your building-materials retail operation." },
+    ],
+  }),
+  component: SubscriptionsPage,
 });
