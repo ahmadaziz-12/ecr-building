@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { HardHat, Radio, Shield, Truck, Boxes, Wallet, ArrowRight, Lock, Mail, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import logoAsset from "@/assets/mimony-logo.png.asset.json";
 import loginHero from "@/assets/login-hero.jpg";
+import { useAuth } from "@/lib/api/auth";
+import { ApiError } from "@/lib/api/client";
 
 export const Route = createFileRoute("/")({
   component: LandingPage,
@@ -21,21 +23,33 @@ const highlights = [
 
 function LandingPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("manager@mimoney.sa");
-  const [password, setPassword] = useState("buildpos");
+  const { login, user } = useAuth();
+  const [email, setEmail] = useState("owner@ecr-building.local");
+  const [password, setPassword] = useState("Passw0rd!");
   const [loading, setLoading] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  // Navigate only once the auth context has actually picked up the new session —
+  // calling navigate() immediately after login() raced AuthGate's redirect-to-login
+  // effect (context hadn't re-rendered yet) and bounced straight back to "/".
+  useEffect(() => {
+    if (user) navigate({ to: "/dashboard" });
+  }, [user, navigate]);
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!email || !password) {
       toast.error("Enter your email and password");
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      toast.success("Welcome back", { description: "Opening BuildPOS Command Center…" });
-      navigate({ to: "/dashboard" });
-    }, 700);
+    try {
+      const loggedInUser = await login(email, password);
+      toast.success("Welcome back", { description: `Signed in as ${loggedInUser.name} (${loggedInUser.role})` });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Unable to sign in");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (

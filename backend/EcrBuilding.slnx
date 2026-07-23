@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EcrBuilding.Api/EcrBuilding.Api.csproj" />
+    <Project Path="src/EcrBuilding.Application/EcrBuilding.Application.csproj" />
+    <Project Path="src/EcrBuilding.Domain/EcrBuilding.Domain.csproj" />
+    <Project Path="src/EcrBuilding.Infrastructure/EcrBuilding.Infrastructure.csproj" />
+  </Folder>
+</Solution>

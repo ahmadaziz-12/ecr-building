@@ -19,6 +19,7 @@ import { Route as StockTransfersRouteImport } from './routes/stock.transfers'
 import { Route as StockStocksRouteImport } from './routes/stock.stocks'
 import { Route as StockInventoryRouteImport } from './routes/stock.inventory'
 import { Route as StockExpiryRouteImport } from './routes/stock.expiry'
+import { Route as StockBundlesRouteImport } from './routes/stock.bundles'
 import { Route as OperatePosCheckoutRouteImport } from './routes/operate.pos-checkout'
 import { Route as OperateOrdersRouteImport } from './routes/operate.orders'
 import { Route as OperateCustomersRouteImport } from './routes/operate.customers'
@@ -43,6 +44,7 @@ import { Route as FinanceTaxZatcaRouteImport } from './routes/finance.tax-zatca'
 import { Route as FinanceReturnsRouteImport } from './routes/finance.returns'
 import { Route as FinancePurchaseOrdersRouteImport } from './routes/finance.purchase-orders'
 import { Route as FinancePricingRouteImport } from './routes/finance.pricing'
+import { Route as FinanceLoyaltyRouteImport } from './routes/finance.loyalty'
 import { Route as FinanceExpensesRouteImport } from './routes/finance.expenses'
 import { Route as DeliveryZonesRouteImport } from './routes/delivery.zones'
 import { Route as DeliveryVehiclesRouteImport } from './routes/delivery.vehicles'
@@ -113,6 +115,11 @@ const StockInventoryRoute = StockInventoryRouteImport.update({
 const StockExpiryRoute = StockExpiryRouteImport.update({
   id: '/stock/expiry',
   path: '/stock/expiry',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StockBundlesRoute = StockBundlesRouteImport.update({
+  id: '/stock/bundles',
+  path: '/stock/bundles',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OperatePosCheckoutRoute = OperatePosCheckoutRouteImport.update({
@@ -233,6 +240,11 @@ const FinancePurchaseOrdersRoute = FinancePurchaseOrdersRouteImport.update({
 const FinancePricingRoute = FinancePricingRouteImport.update({
   id: '/finance/pricing',
   path: '/finance/pricing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FinanceLoyaltyRoute = FinanceLoyaltyRouteImport.update({
+  id: '/finance/loyalty',
+  path: '/finance/loyalty',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FinanceExpensesRoute = FinanceExpensesRouteImport.update({
@@ -366,6 +378,7 @@ export interface FileRoutesByFullPath {
   '/delivery/vehicles': typeof DeliveryVehiclesRoute
   '/delivery/zones': typeof DeliveryZonesRoute
   '/finance/expenses': typeof FinanceExpensesRoute
+  '/finance/loyalty': typeof FinanceLoyaltyRoute
   '/finance/pricing': typeof FinancePricingRoute
   '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
   '/finance/returns': typeof FinanceReturnsRoute
@@ -390,6 +403,7 @@ export interface FileRoutesByFullPath {
   '/operate/customers': typeof OperateCustomersRoute
   '/operate/orders': typeof OperateOrdersRoute
   '/operate/pos-checkout': typeof OperatePosCheckoutRoute
+  '/stock/bundles': typeof StockBundlesRoute
   '/stock/expiry': typeof StockExpiryRoute
   '/stock/inventory': typeof StockInventoryRoute
   '/stock/stocks': typeof StockStocksRoute
@@ -423,6 +437,7 @@ export interface FileRoutesByTo {
   '/delivery/vehicles': typeof DeliveryVehiclesRoute
   '/delivery/zones': typeof DeliveryZonesRoute
   '/finance/expenses': typeof FinanceExpensesRoute
+  '/finance/loyalty': typeof FinanceLoyaltyRoute
   '/finance/pricing': typeof FinancePricingRoute
   '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
   '/finance/returns': typeof FinanceReturnsRoute
@@ -447,6 +462,7 @@ export interface FileRoutesByTo {
   '/operate/customers': typeof OperateCustomersRoute
   '/operate/orders': typeof OperateOrdersRoute
   '/operate/pos-checkout': typeof OperatePosCheckoutRoute
+  '/stock/bundles': typeof StockBundlesRoute
   '/stock/expiry': typeof StockExpiryRoute
   '/stock/inventory': typeof StockInventoryRoute
   '/stock/stocks': typeof StockStocksRoute
@@ -481,6 +497,7 @@ export interface FileRoutesById {
   '/delivery/vehicles': typeof DeliveryVehiclesRoute
   '/delivery/zones': typeof DeliveryZonesRoute
   '/finance/expenses': typeof FinanceExpensesRoute
+  '/finance/loyalty': typeof FinanceLoyaltyRoute
   '/finance/pricing': typeof FinancePricingRoute
   '/finance/purchase-orders': typeof FinancePurchaseOrdersRoute
   '/finance/returns': typeof FinanceReturnsRoute
@@ -505,6 +522,7 @@ export interface FileRoutesById {
   '/operate/customers': typeof OperateCustomersRoute
   '/operate/orders': typeof OperateOrdersRoute
   '/operate/pos-checkout': typeof OperatePosCheckoutRoute
+  '/stock/bundles': typeof StockBundlesRoute
   '/stock/expiry': typeof StockExpiryRoute
   '/stock/inventory': typeof StockInventoryRoute
   '/stock/stocks': typeof StockStocksRoute
@@ -540,6 +558,7 @@ export interface FileRouteTypes {
     | '/delivery/vehicles'
     | '/delivery/zones'
     | '/finance/expenses'
+    | '/finance/loyalty'
     | '/finance/pricing'
     | '/finance/purchase-orders'
     | '/finance/returns'
@@ -564,6 +583,7 @@ export interface FileRouteTypes {
     | '/operate/customers'
     | '/operate/orders'
     | '/operate/pos-checkout'
+    | '/stock/bundles'
     | '/stock/expiry'
     | '/stock/inventory'
     | '/stock/stocks'
@@ -597,6 +617,7 @@ export interface FileRouteTypes {
     | '/delivery/vehicles'
     | '/delivery/zones'
     | '/finance/expenses'
+    | '/finance/loyalty'
     | '/finance/pricing'
     | '/finance/purchase-orders'
     | '/finance/returns'
@@ -621,6 +642,7 @@ export interface FileRouteTypes {
     | '/operate/customers'
     | '/operate/orders'
     | '/operate/pos-checkout'
+    | '/stock/bundles'
     | '/stock/expiry'
     | '/stock/inventory'
     | '/stock/stocks'
@@ -654,6 +676,7 @@ export interface FileRouteTypes {
     | '/delivery/vehicles'
     | '/delivery/zones'
     | '/finance/expenses'
+    | '/finance/loyalty'
     | '/finance/pricing'
     | '/finance/purchase-orders'
     | '/finance/returns'
@@ -678,6 +701,7 @@ export interface FileRouteTypes {
     | '/operate/customers'
     | '/operate/orders'
     | '/operate/pos-checkout'
+    | '/stock/bundles'
     | '/stock/expiry'
     | '/stock/inventory'
     | '/stock/stocks'
@@ -712,6 +736,7 @@ export interface RootRouteChildren {
   DeliveryVehiclesRoute: typeof DeliveryVehiclesRoute
   DeliveryZonesRoute: typeof DeliveryZonesRoute
   FinanceExpensesRoute: typeof FinanceExpensesRoute
+  FinanceLoyaltyRoute: typeof FinanceLoyaltyRoute
   FinancePricingRoute: typeof FinancePricingRoute
   FinancePurchaseOrdersRoute: typeof FinancePurchaseOrdersRoute
   FinanceReturnsRoute: typeof FinanceReturnsRoute
@@ -736,6 +761,7 @@ export interface RootRouteChildren {
   OperateCustomersRoute: typeof OperateCustomersRoute
   OperateOrdersRoute: typeof OperateOrdersRoute
   OperatePosCheckoutRoute: typeof OperatePosCheckoutRoute
+  StockBundlesRoute: typeof StockBundlesRoute
   StockExpiryRoute: typeof StockExpiryRoute
   StockInventoryRoute: typeof StockInventoryRoute
   StockStocksRoute: typeof StockStocksRoute
@@ -815,6 +841,13 @@ declare module '@tanstack/react-router' {
       path: '/stock/expiry'
       fullPath: '/stock/expiry'
       preLoaderRoute: typeof StockExpiryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stock/bundles': {
+      id: '/stock/bundles'
+      path: '/stock/bundles'
+      fullPath: '/stock/bundles'
+      preLoaderRoute: typeof StockBundlesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/operate/pos-checkout': {
@@ -983,6 +1016,13 @@ declare module '@tanstack/react-router' {
       path: '/finance/pricing'
       fullPath: '/finance/pricing'
       preLoaderRoute: typeof FinancePricingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/finance/loyalty': {
+      id: '/finance/loyalty'
+      path: '/finance/loyalty'
+      fullPath: '/finance/loyalty'
+      preLoaderRoute: typeof FinanceLoyaltyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/finance/expenses': {
@@ -1160,6 +1200,7 @@ const rootRouteChildren: RootRouteChildren = {
   DeliveryVehiclesRoute: DeliveryVehiclesRoute,
   DeliveryZonesRoute: DeliveryZonesRoute,
   FinanceExpensesRoute: FinanceExpensesRoute,
+  FinanceLoyaltyRoute: FinanceLoyaltyRoute,
   FinancePricingRoute: FinancePricingRoute,
   FinancePurchaseOrdersRoute: FinancePurchaseOrdersRoute,
   FinanceReturnsRoute: FinanceReturnsRoute,
@@ -1184,6 +1225,7 @@ const rootRouteChildren: RootRouteChildren = {
   OperateCustomersRoute: OperateCustomersRoute,
   OperateOrdersRoute: OperateOrdersRoute,
   OperatePosCheckoutRoute: OperatePosCheckoutRoute,
+  StockBundlesRoute: StockBundlesRoute,
   StockExpiryRoute: StockExpiryRoute,
   StockInventoryRoute: StockInventoryRoute,
   StockStocksRoute: StockStocksRoute,

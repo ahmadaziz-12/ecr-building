@@ -1,6 +1,10 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import { useAuditStore } from "@/lib/store/audit";
+import {
+  apiCheckIn, apiCheckOut, apiAdjustAttendance, apiUpdateLeaveStatus, apiVerifyDoc, backendEmpId,
+  ATTENDANCE_SOURCE_TO_BACKEND, LEAVE_TYPE_TO_BACKEND, LEAVE_STATUS_TO_BACKEND, DOC_TYPE_TO_BACKEND, CONTRACT_TYPE_TO_BACKEND,
+} from "@/lib/api/hr";
+import { apiPost, apiPut } from "@/lib/api/client";
 
 export type EmploymentStatus =
   | "Active"
@@ -53,6 +57,9 @@ export type Employee = {
   licenseExpiry?: string;
   vehicleId?: string;
   profileImage?: string;
+  _backendId?: number;
+  _departmentId?: number;
+  _branchId?: number;
 };
 
 export type Department = {
@@ -65,6 +72,7 @@ export type Department = {
   branches?: string[];
   status: "Active" | "Inactive";
   parent?: string;
+  _backendId?: number;
 };
 
 export type Shift = {
@@ -80,6 +88,7 @@ export type Shift = {
   crossMidnight?: boolean;
   departments?: string[];
   status: "Active" | "Inactive";
+  _backendId?: number;
 };
 
 export type Attendance = {
@@ -97,6 +106,7 @@ export type Attendance = {
   status: AttendanceStatus;
   source: "Biometric" | "PIN" | "Terminal" | "Manual" | "Mobile";
   note?: string;
+  _backendId?: number;
 };
 
 export type Leave = {
@@ -112,6 +122,7 @@ export type Leave = {
   attachment?: string;
   approver?: string;
   status: "Draft" | "Submitted" | "Pending Manager" | "Pending HR" | "Approved" | "Rejected" | "Cancelled" | "Completed";
+  _backendId?: number;
 };
 
 export type EmployeeDoc = {
@@ -135,6 +146,7 @@ export type EmployeeDoc = {
   verifiedBy?: string;
   notes?: string;
   fileName?: string;
+  _backendId?: number;
 };
 
 export type Contract = {
@@ -154,70 +166,10 @@ export type Contract = {
   status: "Draft" | "Active" | "Expiring Soon" | "Expired" | "Renewed" | "Closed" | "Terminated";
   supersededBy?: string;
   attachment?: string;
+  _backendId?: number;
 };
 
-/* --- seed --- */
-
-const seedEmployees: Employee[] = [
-  { id: "EMP-001", firstName: "Ahmed", lastName: "Al-Harbi", arabicName: "أحمد الحربي", department: "Store Operations", designation: "Store Manager", branch: "Riyadh Main Branch", reportingManager: "Regional Operations Manager", joiningDate: "2024-01-15", employmentType: "Full-Time", shiftId: "HRS-001", mobile: "+966 50 100 2001", email: "ahmed.harbi@albinaa.sa", status: "Active", userId: "USR-001", role: "Store Manager" },
-  { id: "EMP-002", firstName: "Fahad", lastName: "Al-Qahtani", department: "Cashier Operations", designation: "Senior Cashier", branch: "Riyadh Main Branch", joiningDate: "2024-03-01", employmentType: "Full-Time", shiftId: "HRS-001", mobile: "+966 50 200 2002", status: "Active", userId: "USR-014", role: "Senior Cashier" },
-  { id: "EMP-003", firstName: "Sara", lastName: "Al-Otaibi", department: "Cashier Operations", designation: "Cashier", branch: "Riyadh Main Branch", joiningDate: "2025-09-01", employmentType: "Full-Time", shiftId: "HRS-001", mobile: "+966 50 300 2003", status: "Active", role: "Cashier" },
-  { id: "EMP-004", firstName: "Khalid", lastName: "Al-Mutairi", department: "Cashier Operations", designation: "Cashier", branch: "Riyadh Main Branch", joiningDate: "2024-11-20", employmentType: "Full-Time", shiftId: "HRS-002", mobile: "+966 50 400 2004", status: "Active", role: "Cashier" },
-  { id: "EMP-005", firstName: "Noura", lastName: "Al-Salem", department: "Inventory", designation: "Inventory Officer", branch: "Riyadh Main Branch", joiningDate: "2024-05-10", employmentType: "Full-Time", shiftId: "HRS-001", mobile: "+966 50 500 2005", status: "Active", role: "Inventory Officer" },
-  { id: "EMP-006", firstName: "Hamad", lastName: "Al-Qahtani", department: "Delivery & Dispatch", designation: "Driver", branch: "Riyadh Main Branch", joiningDate: "2024-04-01", employmentType: "Full-Time", shiftId: "HRS-004", mobile: "+966 50 311 4567", status: "Active", drivingLicense: "DL-966-77821", licenseExpiry: "2027-03-18", vehicleId: "TRK-07", role: "Driver" },
-  { id: "EMP-007", firstName: "Maha", lastName: "Al-Rashid", department: "Procurement", designation: "Procurement Manager", branch: "Riyadh Main Branch", joiningDate: "2023-08-15", employmentType: "Full-Time", shiftId: "HRS-001", mobile: "+966 50 700 2007", status: "Active", userId: "USR-052", role: "Procurement Manager" },
-  { id: "EMP-014", firstName: "Saad", lastName: "Al-Dossari", department: "Delivery & Dispatch", designation: "Driver", branch: "Riyadh Main Branch", joiningDate: "2024-06-01", employmentType: "Full-Time", shiftId: "HRS-004", mobile: "+966 50 411 2234", status: "Active", drivingLicense: "DL-966-88112", licenseExpiry: "2027-08-01", vehicleId: "VAN-02" },
-  { id: "EMP-020", firstName: "Khaled", lastName: "Al-Harthi", department: "Delivery & Dispatch", designation: "Driver", branch: "Riyadh Main Branch", joiningDate: "2024-07-01", employmentType: "Full-Time", shiftId: "HRS-004", mobile: "+966 50 511 3345", status: "Active", drivingLicense: "DL-966-99034", licenseExpiry: "2026-12-11", vehicleId: "TRK-03" },
-  { id: "EMP-021", firstName: "Faisal", lastName: "Al-Mutairi", department: "Delivery & Dispatch", designation: "Driver", branch: "Dammam Branch", joiningDate: "2025-02-01", employmentType: "Full-Time", shiftId: "HRS-004", mobile: "+966 50 611 4456", status: "Active", drivingLicense: "DL-966-11223", licenseExpiry: "2027-02-04", vehicleId: "VAN-05" },
-  { id: "EMP-022", firstName: "Omar", lastName: "Al-Ghamdi", department: "Delivery & Dispatch", designation: "Dispatch Supervisor", branch: "Riyadh Main Branch", joiningDate: "2023-11-01", employmentType: "Full-Time", shiftId: "HRS-001", mobile: "+966 50 711 5567", status: "On Leave" },
-];
-
-const seedDepartments: Department[] = [
-  { id: "DEP-001", name: "Store Operations", arabicName: "عمليات المتجر", code: "STO", managerEmpId: "EMP-001", branchScope: "All Branches", status: "Active" },
-  { id: "DEP-002", name: "Cashier Operations", arabicName: "عمليات الصندوق", code: "CSH", managerEmpId: "EMP-002", branchScope: "All Branches", status: "Active" },
-  { id: "DEP-003", name: "Inventory", arabicName: "إدارة المخزون", code: "INV", managerEmpId: "EMP-005", branchScope: "All Branches", status: "Active" },
-  { id: "DEP-004", name: "Procurement", arabicName: "المشتريات", code: "PRO", managerEmpId: "EMP-007", branchScope: "All Branches", status: "Active" },
-  { id: "DEP-005", name: "Delivery & Dispatch", arabicName: "التوصيل والتوزيع", code: "DEL", managerEmpId: "EMP-022", branchScope: "All Branches", status: "Active" },
-  { id: "DEP-006", name: "Finance", arabicName: "المالية", code: "FIN", branchScope: "All Branches", status: "Active" },
-  { id: "DEP-007", name: "HR & Administration", arabicName: "الموارد البشرية والإدارة", code: "HR", branchScope: "All Branches", status: "Active" },
-  { id: "DEP-008", name: "IT Support", arabicName: "دعم تقنية المعلومات", code: "IT", branchScope: "All Branches", status: "Active" },
-];
-
-const seedShifts: Shift[] = [
-  { id: "HRS-001", name: "Morning Shift", code: "MOR-01", start: "08:00", end: "16:00", breakMin: 60, workingHours: 7, graceMin: 5, departments: ["Store Operations", "Cashier Operations", "Inventory", "Procurement", "Finance"], status: "Active" },
-  { id: "HRS-002", name: "Mid Shift", code: "MID-01", start: "10:00", end: "18:00", breakMin: 60, workingHours: 7, graceMin: 5, status: "Active" },
-  { id: "HRS-003", name: "Evening Shift", code: "EVE-01", start: "14:00", end: "22:00", breakMin: 60, workingHours: 7, graceMin: 5, status: "Active" },
-  { id: "HRS-004", name: "Driver Early Shift", code: "DRV-01", start: "07:00", end: "15:00", breakMin: 45, workingHours: 7.25, graceMin: 10, departments: ["Delivery & Dispatch"], status: "Active" },
-];
-
-const today = new Date().toISOString().slice(0, 10);
-const seedAttendance: Attendance[] = [
-  { id: "ATT-2026-0715-001", empId: "EMP-001", date: today, shiftId: "HRS-001", scheduledIn: "08:00", scheduledOut: "16:00", checkIn: "07:52", status: "Present", source: "Biometric" },
-  { id: "ATT-2026-0715-002", empId: "EMP-002", date: today, shiftId: "HRS-001", scheduledIn: "09:00", scheduledOut: "17:00", checkIn: "08:57", status: "Present", source: "PIN" },
-  { id: "ATT-2026-0715-003", empId: "EMP-005", date: today, shiftId: "HRS-001", scheduledIn: "08:00", scheduledOut: "16:00", checkIn: "08:05", lateMin: 5, status: "Late", source: "Biometric" },
-  { id: "ATT-2026-0715-004", empId: "EMP-006", date: today, shiftId: "HRS-004", scheduledIn: "07:00", scheduledOut: "15:00", checkIn: "07:45", lateMin: 45, status: "Late", source: "Mobile", note: "Supervisor manual entry" },
-  { id: "ATT-2026-0715-005", empId: "EMP-022", date: today, status: "On Leave", source: "Manual" },
-  { id: "ATT-2026-0715-006", empId: "EMP-003", date: today, shiftId: "HRS-001", scheduledIn: "08:00", scheduledOut: "16:00", checkIn: "08:28", status: "Present", source: "Terminal" },
-  { id: "ATT-2026-0715-007", empId: "EMP-004", date: today, shiftId: "HRS-002", scheduledIn: "10:00", scheduledOut: "18:00", checkIn: "09:56", status: "Present", source: "Terminal" },
-];
-
-const seedLeaves: Leave[] = [
-  { id: "LEV-2026-0081", empId: "EMP-022", type: "Annual Leave", start: "2026-07-15", end: "2026-07-18", days: 4, handoverTo: "EMP-006", status: "Approved", approver: "EMP-001" },
-  { id: "LEV-2026-0082", empId: "EMP-003", type: "Sick Leave", start: "2026-07-16", end: "2026-07-17", days: 2, attachment: "Medical-Certificate-0082.pdf", status: "Pending Manager" },
-  { id: "LEV-2026-0083", empId: "EMP-005", type: "Emergency Leave", start: "2026-07-20", end: "2026-07-20", days: 1, status: "Submitted" },
-];
-
-const seedDocs: EmployeeDoc[] = [
-  { id: "DOC-1001", empId: "EMP-006", type: "Driving Licence", number: "DL-966-77821", issueDate: "2022-03-18", expiryDate: "2027-03-18", status: "Valid", verifiedBy: "EMP-007", fileName: "hamad-license.pdf" },
-  { id: "DOC-1002", empId: "EMP-003", type: "National ID / Iqama", number: "2456789123", expiryDate: "2026-08-28", status: "Expiring Soon", fileName: "sara-iqama.pdf" },
-  { id: "DOC-1003", empId: "EMP-005", type: "Professional Certification", issuer: "Inventory Control Level 2", expiryDate: "2026-12-10", status: "Valid" },
-];
-
-const seedContracts: Contract[] = [
-  { id: "CON-2001", empId: "EMP-001", type: "Full-Time", start: "2024-01-15", end: "2027-01-14", jobTitle: "Store Manager", department: "Store Operations", branch: "Riyadh Main Branch", status: "Active" },
-  { id: "CON-2002", empId: "EMP-003", type: "Fixed-Term", start: "2025-09-01", end: "2026-08-31", jobTitle: "Cashier", department: "Cashier Operations", branch: "Riyadh Main Branch", status: "Expiring Soon" },
-  { id: "CON-2003", empId: "EMP-006", type: "Full-Time", start: "2024-04-01", end: "2027-03-31", jobTitle: "Driver", department: "Delivery & Dispatch", branch: "Riyadh Main Branch", status: "Active" },
-];
+type Lookups = { departmentIdByName: Record<string, number>; branchIdByName: Record<string, number> };
 
 type S = {
   employees: Employee[];
@@ -228,6 +180,8 @@ type S = {
   docs: EmployeeDoc[];
   contracts: Contract[];
   empSeq: number;
+  lookups: Lookups;
+  setSynced: (data: Partial<Pick<S, "employees" | "departments" | "shifts" | "attendance" | "leaves" | "docs" | "contracts" | "lookups">>) => void;
   addEmployee: (e: Omit<Employee, "id">) => Employee;
   updateEmployee: (id: string, p: Partial<Employee>) => void;
   deactivateEmployee: (id: string) => void;
@@ -258,153 +212,219 @@ function minutesBetween(a?: string, b?: string) {
   return bh * 60 + bm - (ah * 60 + am);
 }
 
-export const useHrStore = create<S>()(
-  persist(
-    (set, get) => ({
-      employees: seedEmployees,
-      departments: seedDepartments,
-      shifts: seedShifts,
-      attendance: seedAttendance,
-      leaves: seedLeaves,
-      docs: seedDocs,
-      contracts: seedContracts,
-      empSeq: 30,
-      addEmployee: (e) => {
-        const id = `EMP-${String(get().empSeq).padStart(3, "0")}`;
-        const emp: Employee = { ...e, id };
-        set((s) => ({ employees: [emp, ...s.employees], empSeq: s.empSeq + 1 }));
-        useAuditStore.getState().log({
-          module: "hr", event: "EMPLOYEE_CREATED", recordId: id, employee: `${emp.firstName} ${emp.lastName}`, branch: emp.branch, severity: "info", newValue: emp.department,
-        });
-        return emp;
-      },
-      updateEmployee: (id, p) => {
-        set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, ...p } : e)) }));
-        useAuditStore.getState().log({ module: "hr", event: "EMPLOYEE_UPDATED", recordId: id, severity: "info" });
-      },
-      deactivateEmployee: (id) => {
-        set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, status: "Inactive" } : e)) }));
-        useAuditStore.getState().log({ module: "hr", event: "EMPLOYEE_DEACTIVATED", recordId: id, severity: "warning" });
-      },
-      addDepartment: (d) =>
-        set((s) => {
-          const id = `DEP-${String(s.departments.length + 1).padStart(3, "0")}`;
-          useAuditStore.getState().log({ module: "hr", event: "DEPARTMENT_CREATED", recordId: id, severity: "info", newValue: d.name });
-          return { departments: [...s.departments, { ...d, id }] };
-        }),
-      updateDepartment: (id, p) =>
-        set((s) => ({ departments: s.departments.map((d) => (d.id === id ? { ...d, ...p } : d)) })),
-      addShift: (sh) =>
-        set((s) => {
-          const id = `HRS-${String(s.shifts.length + 1).padStart(3, "0")}`;
-          useAuditStore.getState().log({ module: "hr", event: "SHIFT_TEMPLATE_CREATED", recordId: id, severity: "info", newValue: sh.name });
-          return { shifts: [...s.shifts, { ...sh, id }] };
-        }),
-      checkIn: (empId, source, time) => {
-        const t = time ?? nowHHMM();
-        const emp = get().employees.find((e) => e.id === empId);
-        const shift = emp?.shiftId ? get().shifts.find((sh) => sh.id === emp.shiftId) : undefined;
-        const late = shift ? Math.max(0, minutesBetween(shift.start, t) - shift.graceMin) : 0;
-        const rec: Attendance = {
-          id: `ATT-${Date.now()}`,
-          empId,
-          date: new Date().toISOString().slice(0, 10),
-          shiftId: shift?.id,
-          scheduledIn: shift?.start,
-          scheduledOut: shift?.end,
-          checkIn: t,
-          lateMin: late,
-          status: late > 0 ? "Late" : "Present",
-          source,
-        };
-        set((s) => ({ attendance: [rec, ...s.attendance] }));
-        useAuditStore.getState().log({
-          module: "hr", event: "EMPLOYEE_CHECKED_IN", recordId: rec.id, employee: emp ? `${emp.firstName} ${emp.lastName}` : empId, branch: emp?.branch, severity: late > 0 ? "warning" : "info", newValue: t,
-        });
-        return rec;
-      },
-      checkOut: (empId, time) => {
-        const t = time ?? nowHHMM();
-        set((s) => {
-          const idx = s.attendance.findIndex((a) => a.empId === empId && a.date === new Date().toISOString().slice(0, 10) && a.checkIn && !a.checkOut);
-          if (idx === -1) return {};
-          const a = s.attendance[idx];
-          const worked = Math.max(0, minutesBetween(a.checkIn, t)) / 60;
-          const shift = a.shiftId ? s.shifts.find((sh) => sh.id === a.shiftId) : undefined;
-          const breakMin = shift?.breakMin ?? 0;
-          const workedH = Math.max(0, worked - breakMin / 60);
-          const next = [...s.attendance];
-          next[idx] = { ...a, checkOut: t, workedHours: Number(workedH.toFixed(2)) };
-          useAuditStore.getState().log({ module: "hr", event: "EMPLOYEE_CHECKED_OUT", recordId: a.id, employee: a.empId, severity: "info", newValue: t });
-          return { attendance: next };
-        });
-      },
-      adjustAttendance: (id, patch, reason) => {
-        set((s) => ({ attendance: s.attendance.map((a) => (a.id === id ? { ...a, ...patch, status: "Manual Adjustment" } : a)) }));
-        useAuditStore.getState().log({ module: "hr", event: "ATTENDANCE_ADJUSTMENT_APPROVED", recordId: id, reason, severity: "warning" });
-      },
-      addLeave: (l) => {
-        const id = `LEV-2026-${String((get().leaves.length + 84)).padStart(4, "0")}`;
-        const rec: Leave = { ...l, id };
-        set((s) => ({ leaves: [rec, ...s.leaves] }));
-        useAuditStore.getState().log({ module: "hr", event: "LEAVE_CREATED", recordId: id, employee: l.empId, severity: "info", newValue: l.type });
-        return rec;
-      },
-      updateLeaveStatus: (id, status, approver) => {
-        set((s) => ({ leaves: s.leaves.map((l) => (l.id === id ? { ...l, status, approver: approver ?? l.approver } : l)) }));
-        useAuditStore.getState().log({ module: "hr", event: `LEAVE_${status.toUpperCase().replace(/\s/g, "_")}`, recordId: id, severity: status === "Rejected" ? "warning" : "info", newValue: status });
-        // If approved, mark today's/attendance days as On Leave for range dates that match today
-        if (status === "Approved") {
-          const l = get().leaves.find((x) => x.id === id);
-          if (l) {
-            const emp = get().employees.find((e) => e.id === l.empId);
-            if (emp) {
-              const t = new Date().toISOString().slice(0, 10);
-              if (t >= l.start && t <= l.end) {
-                set((s) => ({
-                  employees: s.employees.map((e) => (e.id === l.empId ? { ...e, status: "On Leave" } : e)),
-                  attendance: [
-                    { id: `ATT-${Date.now()}`, empId: l.empId, date: t, status: "On Leave", source: "Manual" as const },
-                    ...s.attendance.filter((a) => !(a.empId === l.empId && a.date === t)),
-                  ],
-                }));
-              }
-            }
-          }
-        }
-      },
-      addDoc: (d) =>
-        set((s) => {
-          const id = `DOC-${String(1000 + s.docs.length + 4).padStart(4, "0")}`;
-          useAuditStore.getState().log({ module: "hr", event: "DOCUMENT_UPLOADED", recordId: id, employee: d.empId, severity: "info", newValue: d.type });
-          return { docs: [{ ...d, id }, ...s.docs] };
-        }),
-      verifyDoc: (id, by) => {
-        set((s) => ({ docs: s.docs.map((d) => (d.id === id ? { ...d, status: "Valid", verifiedBy: by } : d)) }));
-        useAuditStore.getState().log({ module: "hr", event: "DOCUMENT_VERIFIED", recordId: id, severity: "info", newValue: by });
-      },
-      addContract: (c) =>
-        set((s) => {
-          const id = `CON-${String(2000 + s.contracts.length + 4).padStart(4, "0")}`;
-          useAuditStore.getState().log({ module: "hr", event: "CONTRACT_CREATED", recordId: id, employee: c.empId, severity: "info" });
-          return { contracts: [{ ...c, id }, ...s.contracts] };
-        }),
-      renewContract: (id, newC) =>
-        set((s) => {
-          const nextId = `CON-${String(2000 + s.contracts.length + 4).padStart(4, "0")}`;
-          const next = s.contracts.map((c) => (c.id === id ? { ...c, status: "Renewed" as const, supersededBy: nextId } : c));
-          useAuditStore.getState().log({ module: "hr", event: "CONTRACT_RENEWED", recordId: nextId, employee: newC.empId, severity: "info", oldValue: id });
-          return { contracts: [{ ...newC, id: nextId }, ...next] };
-        }),
-      reset: () =>
-        set({
-          employees: seedEmployees, departments: seedDepartments, shifts: seedShifts,
-          attendance: seedAttendance, leaves: seedLeaves, docs: seedDocs, contracts: seedContracts, empSeq: 30,
-        }),
+let empSeqCounter = 30;
+
+export const useHrStore = create<S>()((set, get) => ({
+  employees: [],
+  departments: [],
+  shifts: [],
+  attendance: [],
+  leaves: [],
+  docs: [],
+  contracts: [],
+  empSeq: empSeqCounter,
+  lookups: { departmentIdByName: {}, branchIdByName: {} },
+  setSynced: (data) => set((s) => ({ ...s, ...data })),
+
+  addEmployee: (e) => {
+    const id = `EMP-${String(get().empSeq).padStart(3, "0")}`;
+    const emp: Employee = { ...e, id };
+    set((s) => ({ employees: [emp, ...s.employees], empSeq: s.empSeq + 1 }));
+    useAuditStore.getState().log({
+      module: "hr", event: "EMPLOYEE_CREATED", recordId: id, employee: `${emp.firstName} ${emp.lastName}`, branch: emp.branch, severity: "info", newValue: emp.department,
+    });
+
+    const { departmentIdByName, branchIdByName } = get().lookups;
+    const departmentId = departmentIdByName[emp.department];
+    const branchId = branchIdByName[emp.branch];
+    if (departmentId && branchId) {
+      apiPost("/api/hr/employees", {
+        firstName: emp.firstName, lastName: emp.lastName, arabicName: emp.arabicName ?? null,
+        mobile: emp.mobile, email: emp.email ?? null, joiningDate: emp.joiningDate,
+        employmentType: emp.employmentType.replace("-", ""), departmentId, designation: emp.designation,
+        reportingManagerId: null, branchId, shiftId: emp.shiftId ? Number(emp.shiftId.replace("HRS-", "")) : null,
+        userId: null, createUserAccount: false, password: null,
+        drivingLicense: emp.drivingLicense ?? null, licenseExpiry: emp.licenseExpiry ?? null,
+      }).then((created: unknown) => {
+        const backendId = (created as { id: number }).id;
+        set((s) => ({ employees: s.employees.map((x) => (x.id === id ? { ...x, _backendId: backendId } : x)) }));
+      }).catch((err) => console.warn("Employee not persisted to backend:", err));
+    }
+    return emp;
+  },
+  updateEmployee: (id, p) => {
+    set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, ...p } : e)) }));
+    useAuditStore.getState().log({ module: "hr", event: "EMPLOYEE_UPDATED", recordId: id, severity: "info" });
+  },
+  deactivateEmployee: (id) => {
+    set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, status: "Inactive" } : e)) }));
+    useAuditStore.getState().log({ module: "hr", event: "EMPLOYEE_DEACTIVATED", recordId: id, severity: "warning" });
+    const backendId = get().employees.find((e) => e.id === id)?._backendId;
+    if (backendId) apiPut(`/api/hr/employees/${backendId}/deactivate`).catch((err) => console.warn("Deactivation not persisted:", err));
+  },
+  addDepartment: (d) =>
+    set((s) => {
+      const id = `DEP-${String(s.departments.length + 1).padStart(3, "0")}`;
+      useAuditStore.getState().log({ module: "hr", event: "DEPARTMENT_CREATED", recordId: id, severity: "info", newValue: d.name });
+      apiPost("/api/hr/departments", {
+        name: d.name, arabicName: d.arabicName ?? null, code: d.code,
+        managerEmployeeId: backendEmpId(d.managerEmpId) ?? null, branchScope: d.branchScope.replace(/\s/g, ""), parentId: null,
+      }).catch((err) => console.warn("Department not persisted:", err));
+      return { departments: [...s.departments, { ...d, id }] };
     }),
-    { name: "buildpos-hr-v1" }
-  )
-);
+  updateDepartment: (id, p) =>
+    set((s) => ({ departments: s.departments.map((d) => (d.id === id ? { ...d, ...p } : d)) })),
+  addShift: (sh) =>
+    set((s) => {
+      const id = `HRS-${String(s.shifts.length + 1).padStart(3, "0")}`;
+      useAuditStore.getState().log({ module: "hr", event: "SHIFT_TEMPLATE_CREATED", recordId: id, severity: "info", newValue: sh.name });
+      apiPost("/api/hr/shifts", {
+        name: sh.name, code: sh.code, start: sh.start, end: sh.end, breakMin: sh.breakMin, workingHours: sh.workingHours, graceMin: sh.graceMin,
+      }).catch((err) => console.warn("Shift not persisted:", err));
+      return { shifts: [...s.shifts, { ...sh, id }] };
+    }),
+  checkIn: (empIdStr, source, time) => {
+    const t = time ?? nowHHMM();
+    const emp = get().employees.find((e) => e.id === empIdStr);
+    const shift = emp?.shiftId ? get().shifts.find((sh) => sh.id === emp.shiftId) : undefined;
+    const late = shift ? Math.max(0, minutesBetween(shift.start, t) - shift.graceMin) : 0;
+    const rec: Attendance = {
+      id: `ATT-${Date.now()}`,
+      empId: empIdStr,
+      date: new Date().toISOString().slice(0, 10),
+      shiftId: shift?.id,
+      scheduledIn: shift?.start,
+      scheduledOut: shift?.end,
+      checkIn: t,
+      lateMin: late,
+      status: late > 0 ? "Late" : "Present",
+      source,
+    };
+    set((s) => ({ attendance: [rec, ...s.attendance] }));
+    useAuditStore.getState().log({
+      module: "hr", event: "EMPLOYEE_CHECKED_IN", recordId: rec.id, employee: emp ? `${emp.firstName} ${emp.lastName}` : empIdStr, branch: emp?.branch, severity: late > 0 ? "warning" : "info", newValue: t,
+    });
+
+    const backendId = backendEmpId(empIdStr);
+    if (backendId) {
+      apiCheckIn({ employeeId: backendId, source: ATTENDANCE_SOURCE_TO_BACKEND[source] ?? source })
+        .catch((err) => console.warn("Check-in not persisted:", err));
+    }
+    return rec;
+  },
+  checkOut: (empIdStr, time) => {
+    const t = time ?? nowHHMM();
+    set((s) => {
+      const idx = s.attendance.findIndex((a) => a.empId === empIdStr && a.date === new Date().toISOString().slice(0, 10) && a.checkIn && !a.checkOut);
+      if (idx === -1) return {};
+      const a = s.attendance[idx];
+      const worked = Math.max(0, minutesBetween(a.checkIn, t)) / 60;
+      const shift = a.shiftId ? s.shifts.find((sh) => sh.id === a.shiftId) : undefined;
+      const breakMin = shift?.breakMin ?? 0;
+      const workedH = Math.max(0, worked - breakMin / 60);
+      const next = [...s.attendance];
+      next[idx] = { ...a, checkOut: t, workedHours: Number(workedH.toFixed(2)) };
+      useAuditStore.getState().log({ module: "hr", event: "EMPLOYEE_CHECKED_OUT", recordId: a.id, employee: a.empId, severity: "info", newValue: t });
+      return { attendance: next };
+    });
+    const backendId = backendEmpId(empIdStr);
+    if (backendId) apiCheckOut({ employeeId: backendId }).catch((err) => console.warn("Check-out not persisted:", err));
+  },
+  adjustAttendance: (id, patch, reason) => {
+    set((s) => ({ attendance: s.attendance.map((a) => (a.id === id ? { ...a, ...patch, status: "Manual Adjustment" } : a)) }));
+    useAuditStore.getState().log({ module: "hr", event: "ATTENDANCE_ADJUSTMENT_APPROVED", recordId: id, reason, severity: "warning" });
+    const backendId = get().attendance.find((a) => a.id === id)?._backendId;
+    if (backendId) apiAdjustAttendance(backendId, { checkIn: patch.checkIn, checkOut: patch.checkOut, reason }).catch((err) => console.warn("Adjustment not persisted:", err));
+  },
+  addLeave: (l) => {
+    const id = `LEV-2026-${String((get().leaves.length + 84)).padStart(4, "0")}`;
+    const rec: Leave = { ...l, id };
+    set((s) => ({ leaves: [rec, ...s.leaves] }));
+    useAuditStore.getState().log({ module: "hr", event: "LEAVE_CREATED", recordId: id, employee: l.empId, severity: "info", newValue: l.type });
+
+    const backendId = backendEmpId(l.empId);
+    if (backendId) {
+      apiPost("/api/hr/leaves", {
+        employeeId: backendId, type: LEAVE_TYPE_TO_BACKEND[l.type] ?? l.type, start: l.start, end: l.end, days: l.days,
+        halfDay: l.halfDay ?? false, reason: l.reason ?? null, handoverToEmployeeId: backendEmpId(l.handoverTo) ?? null, attachment: l.attachment ?? null,
+      }).then((created: unknown) => {
+        const backendLeaveId = (created as { id: number }).id;
+        set((s) => ({ leaves: s.leaves.map((x) => (x.id === id ? { ...x, _backendId: backendLeaveId } : x)) }));
+      }).catch((err) => console.warn("Leave not persisted:", err));
+    }
+    return rec;
+  },
+  updateLeaveStatus: (id, status, approver) => {
+    set((s) => ({ leaves: s.leaves.map((l) => (l.id === id ? { ...l, status, approver: approver ?? l.approver } : l)) }));
+    useAuditStore.getState().log({ module: "hr", event: `LEAVE_${status.toUpperCase().replace(/\s/g, "_")}`, recordId: id, severity: status === "Rejected" ? "warning" : "info", newValue: status });
+
+    const l = get().leaves.find((x) => x.id === id);
+    if (l) {
+      const emp = get().employees.find((e) => e.id === l.empId);
+      if (emp) {
+        const t = new Date().toISOString().slice(0, 10);
+        if (status === "Approved" && t >= l.start && t <= l.end) {
+          set((s) => ({
+            employees: s.employees.map((e) => (e.id === l.empId ? { ...e, status: "On Leave" } : e)),
+            attendance: [
+              { id: `ATT-${Date.now()}`, empId: l.empId, date: t, status: "On Leave", source: "Manual" as const },
+              ...s.attendance.filter((a) => !(a.empId === l.empId && a.date === t)),
+            ],
+          }));
+        }
+      }
+    }
+    const backendId = l?._backendId;
+    if (backendId) {
+      apiUpdateLeaveStatus(backendId, { status: LEAVE_STATUS_TO_BACKEND[status] ?? status, approverEmployeeId: backendEmpId(approver) })
+        .catch((err) => console.warn("Leave status not persisted:", err));
+    }
+  },
+  addDoc: (d) =>
+    set((s) => {
+      const id = `DOC-${String(1000 + s.docs.length + 4).padStart(4, "0")}`;
+      useAuditStore.getState().log({ module: "hr", event: "DOCUMENT_UPLOADED", recordId: id, employee: d.empId, severity: "info", newValue: d.type });
+      const backendId = backendEmpId(d.empId);
+      if (backendId) {
+        apiPost("/api/hr/documents", {
+          employeeId: backendId, type: DOC_TYPE_TO_BACKEND[d.type] ?? d.type, number: d.number ?? null,
+          issueDate: d.issueDate ?? null, expiryDate: d.expiryDate ?? null, issuer: d.issuer ?? null, fileName: d.fileName ?? null,
+        }).catch((err) => console.warn("Document not persisted:", err));
+      }
+      return { docs: [{ ...d, id }, ...s.docs] };
+    }),
+  verifyDoc: (id, by) => {
+    set((s) => ({ docs: s.docs.map((d) => (d.id === id ? { ...d, status: "Valid", verifiedBy: by } : d)) }));
+    useAuditStore.getState().log({ module: "hr", event: "DOCUMENT_VERIFIED", recordId: id, severity: "info", newValue: by });
+    const backendId = get().docs.find((d) => d.id === id)?._backendId;
+    const byBackendId = backendEmpId(by) ?? get().employees.find((e) => `${e.firstName} ${e.lastName}` === by)?._backendId;
+    if (backendId && byBackendId) apiVerifyDoc(backendId, { verifiedByEmployeeId: byBackendId }).catch((err) => console.warn("Doc verify not persisted:", err));
+  },
+  addContract: (c) =>
+    set((s) => {
+      const id = `CON-${String(2000 + s.contracts.length + 4).padStart(4, "0")}`;
+      useAuditStore.getState().log({ module: "hr", event: "CONTRACT_CREATED", recordId: id, employee: c.empId, severity: "info" });
+      const backendId = backendEmpId(c.empId);
+      const { departmentIdByName, branchIdByName } = get().lookups;
+      const departmentId = departmentIdByName[c.department];
+      const branchId = branchIdByName[c.branch];
+      if (backendId && departmentId && branchId) {
+        apiPost("/api/hr/contracts", {
+          employeeId: backendId, type: CONTRACT_TYPE_TO_BACKEND[c.type] ?? c.type, number: c.number ?? null,
+          start: c.start, end: c.end, probationEnd: c.probationEnd ?? null, jobTitle: c.jobTitle, departmentId, branchId,
+        }).catch((err) => console.warn("Contract not persisted:", err));
+      }
+      return { contracts: [{ ...c, id }, ...s.contracts] };
+    }),
+  renewContract: (id, newC) =>
+    set((s) => {
+      const nextId = `CON-${String(2000 + s.contracts.length + 4).padStart(4, "0")}`;
+      const next = s.contracts.map((c) => (c.id === id ? { ...c, status: "Renewed" as const, supersededBy: nextId } : c));
+      useAuditStore.getState().log({ module: "hr", event: "CONTRACT_RENEWED", recordId: nextId, employee: newC.empId, severity: "info", oldValue: id });
+      return { contracts: [{ ...newC, id: nextId }, ...next] };
+    }),
+  reset: () => set({ employees: [], departments: [], shifts: [], attendance: [], leaves: [], docs: [], contracts: [], empSeq: 30 }),
+}));
 
 /* --- selectors --- */
 

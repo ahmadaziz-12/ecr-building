@@ -419,7 +419,7 @@ const BRAND = "oklch(0.48 0.19 285)";
 const TEAL = "oklch(0.65 0.12 185)";
 const RED = "oklch(0.62 0.24 25)";
 
-export function SalesPerformance() {
+export function SalesPerformance({ data = hourlySales }: { data?: typeof hourlySales }) {
   return (
     <SectionCard
       title="Sales Performance"
@@ -428,7 +428,7 @@ export function SalesPerformance() {
     >
       <div className="h-72 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={hourlySales} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+          <AreaChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <defs>
               <linearGradient id="g-gross" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={BRAND} stopOpacity={0.35} />
@@ -592,10 +592,16 @@ export function TopCategories() {
 
 /* ---------------- Inventory Health ---------------- */
 
-export function InventoryHealth() {
+export function InventoryHealth({
+  rows: allRows = lowStock,
+  summary = inventorySummary,
+}: {
+  rows?: typeof lowStock;
+  summary?: typeof inventorySummary;
+}) {
   const { values, setValue } = useFilters();
   const cat = values.Category;
-  const rows = cat === "All Categories" ? lowStock : lowStock.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
+  const rows = cat === "All Categories" ? allRows : allRows.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
   return (
     <SectionCard
       title="Stock Health & Availability"
@@ -624,7 +630,7 @@ export function InventoryHealth() {
       }
     >
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
-        {inventorySummary.map((s) => (
+        {summary.map((s) => (
           <div key={s.label} className="rounded-lg border border-black/5 bg-canvas p-2.5">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{s.label}</p>
             <p className="mt-1 text-sm font-semibold text-foreground">{s.value}</p>
@@ -649,7 +655,7 @@ export function InventoryHealth() {
               </TableRow>
             ) : (
               rows.map((r) => (
-              <TableRow key={r.sku} className="bp-enter hover:bg-canvas">
+              <TableRow key={`${r.sku}-${r.branch}`} className="bp-enter hover:bg-canvas">
                 <TableCell className="font-mono text-xs">{r.sku}</TableCell>
                 <TableCell className="font-medium">{r.name}</TableCell>
                 <TableCell className="text-muted-foreground">{r.cat}</TableCell>
@@ -868,7 +874,7 @@ export function ReturnsRefunds() {
 
 /* ---------------- Branch Performance ---------------- */
 
-export function BranchPerformance() {
+export function BranchPerformance({ rows = branches }: { rows?: typeof branches }) {
   return (
     <SectionCard title="Branch Performance" desc="Snapshot across all Mi Money branches.">
       <div className="overflow-x-auto">
@@ -881,7 +887,7 @@ export function BranchPerformance() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {branches.map((b) => (
+            {rows.map((b) => (
               <TableRow key={b.branch} className="hover:bg-canvas">
                 <TableCell className="font-medium">{b.branch}</TableCell>
                 <TableCell className="font-semibold">{b.sales}</TableCell>
@@ -1268,10 +1274,10 @@ export function DashboardHeader({ subtitle }: { subtitle: string }) {
 
 /* ---------- 7.1a Overview KPI cards (6) ---------- */
 
-export function OverviewKpis() {
+export function OverviewKpis({ items = overviewKpis }: { items?: typeof overviewKpis }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-      {overviewKpis.map((k, i) => {
+      {items.map((k, i) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
           <div
@@ -1301,11 +1307,10 @@ export function OverviewKpis() {
 
 /* ---------- 7.1b Today's Sales Summary — compact hourly ---------- */
 
-export function HourlySummary() {
-  const gross = hourlySales.reduce((s, h) => s + h.gross, 0);
-  const net = hourlySales.reduce((s, h) => s + h.net, 0);
-  const tx = 286;
-  const basket = Math.round(net / tx);
+export function HourlySummary({ data = hourlySales, tx = 286 }: { data?: typeof hourlySales; tx?: number }) {
+  const gross = data.reduce((s, h) => s + h.gross, 0);
+  const net = data.reduce((s, h) => s + h.net, 0);
+  const basket = tx === 0 ? 0 : Math.round(net / tx);
   return (
     <SectionCard
       title="Today's Sales Summary"
@@ -1327,7 +1332,7 @@ export function HourlySummary() {
       </div>
       <div className="h-52 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={hourlySales} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+          <AreaChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
             <defs>
               <linearGradient id="g-hs-gross" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={BRAND} stopOpacity={0.35} />
@@ -1354,7 +1359,15 @@ export function HourlySummary() {
 
 /* ---------- 7.1c Dispatch Pipeline Preview (horizontal) ---------- */
 
-export function DispatchPipelinePreview({ onViewAll }: { onViewAll?: () => void }) {
+export function DispatchPipelinePreview({
+  onViewAll,
+  stages = dispatchPipeline,
+  previewCards = deliveryDetail.slice(0, 3),
+}: {
+  onViewAll?: () => void;
+  stages?: typeof dispatchPipeline;
+  previewCards?: typeof deliveryDetail;
+}) {
   return (
     <SectionCard
       title="Dispatch Pipeline"
@@ -1371,7 +1384,7 @@ export function DispatchPipelinePreview({ onViewAll }: { onViewAll?: () => void 
       }
     >
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-        {dispatchPipeline.map((stage, i) => (
+        {stages.map((stage, i) => (
           <div
             key={stage.key}
             className={`bp-enter stagger-${(i % 6) + 1} relative overflow-hidden rounded-xl border border-black/5 bg-canvas p-3 transition hover:-translate-y-0.5 hover:bg-white hover:shadow-sm`}
@@ -1388,7 +1401,7 @@ export function DispatchPipelinePreview({ onViewAll }: { onViewAll?: () => void 
         ))}
       </div>
       <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3">
-        {deliveryDetail.slice(0, 3).map((d) => (
+        {previewCards.map((d) => (
           <div key={d.no} className="bp-enter rounded-lg border border-black/5 bg-white p-2.5 shadow-sm">
             <div className="flex items-center justify-between">
               <span className="font-mono text-[11px] font-semibold text-brand">{d.no}</span>
@@ -1409,19 +1422,26 @@ export function DispatchPipelinePreview({ onViewAll }: { onViewAll?: () => void 
 
 /* ---------- 7.1d Cashier Workspace Summary ---------- */
 
-export function CashierWorkspaceSummary() {
-  const tiles = [
-    { l: "Active terminals", v: cashierWorkspaceSummary.activeTerminals, tone: "success" as Severity },
-    { l: "Open shifts", v: String(cashierWorkspaceSummary.openShifts), tone: "info" as Severity },
-    { l: "Parked sales", v: String(cashierWorkspaceSummary.parkedSales), tone: "warning" as Severity },
-    { l: "Pending approvals", v: String(cashierWorkspaceSummary.pendingApprovals), tone: "warning" as Severity },
-    { l: "Offline terminals", v: cashierWorkspaceSummary.offlineTerminals, tone: "critical" as Severity },
-    { l: "Cash variance", v: cashierWorkspaceSummary.cashVariance, tone: "critical" as Severity },
+export function CashierWorkspaceSummary({
+  tiles,
+  quickActions: actions = cashierWorkspaceSummary.quickActions.map((label) => ({ label, onClick: () => toast.info(label, { description: "Cashier action triggered." }) })),
+}: {
+  tiles?: { l: string; v: string; tone: Severity }[];
+  quickActions?: { label: string; onClick: () => void }[];
+}) {
+  const defaultTiles: { l: string; v: string; tone: Severity }[] = [
+    { l: "Active terminals", v: cashierWorkspaceSummary.activeTerminals, tone: "success" },
+    { l: "Open shifts", v: String(cashierWorkspaceSummary.openShifts), tone: "info" },
+    { l: "Parked sales", v: String(cashierWorkspaceSummary.parkedSales), tone: "warning" },
+    { l: "Pending approvals", v: String(cashierWorkspaceSummary.pendingApprovals), tone: "warning" },
+    { l: "Offline terminals", v: cashierWorkspaceSummary.offlineTerminals, tone: "critical" },
+    { l: "Cash variance", v: cashierWorkspaceSummary.cashVariance, tone: "critical" },
   ];
+  const rows = tiles ?? defaultTiles;
   return (
     <SectionCard title="Cashier Workspace Summary" desc="Terminals, shifts and cash reconciliation at a glance.">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-        {tiles.map((t, i) => (
+        {rows.map((t, i) => (
           <div
             key={t.l}
             className={`bp-enter stagger-${(i % 6) + 1} rounded-lg border border-black/5 bg-canvas p-2.5 transition hover:bg-white hover:shadow-sm`}
@@ -1435,15 +1455,9 @@ export function CashierWorkspaceSummary() {
         ))}
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5">
-        {cashierWorkspaceSummary.quickActions.map((a) => (
-          <Button
-            key={a}
-            size="sm"
-            variant="outline"
-            className="h-8 gap-1 text-xs"
-            onClick={() => toast.info(a, { description: "Cashier action triggered." })}
-          >
-            {a}
+        {actions.map((a) => (
+          <Button key={a.label} size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={a.onClick}>
+            {a.label}
           </Button>
         ))}
       </div>
@@ -1453,7 +1467,15 @@ export function CashierWorkspaceSummary() {
 
 /* ---------- 7.1e Top Material Categories (compact) ---------- */
 
-export function TopCategoriesCompact({ onViewAll }: { onViewAll?: () => void }) {
+export function TopCategoriesCompact({
+  onViewAll,
+  categories = topCategories,
+  topProductByCategory = {},
+}: {
+  onViewAll?: () => void;
+  categories?: typeof topCategories;
+  topProductByCategory?: Record<string, string>;
+}) {
   return (
     <SectionCard
       title="Top Material Categories"
@@ -1478,17 +1500,15 @@ export function TopCategoriesCompact({ onViewAll }: { onViewAll?: () => void }) 
           </TableRow>
         </TableHeader>
         <TableBody>
-          {topCategories.slice(0, 6).map((c) => {
+          {categories.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">No sales recorded yet.</TableCell>
+            </TableRow>
+          )}
+          {categories.slice(0, 6).map((c) => {
             const Icon = iconMap[c.icon] ?? Boxes;
             const tone = toneForStatus(c.health);
-            const top: Record<string, string> = {
-              "Cement & Aggregates": "OPC Cement 50KG",
-              "Steel & Rebar": "Steel Rebar 12MM",
-              "Tiles & Flooring": "Grey Porcelain Tile 60×60",
-              "Paint & Chemicals": "Interior White Paint 20L",
-              "Plumbing": "UPVC Pipe 2 Inch",
-              "Electrical": "Electric Cable 2.5MM",
-            };
+            const top = topProductByCategory;
             return (
               <TableRow key={c.name} className="bp-enter hover:bg-canvas">
                 <TableCell>
@@ -1523,10 +1543,10 @@ export function TopCategoriesCompact({ onViewAll }: { onViewAll?: () => void }) 
 
 /* ---------- 7.2 Sales Performance KPIs & Recent Orders ---------- */
 
-export function SalesPerfKpis() {
+export function SalesPerfKpis({ items = salesPerfKpis }: { items?: typeof salesPerfKpis }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-      {salesPerfKpis.map((k, i) => {
+      {items.map((k, i) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
           <div
@@ -1548,7 +1568,13 @@ export function SalesPerfKpis() {
   );
 }
 
-export function RecentOrdersTable({ onOpenAnalytics }: { onOpenAnalytics?: () => void }) {
+export function RecentOrdersTable({
+  onOpenAnalytics,
+  orders = recentOrders,
+}: {
+  onOpenAnalytics?: () => void;
+  orders?: typeof recentOrders;
+}) {
   return (
     <SectionCard
       title="Recent Orders"
@@ -1572,7 +1598,12 @@ export function RecentOrdersTable({ onOpenAnalytics }: { onOpenAnalytics?: () =>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {recentOrders.map((o) => (
+          {orders.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">No orders yet.</TableCell>
+            </TableRow>
+          )}
+          {orders.map((o) => (
             <TableRow key={o.id} className="bp-enter hover:bg-canvas">
               <TableCell className="font-mono text-xs">{o.id}</TableCell>
               <TableCell className="font-medium">{o.customer}</TableCell>
@@ -1591,10 +1622,10 @@ export function RecentOrdersTable({ onOpenAnalytics }: { onOpenAnalytics?: () =>
 
 /* ---------- 7.3 Inventory KPIs ---------- */
 
-export function InventoryKpiGrid() {
+export function InventoryKpiGrid({ items = inventoryKpis }: { items?: typeof inventoryKpis }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-      {inventoryKpis.map((k, i) => {
+      {items.map((k, i) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
           <div
@@ -1618,7 +1649,7 @@ export function InventoryKpiGrid() {
 
 /* ---------- 7.4 Delivery pipeline board (full, 6 lanes) ---------- */
 
-export function DeliveryPipelineBoard() {
+export function DeliveryPipelineBoard({ cards: allCards = deliveryDetail }: { cards?: typeof deliveryDetail }) {
   const lanes: { key: string; tone: Severity }[] = [
     { key: "Pending", tone: "warning" },
     { key: "Assigned", tone: "info" },
@@ -1631,7 +1662,7 @@ export function DeliveryPipelineBoard() {
     <SectionCard title="Delivery & Dispatch Board" desc="Driver, vehicle, weight and area on every card.">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {lanes.map((lane) => {
-          const cards = deliveryDetail.filter((d) => d.status === lane.key);
+          const cards = allCards.filter((d) => d.status === lane.key);
           return (
             <div key={lane.key} className="rounded-xl border border-black/5 concrete-panel p-2.5">
               <div className="mb-2 flex items-center justify-between">
@@ -1684,10 +1715,10 @@ export function DeliveryPipelineBoard() {
 
 /* ---------- 7.5 Cashier & Terminal ---------- */
 
-export function CashierKpiGrid() {
+export function CashierKpiGrid({ items = cashierKpis }: { items?: typeof cashierKpis }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-      {cashierKpis.map((k, i) => {
+      {items.map((k, i) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
           <div
@@ -1709,7 +1740,7 @@ export function CashierKpiGrid() {
   );
 }
 
-export function TerminalDetailTable() {
+export function TerminalDetailTable({ rows = terminalDetail }: { rows?: typeof terminalDetail }) {
   return (
     <SectionCard title="Terminal Status" desc="Cashier · shift · sales · sync · printer · card terminal.">
       <div className="overflow-x-auto">
@@ -1722,8 +1753,13 @@ export function TerminalDetailTable() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {terminalDetail.map((t) => (
-              <TableRow key={t.term} className="bp-enter hover:bg-canvas">
+            {rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={11} className="py-8 text-center text-sm text-muted-foreground">No shift activity yet.</TableCell>
+              </TableRow>
+            )}
+            {rows.map((t) => (
+              <TableRow key={t.shift} className="bp-enter hover:bg-canvas">
                 <TableCell className="font-mono text-xs">{t.term}</TableCell>
                 <TableCell className="font-medium">{t.cashier}</TableCell>
                 <TableCell className="font-mono text-xs">{t.shift}</TableCell>
@@ -1753,11 +1789,12 @@ export function TerminalDetailTable() {
 
 /* ---------- 7.6 Payments & Returns ---------- */
 
-export function PaymentBreakdownTiles() {
+export function PaymentBreakdownTiles({ items = paymentBreakdown }: { items?: typeof paymentBreakdown }) {
   return (
     <SectionCard title="Payment Summary" desc="Today's collections by method (Card replaces Mada).">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {paymentBreakdown.map((p, i) => {
+        {items.length === 0 && <p className="col-span-full py-6 text-center text-sm text-muted-foreground">No payments recorded yet.</p>}
+        {items.map((p, i) => {
           const Icon = iconMap[p.icon] ?? Receipt;
           return (
             <div
@@ -1780,11 +1817,11 @@ export function PaymentBreakdownTiles() {
   );
 }
 
-export function ReturnBreakdownTiles() {
+export function ReturnBreakdownTiles({ items = returnBreakdown }: { items?: typeof returnBreakdown }) {
   return (
     <SectionCard title="Return Summary" desc="Standard, damaged, surplus, exchanges, VAT reversal and restocking.">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-        {returnBreakdown.map((r) => (
+        {items.map((r) => (
           <div key={r.label} className="rounded-lg border border-black/5 bg-canvas p-2.5">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{r.label}</p>
             <p className="mt-1 font-display text-sm font-bold tabular-nums text-foreground">{r.value}</p>
@@ -1797,7 +1834,15 @@ export function ReturnBreakdownTiles() {
 
 /* ---------- 7.7 Compliance & Alerts grouped ---------- */
 
-export function AlertsByGroup() {
+type AlertItem = (typeof groupedAlerts)[number] & { link?: string | null };
+
+export function AlertsByGroup({
+  alerts: allAlerts = groupedAlerts,
+  onAction,
+}: {
+  alerts?: AlertItem[];
+  onAction?: (a: AlertItem) => void;
+}) {
   const groups: { sev: Severity; title: string }[] = [
     { sev: "critical", title: "Critical" },
     { sev: "warning", title: "Warning" },
@@ -1806,7 +1851,7 @@ export function AlertsByGroup() {
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       {groups.map(({ sev, title }) => {
-        const list = groupedAlerts.filter((a) => a.severity === sev);
+        const list = allAlerts.filter((a) => a.severity === sev);
         return (
           <SectionCard
             key={sev}
@@ -1835,7 +1880,7 @@ export function AlertsByGroup() {
                       size="sm"
                       variant="ghost"
                       className="mt-1 h-7 px-2 text-[11px] text-brand hover:bg-brand/10 hover:text-brand"
-                      onClick={() => toast.success(a.action, { description: a.msg })}
+                      onClick={() => (onAction ? onAction(a) : toast.success(a.action, { description: a.msg }))}
                     >
                       {a.action} <ArrowRight className="ml-1 h-3 w-3" />
                     </Button>

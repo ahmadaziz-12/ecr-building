@@ -1,21 +1,16 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Barcode,
-  CreditCard,
   Minus,
   Plus,
   Trash2,
   UserPlus,
+  X,
   Pause,
   Percent,
   Printer,
-  Banknote,
-  Wallet,
-  Smartphone,
-  Building2,
-  Gift,
-  RotateCcw,
   FileText,
+  RotateCcw,
   Package,
   PaintBucket,
   Hammer,
@@ -34,8 +29,26 @@ import {
   Radar,
   CheckCircle2,
   ShoppingCart,
+  Loader2,
+  Tag,
+  User,
+  ChevronRight,
+  ReceiptText,
 } from "lucide-react";
+import { toast } from "sonner";
 import { productImage } from "@/lib/buildpos/product-images";
+import { useProducts } from "@/lib/api/catalog";
+import { useTerminals, useBranches } from "@/lib/api/admin";
+import {
+  useCustomers, useCheckout, useHoldSale, useResumeSale, useParkedSales, useCreateCustomer,
+  lookupCustomerByPhone, validateCoupon, type CustomerDto, type ValidateCouponResponse, type PaymentInput,
+} from "@/lib/api/pos";
+import { useAuth } from "@/lib/api/auth";
+import { ApiError } from "@/lib/api/client";
+import { PaymentDialog } from "@/components/buildpos/pos/PaymentDialog";
+import { PrinterSetupDialog } from "@/components/buildpos/pos/PrinterSetupDialog";
+import { ReceiptDialog } from "@/components/buildpos/pos/ReceiptDialog";
+import type { OrderDto } from "@/lib/api/pos";
 
 type IconType = typeof Package;
 
@@ -58,24 +71,11 @@ const productIcon: Record<string, IconType> = {
   "SEAL-SILC-300": Droplet,
 };
 
-const products = [
-  { sku: "CEM-OPC-50KG", name: "OPC Cement 50KG", cat: "Cement", uom: "Bag", price: 22.5, stock: 42, tone: "warning" },
-  { sku: "CEM-WHT-40KG", name: "White Cement 40KG", cat: "Cement", uom: "Bag", price: 38.0, stock: 24, tone: "success" },
-  { sku: "STEEL-RBR-12MM", name: "Steel Rebar 12MM", cat: "Steel", uom: "Bundle", price: 1950, stock: 22, tone: "warning" },
-  { sku: "STEEL-RBR-16MM", name: "Steel Rebar 16MM", cat: "Steel", uom: "Bundle", price: 2680, stock: 18, tone: "success" },
-  { sku: "TILE-GRY-60X60", name: "Grey Tile 60x60", cat: "Tiles", uom: "Box", price: 44.0, stock: 12, tone: "critical" },
-  { sku: "TILE-MRB-80X80", name: "Marble Tile 80x80", cat: "Tiles", uom: "Box", price: 120, stock: 34, tone: "success" },
-  { sku: "PAINT-WHT-20L", name: "White Paint 20L", cat: "Paint", uom: "Can", price: 220, stock: 8, tone: "critical" },
-  { sku: "PAINT-BEIGE-4L", name: "Beige Paint 4L", cat: "Paint", uom: "Can", price: 68, stock: 42, tone: "success" },
-  { sku: "PVC-PIPE-2IN", name: "PVC Pipe 2 Inch", cat: "Plumbing", uom: "Piece", price: 32, stock: 34, tone: "warning" },
-  { sku: "PVC-ELB-2IN", name: "PVC Elbow 2 Inch", cat: "Plumbing", uom: "Piece", price: 6, stock: 220, tone: "success" },
-  { sku: "ELEC-CBL-2.5MM", name: "Cable 2.5MM (m)", cat: "Electrical", uom: "Meter", price: 4.2, stock: 90, tone: "warning" },
-  { sku: "ELEC-SW-1G", name: "Wall Switch 1G", cat: "Electrical", uom: "Piece", price: 18, stock: 120, tone: "success" },
-  { sku: "TOOL-DRL-18V", name: "Cordless Drill 18V", cat: "Tools", uom: "Piece", price: 540, stock: 34, tone: "success" },
-  { sku: "TOOL-HMR-500", name: "Claw Hammer 500g", cat: "Tools", uom: "Piece", price: 42, stock: 88, tone: "success" },
-  { sku: "GLASS-6MM-CLR", name: "Clear Glass 6MM", cat: "Tiles", uom: "m²", price: 180, stock: 62, tone: "success" },
-  { sku: "SEAL-SILC-300", name: "Silicone Sealant", cat: "Tools", uom: "Tube", price: 22, stock: 140, tone: "success" },
-];
+function toneForStock(available: number): "success" | "warning" | "critical" {
+  if (available <= 10) return "critical";
+  if (available <= 40) return "warning";
+  return "success";
+}
 
 const toneClass: Record<string, string> = {
   success: "bg-success/10 text-[oklch(0.35_0.1_155)]",
@@ -83,26 +83,148 @@ const toneClass: Record<string, string> = {
   critical: "bg-critical/10 text-critical",
 };
 
-type CartLine = { sku: string; name: string; uom: string; price: number; qty: number };
+type CartLine = { productId: number; sku: string; name: string; uom: string; price: number; vatRate: number; qty: number };
+type CustomFee = { label: string; amount: number };
+const CONTRACTOR_DISCOUNT_PCT = 5;
+const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ر.س";
 
 export function PosCheckout() {
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [lastAdded, setLastAdded] = useState<string | null>(null);
+  const [lastOrderNo, setLastOrderNo] = useState<string | null>(null);
+  const [payOpen, setPayOpen] = useState(false);
+  const [receiptOrder, setReceiptOrder] = useState<OrderDto | null>(null);
+  const [lastCompletedOrder, setLastCompletedOrder] = useState<OrderDto | null>(null);
+
+  const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
+
+  const [customer, setCustomer] = useState<CustomerDto | null>(null);
+  const [phone, setPhone] = useState("");
+  const [lookingUp, setLookingUp] = useState(false);
+  const [notFound, setNotFound] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState("");
+
+  const [couponCode, setCouponCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<ValidateCouponResponse | null>(null);
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
+
+  const [discountType, setDiscountType] = useState<"Percentage" | "Fixed" | "">("");
+  const [discountValue, setDiscountValue] = useState("");
+
+  const [feeLabel, setFeeLabel] = useState("");
+  const [feeAmount, setFeeAmount] = useState("");
+  const [customFees, setCustomFees] = useState<CustomFee[]>([]);
+  const [showHeld, setShowHeld] = useState(false);
+
+  const { user } = useAuth();
+  const { data: terminals } = useTerminals();
+  const { data: customers } = useCustomers();
+  const { data: branches } = useBranches(user?.branchId === null);
+  const checkout = useCheckout();
+  const holdSale = useHoldSale();
+  const resumeSale = useResumeSale();
+  const createCustomer = useCreateCustomer();
+
+  const effectiveBranchId = user?.branchId ?? selectedBranchId ?? branches?.[0]?.id ?? null;
+  const { data: liveProducts } = useProducts(true, effectiveBranchId ?? undefined);
+  useEffect(() => {
+    if (user?.branchId === null && selectedBranchId === null && branches?.[0]) setSelectedBranchId(branches[0].id);
+  }, [user?.branchId, selectedBranchId, branches]);
+
+  const { data: heldSales } = useParkedSales(effectiveBranchId ?? undefined);
+  const terminal = terminals?.find((t) => t.branchId === effectiveBranchId) ?? terminals?.[0];
+
+  const products = useMemo(
+    () =>
+      (liveProducts ?? []).map((p) => ({
+        productId: p.id, sku: p.sku, barcode: p.barcode, name: p.nameEn, cat: p.categoryName, uom: p.stockUom,
+        price: p.sellingPrice, vatRate: p.vatRate, stock: p.totalAvailable, tone: toneForStock(p.totalAvailable),
+      })),
+    [liveProducts],
+  );
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
     return products.filter(
-      (p) => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || p.cat.toLowerCase().includes(q),
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.sku.toLowerCase().includes(q) ||
+        p.cat.toLowerCase().includes(q) ||
+        (p.barcode?.toLowerCase().includes(q) ?? false),
     );
-  }, [query]);
+  }, [query, products]);
+
+  // Barcode scanners act as keyboards: they type the code then send Enter. A real POS should add
+  // the item straight to the cart on that Enter, no manual click — this is what makes it "scan".
+  function submitScan(raw: string) {
+    const q = raw.trim().toLowerCase();
+    if (!q) return;
+    const match = products.find((p) => p.barcode?.toLowerCase() === q) ?? products.find((p) => p.sku.toLowerCase() === q);
+    if (match) {
+      addToCart(match);
+    } else {
+      toast.error(`No product found for "${raw}"`);
+    }
+  }
+
+  function handleScanEnter(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    submitScan(query);
+  }
+
+  const scanInputRef = useRef<HTMLInputElement>(null);
+
+  // Scanners fire keystrokes at whatever element has focus. So the terminal should be scannable
+  // from anywhere on the page, not just after clicking into the search bar — capture keystrokes
+  // globally and route them into the scan buffer, unless the user is deliberately typing somewhere
+  // else (another field, or a dialog is open on top).
+  useEffect(() => {
+    if (payOpen || receiptOrder) return;
+
+    function isTypingElsewhere() {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el || el === scanInputRef.current) return false;
+      const tag = el.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+    }
+
+    function handleGlobalKeyDown(e: KeyboardEvent) {
+      if (isTypingElsewhere()) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submitScan(query);
+        return;
+      }
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        setQuery((q) => q.slice(0, -1));
+        return;
+      }
+      if (e.key.length === 1) {
+        e.preventDefault();
+        setQuery((q) => q + e.key);
+      }
+    }
+
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payOpen, receiptOrder, query, products]);
 
   function addToCart(p: (typeof products)[number]) {
+    const currentQty = cart.find((l) => l.sku === p.sku)?.qty ?? 0;
+    if (currentQty + 1 > p.stock) {
+      toast.error(`Only ${p.stock} ${p.uom} available at this branch.`);
+      return;
+    }
     setCart((c) => {
       const line = c.find((l) => l.sku === p.sku);
-      if (line) return c.map((l) => (l.sku === p.sku ? { ...l, qty: l.qty + 1 } : l));
-      return [...c, { sku: p.sku, name: p.name, uom: p.uom, price: p.price, qty: 1 }];
+      if (line) return c.map((l) => (l.sku === p.sku ? { ...l, qty: line.qty + 1 } : l));
+      return [...c, { productId: p.productId, sku: p.sku, name: p.name, uom: p.uom, price: p.price, vatRate: p.vatRate, qty: 1 }];
     });
     setLastAdded(p.sku);
     setQuery("");
@@ -110,29 +232,184 @@ export function PosCheckout() {
   }
 
   function updateQty(sku: string, delta: number) {
-    setCart((c) =>
-      c.flatMap((l) => (l.sku === sku ? (l.qty + delta <= 0 ? [] : [{ ...l, qty: l.qty + delta }]) : [l]))
-    );
+    const line = cart.find((l) => l.sku === sku);
+    if (!line) return;
+    const nextQty = line.qty + delta;
+    if (nextQty <= 0) {
+      setCart((c) => c.filter((l) => l.sku !== sku));
+      return;
+    }
+    const available = products.find((p) => p.sku === sku)?.stock ?? Infinity;
+    if (nextQty > available) {
+      toast.error(`Only ${available} available at this branch.`);
+      return;
+    }
+    setCart((c) => c.map((l) => (l.sku === sku ? { ...l, qty: nextQty } : l)));
   }
   function removeLine(sku: string) {
     setCart((c) => c.filter((l) => l.sku !== sku));
   }
 
-  const subtotal = cart.reduce((s, l) => s + l.price * l.qty, 0);
-  const discount = cart.length ? subtotal * 0.05 : 0;
-  const taxable = subtotal - discount;
-  const vat = taxable * 0.15;
-  const total = taxable + vat;
+  function resetSale() {
+    setCart([]);
+    setCustomer(null);
+    setPhone("");
+    setNotFound(false);
+    setCouponCode("");
+    setAppliedCoupon(null);
+    setDiscountType("");
+    setDiscountValue("");
+    setCustomFees([]);
+  }
 
-  const money = (n: number) =>
-    n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ر.س";
+  async function handleFindCustomer() {
+    if (!phone.trim()) return;
+    setLookingUp(true);
+    setNotFound(false);
+    try {
+      const found = await lookupCustomerByPhone(phone.trim());
+      if (found) {
+        setCustomer(found);
+      } else {
+        setNotFound(true);
+      }
+    } finally {
+      setLookingUp(false);
+    }
+  }
+
+  async function handleCreateCustomer() {
+    if (!newCustomerName.trim() || !phone.trim()) return;
+    try {
+      const created = await createCustomer.mutateAsync({ nameEn: newCustomerName.trim(), phone: phone.trim() });
+      setCustomer(created);
+      setNotFound(false);
+      toast.success(`${created.nameEn} added`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not create customer");
+    }
+  }
+
+  async function handleApplyCoupon() {
+    if (!couponCode.trim()) return;
+    setApplyingCoupon(true);
+    try {
+      const result = await validateCoupon(couponCode.trim().toUpperCase());
+      if (!result.valid) {
+        toast.error(result.reason ?? "Invalid coupon");
+        return;
+      }
+      setAppliedCoupon(result);
+      toast.success(`Coupon ${result.code} applied`);
+    } catch {
+      toast.error("Could not validate coupon");
+    } finally {
+      setApplyingCoupon(false);
+    }
+  }
+
+  function addCustomFee() {
+    const amount = Number(feeAmount);
+    if (!feeLabel.trim() || !amount || amount <= 0) return;
+    setCustomFees((f) => [...f, { label: feeLabel.trim(), amount }]);
+    setFeeLabel("");
+    setFeeAmount("");
+  }
+
+  async function handleHold() {
+    if (cart.length === 0 || !effectiveBranchId) return;
+    try {
+      await holdSale.mutateAsync({
+        branchId: effectiveBranchId, terminalId: terminal?.id ?? null, customerId: customer?.id ?? null,
+        notes: customer ? undefined : "Walk-in", lines: cart.map((l) => ({ productId: l.productId, qty: l.qty })),
+      });
+      toast.success("Sale held", { description: "Resume it anytime from Held Sales." });
+      resetSale();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not hold sale");
+    }
+  }
+
+  function handleResume(holdId: number) {
+    const held = heldSales?.find((h) => h.id === holdId);
+    if (!held) return;
+    const lines: CartLine[] = held.lines.map((l) => {
+      const product = products.find((p) => p.productId === l.productId);
+      return { productId: l.productId, sku: l.sku, name: l.productName, uom: product?.uom ?? "Piece", price: l.unitPrice, vatRate: product?.vatRate ?? 15, qty: l.qty };
+    });
+    setCart(lines);
+    if (held.customerId) setCustomer(customers?.find((c) => c.id === held.customerId) ?? null);
+    resumeSale.mutate(holdId);
+    setShowHeld(false);
+    toast.success(`${held.ticketNo} resumed`);
+  }
+
+  const isContractor = customer?.type === "Contractor";
+  const contractorDiscountPct = isContractor ? CONTRACTOR_DISCOUNT_PCT : 0;
+  const subtotal = cart.reduce((s, l) => s + l.price * l.qty, 0);
+  const lineTotalsSum = cart.reduce((s, l) => s + l.price * l.qty * (1 - contractorDiscountPct / 100), 0);
+  const contractorDiscount = subtotal - lineTotalsSum;
+
+  const couponAmount = appliedCoupon?.valid
+    ? appliedCoupon.discountType === "Percentage" ? (lineTotalsSum * appliedCoupon.value) / 100 : appliedCoupon.value
+    : 0;
+  const manualValue = Number(discountValue) || 0;
+  const manualAmount = discountType === "Percentage" ? (lineTotalsSum * manualValue) / 100 : discountType === "Fixed" ? manualValue : 0;
+  const orderDiscount = Math.min(lineTotalsSum, couponAmount + manualAmount);
+  const discountRatio = lineTotalsSum === 0 ? 0 : orderDiscount / lineTotalsSum;
+
+  const vat = cart.reduce((s, l) => s + l.price * l.qty * (1 - contractorDiscountPct / 100) * (1 - discountRatio) * (l.vatRate / 100), 0);
+  const feesTotal = customFees.reduce((s, f) => s + f.amount, 0);
+  const total = lineTotalsSum - orderDiscount + vat + feesTotal;
 
   const idle = query === "" && cart.length === 0;
+
+  async function handleCharge(payments: PaymentInput[]) {
+    if (!effectiveBranchId) throw new Error("No branch selected.");
+    const order = await checkout.mutateAsync({
+      branchId: effectiveBranchId,
+      terminalId: terminal?.id ?? null,
+      customerId: customer?.id ?? null,
+      type: isContractor ? "Contractor" : "Retail",
+      lines: cart.map((l) => ({ productId: l.productId, qty: l.qty })),
+      payments,
+      couponCode: appliedCoupon?.code ?? null,
+      manualDiscount: discountType && manualValue > 0 ? { type: discountType, value: manualValue } : null,
+      customFees,
+    });
+    toast.success(`Payment accepted · ${order.orderNo}`, { description: money(order.grandTotal) });
+    setLastOrderNo(order.orderNo);
+    setReceiptOrder(order);
+    setLastCompletedOrder(order);
+    resetSale();
+  }
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_420px]">
       {/* Left — scanner-first panel */}
       <div className="flex flex-col gap-3">
+        {/* Top bar: branch + printer setup */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {user?.branchId === null && branches ? (
+              <select
+                value={effectiveBranchId ?? ""}
+                onChange={(e) => setSelectedBranchId(Number(e.target.value))}
+                className="h-9 rounded-lg border border-black/10 bg-white px-2 text-xs font-medium text-foreground outline-none focus:border-brand"
+              >
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.nameEn}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                {terminal?.branchName ?? "Branch"}
+              </span>
+            )}
+          </div>
+          <PrinterSetupDialog terminalId={terminal?.id} />
+        </div>
+
         {/* Scanner hero — the ONLY primary surface */}
         <div className="relative overflow-hidden rounded-3xl border border-brand/10 bg-gradient-to-br from-[oklch(0.22_0.08_285)] via-[oklch(0.18_0.06_285)] to-[oklch(0.12_0.05_285)] p-6 text-white shadow-[0_10px_40px_-12px_rgba(76,29,149,0.5)]">
           <div className="blueprint-grid-dark absolute inset-0 opacity-40" />
@@ -146,7 +423,7 @@ export function PosCheckout() {
                 {idle && <span className="pos-radar absolute inset-0 rounded-xl ring-2 ring-white/50" />}
               </span>
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/60">Point&nbsp;of&nbsp;Sale · Terminal T-04</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/60">Point&nbsp;of&nbsp;Sale · {terminal?.code ?? "Terminal"}</p>
                 <p className="font-display text-lg font-semibold">Scanner Ready</p>
               </div>
             </div>
@@ -173,8 +450,10 @@ export function PosCheckout() {
                 <Barcode className="h-5 w-5" />
               </span>
               <input
+                ref={scanInputRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={handleScanEnter}
                 placeholder="Scan barcode or search product / SKU…"
                 className="h-11 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-brand-glow focus:bg-white/10"
                 autoFocus
@@ -198,8 +477,8 @@ export function PosCheckout() {
                   <p>Cleared · online</p>
                 </div>
                 <div className="rounded-lg bg-white/5 px-2 py-2 ring-1 ring-white/10">
-                  <p className="font-display text-white text-sm">Shift 03 · 06:12h</p>
-                  <p>Yasser · cashier</p>
+                  <p className="font-display text-white text-sm">{user?.name ?? "Cashier"}</p>
+                  <p>{user?.role ?? "cashier"}</p>
                 </div>
               </div>
             )}
@@ -224,7 +503,7 @@ export function PosCheckout() {
               </button>
             </div>
             {shown.length === 0 ? (
-              <div className="p-6 text-center text-sm text-muted-foreground">No product found. Try SKU or name.</div>
+              <div className="p-6 text-center text-sm text-muted-foreground">No product found. Try SKU, name or barcode.</div>
             ) : (
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
                 {shown.map((p, i) => {
@@ -267,6 +546,32 @@ export function PosCheckout() {
             )}
           </div>
         )}
+
+        {/* Held sales */}
+        {heldSales && heldSales.length > 0 && (
+          <div className="rounded-2xl border border-black/5 bg-white p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Held Sales ({heldSales.length})</p>
+            </div>
+            <div className="space-y-1.5">
+              {heldSales.map((h) => (
+                <button
+                  key={h.id}
+                  onClick={() => handleResume(h.id)}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg border border-black/5 bg-canvas px-3 py-2 text-left transition hover:border-brand/40 hover:bg-brand/5"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{h.ticketNo} · {h.customerName ?? "Walk-in"}</p>
+                    <p className="text-[11px] text-muted-foreground">{h.lines.length} item{h.lines.length === 1 ? "" : "s"} · {h.notes ?? "No notes"}</p>
+                  </div>
+                  <span className="flex flex-none items-center gap-1 font-mono text-sm font-semibold text-foreground">
+                    {money(h.total)} <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Right — cart & payment */}
@@ -275,7 +580,7 @@ export function PosCheckout() {
           <div>
             <p className="text-xs text-muted-foreground">Current Sale</p>
             <p className="font-display text-base font-semibold text-foreground">
-              Ticket #ORD-8096
+              {lastOrderNo ? `Last: ${lastOrderNo}` : "New Sale"}
               {cart.length > 0 && (
                 <span className="pos-pop ml-2 inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-semibold text-brand">
                   <ShoppingCart className="h-3 w-3" /> {cart.reduce((s, l) => s + l.qty, 0)}
@@ -284,27 +589,99 @@ export function PosCheckout() {
             </p>
           </div>
           <div className="flex gap-1">
-            <button className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5" title="Add customer">
-              <UserPlus className="h-4 w-4" />
+            {customer ? (
+              <button
+                onClick={() => setCustomer(null)}
+                className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5"
+                title="Detach customer"
+              >
+                <UserPlus className="h-4 w-4" />
+              </button>
+            ) : null}
+            <button
+              onClick={handleHold}
+              disabled={cart.length === 0 || holdSale.isPending}
+              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5 disabled:opacity-40"
+              title="Hold sale"
+            >
+              {holdSale.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pause className="h-4 w-4" />}
             </button>
-            <button className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5" title="Park sale">
-              <Pause className="h-4 w-4" />
-            </button>
-            <button className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5" title="New quotation">
+            <button
+              onClick={() => toast.info("Quotations are coming soon.")}
+              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5"
+              title="New quotation"
+            >
               <FileText className="h-4 w-4" />
             </button>
-            <button className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5" title="Return">
+            <button
+              onClick={() => toast.info("Process returns from Finance → Returns & Refunds.")}
+              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5"
+              title="Return"
+            >
               <RotateCcw className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        <div className="border-b border-black/5 px-4 py-2 text-xs">
-          <p className="text-muted-foreground">Customer</p>
-          <p className="font-medium text-foreground">Al Noor Contracting · Contractor · Credit 500,000 ر.س</p>
+        {/* Customer lookup / create / attached */}
+        <div className="border-b border-black/5 px-4 py-2.5 text-xs">
+          {customer ? (
+            <div className="flex items-center justify-between gap-2 rounded-lg bg-brand/5 px-2.5 py-1.5">
+              <div className="flex items-center gap-1.5 text-foreground">
+                <User className="h-3.5 w-3.5 text-brand" />
+                <span className="font-medium">{customer.nameEn}</span>
+                <span className="text-muted-foreground">· {customer.type} · {customer.phone}</span>
+              </div>
+              <button onClick={() => setCustomer(null)} className="text-muted-foreground hover:text-critical"><X className="h-3.5 w-3.5" /></button>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <div className="relative flex-1">
+                  <User className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={phone}
+                    onChange={(e) => { setPhone(e.target.value); setNotFound(false); }}
+                    onKeyDown={(e) => e.key === "Enter" && handleFindCustomer()}
+                    placeholder="Customer phone (or leave blank for walk-in)"
+                    className="h-8 w-full rounded-md border border-black/10 bg-white pl-8 pr-2 text-xs outline-none focus:border-brand"
+                  />
+                </div>
+                <button
+                  onClick={handleFindCustomer}
+                  disabled={!phone.trim() || lookingUp}
+                  className="h-8 rounded-md border border-black/10 bg-canvas px-2.5 text-xs font-medium hover:border-brand/40 disabled:opacity-40"
+                >
+                  {lookingUp ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Find"}
+                </button>
+              </div>
+              {notFound && (
+                <div className="rounded-lg border border-warning/30 bg-warning/10 p-2">
+                  <p className="mb-1.5 text-[11px] font-medium text-[oklch(0.4_0.13_70)]">Not found — save as new customer?</p>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      value={newCustomerName}
+                      onChange={(e) => setNewCustomerName(e.target.value)}
+                      placeholder="Customer name"
+                      autoFocus
+                      className="h-8 flex-1 rounded-md border border-black/10 bg-white px-2 text-xs outline-none focus:border-brand"
+                    />
+                    <button
+                      onClick={handleCreateCustomer}
+                      disabled={!newCustomerName.trim() || createCustomer.isPending}
+                      className="h-8 rounded-md bg-brand px-2.5 text-xs font-medium text-brand-foreground hover:bg-brand/90 disabled:opacity-40"
+                    >
+                      {createCustomer.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+                    </button>
+                    <button onClick={() => setNotFound(false)} className="h-8 rounded-md px-2 text-xs text-muted-foreground hover:bg-black/5">Skip</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        <div className="max-h-[42vh] flex-1 divide-y divide-black/5 overflow-y-auto">
+        <div className="max-h-[32vh] flex-1 divide-y divide-black/5 overflow-y-auto">
           {cart.length === 0 && (
             <div className="flex flex-col items-center justify-center gap-2 p-8 text-center">
               <span className="grid h-12 w-12 place-items-center rounded-full bg-canvas text-muted-foreground">
@@ -367,65 +744,139 @@ export function PosCheckout() {
           ))}
         </div>
 
+        {/* Coupon / discount / custom fee controls */}
+        <div className="space-y-2 border-t border-black/5 bg-canvas px-4 py-2.5 text-xs">
+          {appliedCoupon?.valid ? (
+            <div className="flex items-center justify-between rounded-md bg-brand/10 px-2.5 py-1.5">
+              <span className="flex items-center gap-1.5 font-medium text-brand"><Tag className="h-3.5 w-3.5" /> {appliedCoupon.code} — saves {money(couponAmount)}</span>
+              <button onClick={() => setAppliedCoupon(null)} className="text-brand hover:text-critical"><X className="h-3.5 w-3.5" /></button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <div className="relative flex-1">
+                <Tag className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={couponCode}
+                  onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => e.key === "Enter" && handleApplyCoupon()}
+                  placeholder="Coupon code"
+                  className="h-8 w-full rounded-md border border-black/10 bg-white pl-8 pr-2 text-xs uppercase outline-none focus:border-brand"
+                />
+              </div>
+              <button
+                onClick={handleApplyCoupon}
+                disabled={!couponCode.trim() || applyingCoupon}
+                className="h-8 rounded-md border border-black/10 bg-white px-2.5 text-xs font-medium hover:border-brand/40 disabled:opacity-40"
+              >
+                {applyingCoupon ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Apply"}
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center gap-1.5">
+            <select
+              value={discountType}
+              onChange={(e) => setDiscountType(e.target.value as typeof discountType)}
+              className="h-8 rounded-md border border-black/10 bg-white px-1.5 text-xs outline-none focus:border-brand"
+            >
+              <option value="">Manual discount…</option>
+              <option value="Percentage">% off</option>
+              <option value="Fixed">SAR off</option>
+            </select>
+            <input
+              type="number"
+              value={discountValue}
+              onChange={(e) => setDiscountValue(e.target.value)}
+              disabled={!discountType}
+              placeholder="0"
+              className="h-8 w-20 rounded-md border border-black/10 bg-white px-2 text-xs outline-none focus:border-brand disabled:opacity-40"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <input
+              value={feeLabel}
+              onChange={(e) => setFeeLabel(e.target.value)}
+              placeholder="Custom fee (e.g. Delivery)"
+              className="h-8 flex-1 rounded-md border border-black/10 bg-white px-2 text-xs outline-none focus:border-brand"
+            />
+            <input
+              type="number"
+              value={feeAmount}
+              onChange={(e) => setFeeAmount(e.target.value)}
+              placeholder="0.00"
+              className="h-8 w-20 rounded-md border border-black/10 bg-white px-2 text-xs outline-none focus:border-brand"
+            />
+            <button onClick={addCustomFee} className="h-8 rounded-md border border-black/10 bg-white px-2.5 text-xs font-medium hover:border-brand/40">
+              Add
+            </button>
+          </div>
+          {customFees.map((f, i) => (
+            <div key={i} className="flex items-center justify-between rounded-md bg-white px-2.5 py-1">
+              <span className="text-foreground">{f.label}</span>
+              <span className="flex items-center gap-1.5">
+                {money(f.amount)}
+                <button onClick={() => setCustomFees((fs) => fs.filter((_, idx) => idx !== i))} className="text-muted-foreground hover:text-critical"><X className="h-3 w-3" /></button>
+              </span>
+            </div>
+          ))}
+        </div>
+
         <div className="space-y-1.5 border-t border-black/5 bg-canvas px-4 py-3 text-sm">
           <div className="flex justify-between text-muted-foreground">
             <span>Subtotal ({cart.length} lines)</span>
             <span>{money(subtotal)}</span>
           </div>
+          {contractorDiscountPct > 0 && (
+            <div className="flex justify-between text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <Percent className="h-3.5 w-3.5" /> Contractor discount {contractorDiscountPct}%
+              </span>
+              <span>-{money(contractorDiscount)}</span>
+            </div>
+          )}
+          {orderDiscount > 0 && (
+            <div className="flex justify-between text-muted-foreground">
+              <span>Coupon / manual discount</span>
+              <span>-{money(orderDiscount)}</span>
+            </div>
+          )}
+          {feesTotal > 0 && (
+            <div className="flex justify-between text-muted-foreground">
+              <span>Fees</span>
+              <span>{money(feesTotal)}</span>
+            </div>
+          )}
           <div className="flex justify-between text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <Percent className="h-3.5 w-3.5" /> Contractor discount 5%
-            </span>
-            <span>-{money(discount)}</span>
-          </div>
-          <div className="flex justify-between text-muted-foreground">
-            <span>VAT 15%</span>
+            <span>VAT</span>
             <span>{money(vat)}</span>
           </div>
           <div className="mt-1 flex items-center justify-between border-t border-black/10 pt-2">
             <span className="font-display text-base font-semibold text-foreground">Total</span>
-            <span key={total} className="pos-pop font-display text-2xl font-bold text-brand">{money(total)}</span>
+            <span key={total} className="pos-pop font-display text-2xl font-bold text-brand">{money(Math.max(0, total))}</span>
           </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-1 border-t border-black/5 p-2">
-          {[
-            { label: "Cash", icon: Banknote },
-            { label: "Mada", icon: CreditCard },
-            { label: "Apple Pay", icon: Smartphone },
-            { label: "STC Pay", icon: Wallet },
-            { label: "Transfer", icon: Building2 },
-            { label: "Loyalty", icon: Gift },
-          ].map((p) => {
-            const Icon = p.icon;
-            return (
-              <button
-                key={p.label}
-                disabled={cart.length === 0}
-                className="flex flex-col items-center gap-1 rounded-lg border border-black/5 bg-canvas p-2 text-[11px] font-medium text-foreground transition hover:-translate-y-0.5 hover:border-brand/40 hover:bg-brand/5 hover:text-brand disabled:opacity-40 disabled:hover:translate-y-0 disabled:cursor-not-allowed"
-              >
-                <Icon className="h-4 w-4" />
-                {p.label}
-              </button>
-            );
-          })}
         </div>
 
         <div className="grid grid-cols-2 gap-2 border-t border-black/5 p-3">
           <button
-            disabled={cart.length === 0}
+            disabled={!lastCompletedOrder}
+            onClick={() => setReceiptOrder(lastCompletedOrder)}
             className="flex items-center justify-center gap-2 rounded-lg border border-black/10 bg-white px-3 py-2.5 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <Printer className="h-4 w-4" /> Print
+            <Printer className="h-4 w-4" /> Reprint
           </button>
           <button
+            onClick={() => setPayOpen(true)}
             disabled={cart.length === 0}
             className="flex items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition hover:bg-brand/90 hover:shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-brand"
           >
-            Pay {money(total)}
+            <ReceiptText className="h-4 w-4" /> Charge {money(Math.max(0, total))}
           </button>
         </div>
       </aside>
+
+      <PaymentDialog open={payOpen} onOpenChange={setPayOpen} total={Math.max(0, total)} onCharge={handleCharge} />
+      <ReceiptDialog order={receiptOrder} terminalId={terminal?.id ?? null} onClose={() => setReceiptOrder(null)} />
     </div>
   );
 }

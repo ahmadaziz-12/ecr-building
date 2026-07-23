@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useNavigate,
   HeadContent,
   Scripts,
   useRouterState,
@@ -15,7 +16,9 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AppLayout } from "../components/buildpos/AppLayout";
 import { Toaster } from "@/components/ui/sonner";
 import { FilterProvider } from "@/lib/buildpos/filter-context";
-import { LocaleEffect } from "@/lib/store/locale";
+import { I18nProvider } from "@/lib/i18n";
+import { AutoTranslate } from "@/lib/auto-translate";
+import { AuthProvider, useAuth } from "@/lib/api/auth";
 
 function NotFoundComponent() {
   return (
@@ -140,22 +143,47 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isPublic = pathname === "/";
 
   return (
     <QueryClientProvider client={queryClient}>
-      <FilterProvider>
-        <LocaleEffect />
-        {isPublic ? (
-          <Outlet />
-        ) : (
-          <AppLayout>
-            <Outlet />
-          </AppLayout>
-        )}
-        <Toaster position="top-right" richColors closeButton />
-      </FilterProvider>
+      <AuthProvider>
+        <I18nProvider>
+          <FilterProvider>
+            <AutoTranslate />
+            <AuthGate />
+            <Toaster position="top-right" richColors closeButton />
+          </FilterProvider>
+        </I18nProvider>
+      </AuthProvider>
     </QueryClientProvider>
+  );
+}
+
+function AuthGate() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isPublic = pathname === "/";
+  const { user, isLoading } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isLoading && !user && !isPublic) {
+      navigate({ to: "/" });
+    }
+  }, [isLoading, user, isPublic, navigate]);
+
+  if (isPublic) return <Outlet />;
+
+  if (isLoading || !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-canvas">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+      </div>
+    );
+  }
+
+  return (
+    <AppLayout>
+      <Outlet />
+    </AppLayout>
   );
 }

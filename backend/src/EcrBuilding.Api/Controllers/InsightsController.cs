@@ -1,0 +1,122 @@
+using EcrBuilding.Api.Authorization;
+using EcrBuilding.Application.Abstractions;
+using EcrBuilding.Application.Insights;
+using EcrBuilding.Domain.Entities;
+using EcrBuilding.Domain.Enums;
+using EcrBuilding.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace EcrBuilding.Api.Controllers;
+
+[ApiController]
+[Route("api/insights")]
+[Authorize]
+[RequireModule(ModuleArea.Insights, AccessLevel.View)]
+public class InsightsController(AppDbContext db) : ControllerBase
+{
+    [HttpGet("sales")]
+    public async Task<ActionResult<List<SalesSegmentDto>>> Sales(CancellationToken ct)
+    {
+        var lines = await db.OrderLines.Include(l => l.Product).ThenInclude(p => p!.Category).Include(l => l.Order)
+            .Where(l => l.Order!.Status == OrderStatus.Completed).ToListAsync(ct);
+        var totalValue = lines.Sum(l => l.LineTotal);
+        var returnsByCategory = await db.ReturnLines.Include(l => l.Product).ThenInclude(p => p!.Category).ToListAsync(ct);
+
+        var segments = lines.GroupBy(l => l.Product?.Category?.NameEn ?? "Uncategorized").Select(g =>
+        {
+            var value = g.Sum(l => l.LineTotal);
+            var tx = g.Select(l => l.OrderId).Distinct().Count();
+            var returns = returnsByCategory.Where(r => r.Product?.Category?.NameEn == g.Key).Sum(r => r.Amount);
+            return new SalesSegmentDto(
+                g.Key, value, totalValue == 0 ? 0 : Math.Round(value / totalValue * 100, 1), tx,
+                tx == 0 ? 0 : Math.Round(value / tx, 2), value == 0 ? 0 : Math.Round(returns / value * 100, 1), "▲");
+        }).OrderByDescending(s => s.Value).ToList();
+
+        return Ok(segments);
+    }
+
+    [HttpGet("kpi")]
+    public async Task<ActionResult<List<KpiDto>>> Kpis(CancellationToken ct)
+    {
+        var kpis = await db.Kpis.ToListAsync(ct);
+        var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+
+        var netSales = await db.Orders.Where(o => o.Status == OrderStatus.Completed && o.CreatedAt >= monthStart).SumAsync(o => o.GrandTotal, ct);
+        var revenue = await db.OrderLines.Include(l => l.Order).Where(l => l.Order!.Status == OrderStatus.Completed && l.Order!.CreatedAt >= monthStart).SumAsync(l => l.LineTotal, ct);
+        var cost = await db.OrderLines.Include(l => l.Order).Include(l => l.Product)
+            .Where(l => l.Order!.Status == OrderStatus.Completed && l.Order!.CreatedAt >= monthStart).SumAsync(l => l.Qty * l.Product!.CostPrice, ct);
+        var grossMarginPct = revenue == 0 ? 0 : Math.Round((revenue - cost) / revenue * 100, 1);
+        var returnsValue = await db.ReturnLines.Include(l => l.Return).Where(l => l.Return!.CreatedAt >= monthStart).SumAsync(l => l.Amount, ct);
+        var returnRatePct = netSales == 0 ? 0 : Math.Round(returnsValue / netSales * 100, 1);
+        var totalInvoices = await db.ZatcaInvoices.CountAsync(ct);
+        var clearedInvoices = await db.ZatcaInvoices.CountAsync(i => i.Status == ZatcaInvoiceStatus.Cleared, ct);
+        var zatcaSuccessPct = totalInvoices == 0 ? 100 : Math.Round((decimal)clearedInvoices / totalInvoices * 100, 1);
+
+        decimal Actual(string key) => key switch
+        {
+            "NetSalesMtd" => netSales,
+            "GrossMarginPct" => grossMarginPct,
+            "ReturnRatePct" => returnRatePct,
+            "ZatcaSuccessPct" => zatcaSuccessPct,
+            _ => 0,
+        };
+
+        return Ok(kpis.Select(k =>
+        {
+            var actual = Actual(k.MetricKey);
+            var variance = k.Target == 0 ? 0 : Math.Round((actual - k.Target) / k.Target * 100, 1);
+            var status = variance >= 0 ? "On Target" : variance >= -5 ? "Below Target" : "Critical";
+            return new KpiDto(k.Id, k.Name, k.Category, k.Owner, k.Target, actual, variance, status, k.Period);
+        }).ToList());
+    }
+
+    [HttpGet("reports")]
+    public async Task<ActionResult<List<ReportDefinitionDto>>> Reports(CancellationToken ct)
+    {
+        var rows = await db.ReportDefinitions.OrderBy(r => r.Code).ToListAsync(ct);
+        return Ok(rows.Select(r => new ReportDefinitionDto(r.Id, r.Code, r.Name, r.Category, r.Owner, r.Frequency, r.Format, r.Status.ToString())).ToList());
+    }
+
+    [HttpGet("bi")]
+    public async Task<ActionResult<List<BiFeedDto>>> BiFeeds(CancellationToken ct)
+    {
+        var rows = await db.BiFeeds.OrderBy(f => f.Name).ToListAsync(ct);
+        return Ok(rows.Select(f => new BiFeedDto(f.Id, f.Name, f.Source, f.Destination, f.Frequency, f.LastRun, f.Rows, f.Failed, f.Latency, f.Status)).ToList());
+    }
+}
+
+[ApiController]
+[Route("api/admin/overview")]
+[Authorize]
+[RequireModule(ModuleArea.Admin, AccessLevel.View)]
+public class AdminOverviewController(AppDbContext db) : ControllerBase
+{
+    [HttpGet]
+    public async Task<ActionResult<AdminOverviewDto>> Get(CancellationToken ct)
+    {
+        var activeUsers = await db.Users.CountAsync(u => u.Status == UserStatus.Active, ct);
+        var pendingApprovals = await db.Leaves.CountAsync(l => l.Status == LeaveStatus.Submitted || l.Status == LeaveStatus.PendingManager || l.Status == LeaveStatus.PendingHr, ct);
+        var openMaintenance = await db.MaintenanceTickets.CountAsync(t => t.Status == MaintenanceStatus.Open || t.Status == MaintenanceStatus.InProgress, ct);
+        var yesterday = DateTime.UtcNow.AddHours(-24);
+        var criticalEvents = await db.AuditLogs.CountAsync(a => a.Severity == AuditSeverity.Critical && a.CreatedAt >= yesterday, ct);
+        var complianceOverdue = await db.ComplianceControls.CountAsync(c => c.Status == ComplianceStatus.Overdue, ct);
+
+        var totalInvoices = await db.ZatcaInvoices.CountAsync(ct);
+        var clearedInvoices = await db.ZatcaInvoices.CountAsync(i => i.Status == ZatcaInvoiceStatus.Cleared, ct);
+        var zatcaRate = totalInvoices == 0 ? 100m : Math.Round((decimal)clearedInvoices / totalInvoices * 100, 1);
+        var identity = await db.ZatcaIdentities.FirstOrDefaultAsync(ct);
+
+        var areas = new List<OverviewAreaDto>
+        {
+            new("Data API", "Healthy", "IT", "Availability", "100%", "≥ 99.9%"),
+            new("ZATCA Integration", zatcaRate >= 99 ? "Healthy" : "Degraded", "Finance", "Success Rate", $"{zatcaRate}%", "≥ 99.5%"),
+            new("Payment Gateway", "Healthy", "Finance", "Mode", "Simulated (happy-path)", "N/A"),
+            new("Database", "Healthy", "IT", "Provider", "MariaDB", "N/A"),
+            new("ZATCA Onboarding", identity?.OnboardingStatus == ZatcaOnboardingStatus.ProductionReady ? "Healthy" : "Pending", "Finance", "Status", identity?.OnboardingStatus.ToString() ?? "NotStarted", "ProductionReady"),
+        };
+
+        return Ok(new AdminOverviewDto(activeUsers, pendingApprovals, openMaintenance, criticalEvents, complianceOverdue, areas));
+    }
+}

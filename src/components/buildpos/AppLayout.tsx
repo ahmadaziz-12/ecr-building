@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   LayoutDashboard,
   Search,
@@ -48,14 +48,30 @@ import {
   Activity,
   ChevronRight,
   Globe,
-  RefreshCw,
-  Languages,
+  QrCode,
 } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import logoAsset from "@/assets/mimony-logo.png.asset.json";
 import { statusBar } from "@/lib/buildpos/data";
-import { useLocaleStore } from "@/lib/store/locale";
+import { LanguageSwitcher } from "@/components/language-switcher";
+import { useAuth, type ModulePermission } from "@/lib/api/auth";
+import { DeliverySync } from "@/lib/api/delivery-sync";
+import { HrSync } from "@/lib/api/hr-sync";
+import { useNotifications } from "@/lib/api/notifications";
+import { useProducts } from "@/lib/api/catalog";
+import { useCustomers, useCashierShifts } from "@/lib/api/pos";
+import { useTerminals } from "@/lib/api/admin";
+import { useZatcaIdentity } from "@/lib/api/zatca";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
-type Item = { to: string; label: string; icon: typeof LayoutDashboard };
+type Item = { to: string; label: string; icon: typeof LayoutDashboard; module?: ModulePermission["module"] };
 type Group = { name: string; items: Item[]; collapsed?: boolean };
 
 const nav: Group[] = [
@@ -66,111 +82,176 @@ const nav: Group[] = [
   {
     name: "Operate",
     items: [
-      { to: "/operate/pos-checkout", label: "POS Checkout", icon: ScanBarcode },
-      { to: "/operate/orders", label: "Orders & Quotations", icon: ShoppingBag },
-      { to: "/operate/customers", label: "Customers & Contractors", icon: Users },
-      { to: "/operate/cashier-workspace", label: "Cashier Workspace", icon: UserSquare2 },
-      { to: "/operate/cashier-shift", label: "Cashier Shifts", icon: ClipboardList },
+      { to: "/operate/pos-checkout", label: "POS Checkout", icon: ScanBarcode, module: "Pos" },
+      { to: "/operate/orders", label: "Orders & Quotations", icon: ShoppingBag, module: "Orders" },
+      { to: "/operate/customers", label: "Customers & Contractors", icon: Users, module: "Orders" },
+      { to: "/operate/cashier-workspace", label: "Cashier Workspace", icon: UserSquare2, module: "Pos" },
+      { to: "/operate/cashier-shift", label: "Cashier Shifts", icon: ClipboardList, module: "Pos" },
     ],
   },
   {
     name: "Products & Stock",
     items: [
-      { to: "/stock/inventory", label: "Product Catalog", icon: Package },
-      { to: "/admin/categories", label: "Categories & Attributes", icon: Layers },
-      { to: "/stock/stocks", label: "Inventory & Stock", icon: Boxes },
-      { to: "/stock/expiry", label: "Material Validity", icon: CalendarClock },
-      { to: "/stock/transfers", label: "Stock Transfers", icon: ArrowLeftRight },
-      { to: "/coming-soon", label: "Bundles & Systems", icon: Blocks },
+      { to: "/stock/inventory", label: "Product Catalog", icon: Package, module: "Inventory" },
+      { to: "/admin/categories", label: "Categories & Attributes", icon: Layers, module: "Inventory" },
+      { to: "/stock/stocks", label: "Inventory & Stock", icon: Boxes, module: "Inventory" },
+      { to: "/stock/expiry", label: "Material Validity", icon: CalendarClock, module: "Inventory" },
+      { to: "/stock/transfers", label: "Stock Transfers", icon: ArrowLeftRight, module: "Inventory" },
+      { to: "/stock/bundles", label: "Bundles & Systems", icon: Blocks, module: "Inventory" },
     ],
   },
   {
     name: "Procurement",
     items: [
-      { to: "/suppliers/suppliers", label: "Suppliers", icon: Truck },
-      { to: "/finance/purchase-orders", label: "Purchase Orders", icon: FileText },
-      { to: "/suppliers/rts", label: "Supplier Returns", icon: Undo2 },
+      { to: "/suppliers/suppliers", label: "Suppliers", icon: Truck, module: "Suppliers" },
+      { to: "/finance/purchase-orders", label: "Purchase Orders", icon: FileText, module: "Suppliers" },
+      { to: "/suppliers/rts", label: "Supplier Returns", icon: Undo2, module: "Suppliers" },
     ],
   },
   {
     name: "Finance & Customers",
     items: [
-      { to: "/finance/expenses", label: "Expenses", icon: Wallet },
-      { to: "/finance/pricing", label: "Pricing, Discounts & Coupons", icon: Percent },
-      { to: "/finance/returns", label: "Returns & Refunds", icon: RotateCcw },
-      { to: "/coming-soon", label: "Loyalty Program", icon: Gift },
-      { to: "/finance/tax-zatca", label: "Invoices & Tax Compliance", icon: Receipt },
+      { to: "/finance/expenses", label: "Expenses", icon: Wallet, module: "Finance" },
+      { to: "/finance/pricing", label: "Pricing, Discounts & Coupons", icon: Percent, module: "Finance" },
+      { to: "/finance/returns", label: "Returns & Refunds", icon: RotateCcw, module: "Finance" },
+      { to: "/finance/loyalty", label: "Loyalty Program", icon: Gift, module: "Finance" },
+      { to: "/finance/tax-zatca", label: "Invoices & Tax Compliance", icon: Receipt, module: "Finance" },
     ],
   },
   {
     name: "Delivery",
     items: [
-      { to: "/delivery/dashboard", label: "Delivery Dashboard", icon: Truck },
-      { to: "/delivery/pipeline", label: "Delivery Pipeline", icon: ArrowLeftRight },
-      { to: "/delivery/orders", label: "Delivery Orders", icon: ClipboardList },
-      { to: "/delivery/drivers", label: "Driver Assignments", icon: UserRound },
-      { to: "/delivery/vehicles", label: "Vehicle Assignments", icon: Truck },
-      { to: "/delivery/zones", label: "Delivery Zones", icon: Building2 },
-      { to: "/delivery/logs", label: "Delivery Activity Logs", icon: Activity },
+      { to: "/delivery/dashboard", label: "Delivery Dashboard", icon: Truck, module: "Delivery" },
+      { to: "/delivery/pipeline", label: "Delivery Pipeline", icon: ArrowLeftRight, module: "Delivery" },
+      { to: "/delivery/orders", label: "Delivery Orders", icon: ClipboardList, module: "Delivery" },
+      { to: "/delivery/drivers", label: "Driver Assignments", icon: UserRound, module: "Delivery" },
+      { to: "/delivery/vehicles", label: "Vehicle Assignments", icon: Truck, module: "Delivery" },
+      { to: "/delivery/zones", label: "Delivery Zones", icon: Building2, module: "Delivery" },
+      { to: "/delivery/logs", label: "Delivery Activity Logs", icon: Activity, module: "Delivery" },
     ],
   },
   {
     name: "HRMS",
     items: [
-      { to: "/hrms/dashboard", label: "HR Dashboard", icon: LayoutDashboard },
-      { to: "/hrms/employees", label: "Employees", icon: UserRound },
-      { to: "/hrms/departments", label: "Departments", icon: Building2 },
-      { to: "/hrms/attendance", label: "Shift & Attendance", icon: CalendarDays },
-      { to: "/hrms/leave", label: "Leave Management", icon: CalendarClock },
-      { to: "/hrms/documents", label: "Documents & Contracts", icon: FileSignature },
-      { to: "/hrms/logs", label: "HR Activity Logs", icon: Activity },
+      { to: "/hrms/dashboard", label: "HR Dashboard", icon: LayoutDashboard, module: "Hr" },
+      { to: "/hrms/employees", label: "Employees", icon: UserRound, module: "Hr" },
+      { to: "/hrms/departments", label: "Departments", icon: Building2, module: "Hr" },
+      { to: "/hrms/attendance", label: "Shift & Attendance", icon: CalendarDays, module: "Hr" },
+      { to: "/hrms/leave", label: "Leave Management", icon: CalendarClock, module: "Hr" },
+      { to: "/hrms/documents", label: "Documents & Contracts", icon: FileSignature, module: "Hr" },
+      { to: "/hrms/logs", label: "HR Activity Logs", icon: Activity, module: "Hr" },
     ],
   },
   {
     name: "Network",
     items: [
-      { to: "/network/branches", label: "Branches", icon: Store },
-      { to: "/network/terminals", label: "Terminals", icon: MonitorSmartphone },
-      { to: "/network/devices", label: "Devices", icon: Printer },
+      { to: "/network/branches", label: "Branches", icon: Store, module: "Network" },
+      { to: "/network/terminals", label: "Terminals", icon: MonitorSmartphone, module: "Network" },
+      { to: "/network/devices", label: "Devices", icon: Printer, module: "Network" },
     ],
   },
   {
     name: "Insights",
     items: [
-      { to: "/insights/reports", label: "Reports", icon: FileBarChart },
-      { to: "/insights/bi", label: "Analytics", icon: BarChart3 },
-      { to: "/insights/kpi", label: "KPI Evaluation", icon: Target },
+      { to: "/insights/reports", label: "Reports", icon: FileBarChart, module: "Insights" },
+      { to: "/insights/bi", label: "Analytics", icon: BarChart3, module: "Insights" },
+      { to: "/insights/kpi", label: "KPI Evaluation", icon: Target, module: "Insights" },
     ],
   },
   {
     name: "Admin",
     items: [
-      { to: "/admin/overview", label: "Admin Overview", icon: ShieldCheck },
-      { to: "/admin/users", label: "Registered Users", icon: UserCog },
-      { to: "/admin/roles", label: "Roles & Permissions", icon: KeyRound },
-      { to: "/admin/rules", label: "Rules Engine", icon: Sliders },
-      { to: "/admin/pos-settings", label: "POS Settings", icon: Cog },
-      { to: "/admin/audit-logs", label: "Audit Logs", icon: ScrollText },
-      { to: "/admin/plans", label: "Subscriptions", icon: CreditCard },
-      { to: "/admin/settings", label: "General Settings", icon: Settings2 },
+      { to: "/admin/overview", label: "Admin Overview", icon: ShieldCheck, module: "Admin" },
+      { to: "/admin/users", label: "Registered Users", icon: UserCog, module: "Admin" },
+      { to: "/admin/roles", label: "Roles & Permissions", icon: KeyRound, module: "Admin" },
+      { to: "/admin/rules", label: "Rules Engine", icon: Sliders, module: "Admin" },
+      { to: "/admin/pos-settings", label: "POS Settings", icon: Cog, module: "Admin" },
+      { to: "/admin/zatca-invoices", label: "ZATCA Invoices", icon: QrCode, module: "Finance" },
+      { to: "/admin/zatca-settings", label: "ZATCA Phase 2 Settings", icon: ShieldCheck, module: "Finance" },
+      { to: "/admin/audit-logs", label: "Audit Logs", icon: ScrollText, module: "Admin" },
+      { to: "/admin/plans", label: "Subscriptions", icon: CreditCard, module: "Admin" },
+      { to: "/admin/settings", label: "General Settings", icon: Settings2, module: "Admin" },
     ],
   },
 ];
 
-const allItems: Item[] = nav.flatMap((g) => g.items);
-
 export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  const { user, hasAccess, logout } = useAuth();
+
+  const [search, setSearch] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const canSearchProducts = hasAccess("Inventory");
+  const canSearchCustomers = hasAccess("Orders");
+  const { data: searchProducts } = useProducts(canSearchProducts && search.trim().length > 0);
+  const { data: searchCustomers } = useCustomers(canSearchCustomers && search.trim().length > 0);
+  const { data: notifications } = useNotifications();
+  const { data: terminals } = useTerminals(hasAccess("Network"));
+  const { data: cashierShifts } = useCashierShifts(hasAccess("Pos"));
+  const { data: zatcaIdentity } = useZatcaIdentity(user?.branchId ?? null, hasAccess("Finance") && user?.branchId != null);
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+
+  useEffect(() => {
+    const goOnline = () => setOnline(true);
+    const goOffline = () => setOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return { products: [], customers: [] };
+    const products = (searchProducts ?? [])
+      .filter((p) => p.sku.toLowerCase().includes(q) || p.nameEn.toLowerCase().includes(q) || (p.barcode?.toLowerCase().includes(q) ?? false))
+      .slice(0, 5);
+    const customers = (searchCustomers ?? [])
+      .filter((c) => c.nameEn.toLowerCase().includes(q) || (c.phone?.toLowerCase().includes(q) ?? false))
+      .slice(0, 5);
+    return { products, customers };
+  }, [search, searchProducts, searchCustomers]);
+  const hasSearchResults = searchResults.products.length > 0 || searchResults.customers.length > 0;
+
+  const openShift = cashierShifts?.find((s) => s.cashierName === user?.name && s.status === "Open");
+  const criticalCount = notifications?.filter((n) => n.severity === "Critical").length ?? 0;
+  const currentTerminal = terminals?.find((t) => t.branchId === user?.branchId) ?? null;
+
+  function goToSearchResult(to: string) {
+    navigate({ to });
+    setSearch("");
+    setSearchFocused(false);
+  }
+
+  function handleSearchEnter(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    if (searchResults.products.length > 0) goToSearchResult("/stock/inventory");
+    else if (searchResults.customers.length > 0) goToSearchResult("/operate/customers");
+  }
+
+  const visibleNav = nav
+    .map((g) => ({ ...g, items: g.items.filter((i) => !i.module || hasAccess(i.module)) }))
+    .filter((g) => g.items.length > 0);
+  const allItems: Item[] = visibleNav.flatMap((g) => g.items);
+
   const active = allItems.find((m) => m.to === pathname) ?? allItems[0];
-  const activeGroup = nav.find((g) => g.items.some((i) => i.to === pathname))?.name ?? "Dashboard";
+  const activeGroup = visibleNav.find((g) => g.items.some((i) => i.to === pathname))?.name ?? "Dashboard";
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(nav.map((g) => [g.name, true]))
+    Object.fromEntries(visibleNav.map((g) => [g.name, true]))
   );
-  const locale = useLocaleStore((s) => s.locale);
-  const toggleLocale = useLocaleStore((s) => s.toggle);
+
+  async function handleLogout() {
+    await logout();
+    navigate({ to: "/" });
+  }
 
   return (
     <div className="flex min-h-screen bg-canvas font-sans text-foreground">
+      {hasAccess("Delivery") && <DeliverySync />}
+      {hasAccess("Hr") && <HrSync />}
       {/* Sidebar */}
       <aside className="sticky top-0 hidden h-screen w-64 flex-none flex-col border-r border-black/5 bg-sidebar-bg text-sidebar-fg lg:flex relative">
         <div className="pointer-events-none absolute inset-0 blueprint-grid-dark opacity-60" />
@@ -180,7 +261,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
         <nav className="relative flex-1 space-y-3 overflow-y-auto p-3">
-          {nav.map((g) => {
+          {visibleNav.map((g) => {
             const isOpen = open[g.name] ?? true;
             if (!g.name) {
               // ungrouped standalone (Dashboard)
@@ -249,16 +330,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <div className="rounded-lg bg-white/5 p-3 text-xs">
             <div className="flex items-center gap-2">
               <div className="grid h-8 w-8 place-items-center rounded-full bg-teal text-teal-foreground font-semibold">
-                A
+                {(user?.name ?? "?").charAt(0)}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium text-white">{statusBar.user}</p>
-                <p className="truncate text-white/50">{statusBar.role}</p>
+                <p className="truncate font-medium text-white">{user?.name ?? statusBar.user}</p>
+                <p className="truncate text-white/50">{user?.role ?? statusBar.role}</p>
               </div>
               <button
                 type="button"
+                onClick={handleLogout}
                 className="grid h-7 w-7 place-items-center rounded-md text-white/50 hover:bg-white/5 hover:text-white"
-                title="Profile menu"
+                title="Sign out"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
@@ -284,38 +366,114 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="search"
-                placeholder="Search SKU, invoice, customer…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => window.setTimeout(() => setSearchFocused(false), 150)}
+                onKeyDown={handleSearchEnter}
+                placeholder="Search SKU, customer…"
                 className="h-9 w-64 rounded-lg border border-black/10 bg-canvas pl-8 pr-3 text-sm outline-none focus:border-brand"
               />
+              {searchFocused && search.trim() !== "" && (
+                <div className="absolute right-0 top-full z-20 mt-1 w-80 rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
+                  {!hasSearchResults && (
+                    <p className="px-2.5 py-2 text-xs text-muted-foreground">No matches for "{search}"</p>
+                  )}
+                  {searchResults.products.length > 0 && (
+                    <div className="mb-1">
+                      <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Products</p>
+                      {searchResults.products.map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => goToSearchResult("/stock/inventory")}
+                          className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
+                        >
+                          <span className="truncate">{p.nameEn}</span>
+                          <span className="ml-2 flex-none font-mono text-[10px] text-muted-foreground">{p.sku}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {searchResults.customers.length > 0 && (
+                    <div>
+                      <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Customers</p>
+                      {searchResults.customers.map((c) => (
+                        <button
+                          key={c.id}
+                          onClick={() => goToSearchResult("/operate/customers")}
+                          className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
+                        >
+                          <span className="truncate">{c.nameEn}</span>
+                          <span className="ml-2 flex-none text-[10px] text-muted-foreground">{c.phone ?? "—"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            <span className="hidden items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success-foreground md:inline-flex">
-              <Circle className="h-2 w-2 fill-current" /> {statusBar.shift}
-            </span>
-            <span className="hidden items-center gap-1.5 rounded-full border border-teal/30 bg-teal/10 px-2.5 py-0.5 text-xs font-medium text-foreground md:inline-flex">
-              <Wifi className="h-3 w-3 text-teal" /> {statusBar.sync}
-            </span>
-            {statusBar.pendingSync > 0 && (
-              <span className="hidden items-center gap-1.5 rounded-full border border-warning/40 bg-warning/15 px-2.5 py-0.5 text-xs font-medium text-[oklch(0.4_0.13_70)] md:inline-flex">
-                <RefreshCw className="h-3 w-3" /> {statusBar.pendingSync} pending
+            {hasAccess("Pos") && (
+              <span className="hidden items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success-foreground md:inline-flex">
+                <Circle className="h-2 w-2 fill-current" /> {openShift ? `Open since ${new Date(openShift.openedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "No active shift"}
               </span>
             )}
-            <span className="hidden items-center gap-1.5 rounded-full border border-brand/20 bg-brand/10 px-2.5 py-0.5 text-xs font-medium text-brand md:inline-flex">
-              <Shield className="h-3 w-3" /> ZATCA {statusBar.zatca}
+            <span className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium md:inline-flex ${online ? "border-teal/30 bg-teal/10 text-foreground" : "border-critical/30 bg-critical/10 text-critical"}`}>
+              <Wifi className={`h-3 w-3 ${online ? "text-teal" : "text-critical"}`} /> {online ? "Online" : "Offline"}
             </span>
-            <button
-              onClick={toggleLocale}
-              title="Toggle Arabic / English"
-              className="hidden h-9 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 text-xs font-medium text-foreground hover:bg-canvas md:inline-flex"
-            >
-              <Languages className="h-3.5 w-3.5 text-brand" /> {locale === "ar" ? "العربية" : "English"}
-            </button>
-            <button className="relative grid h-9 w-9 place-items-center rounded-lg border border-black/10 bg-white text-foreground hover:bg-canvas">
-              <Bell className="h-4 w-4" />
-              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-critical" />
-            </button>
-            <button className="grid h-9 w-9 place-items-center rounded-full bg-brand text-brand-foreground text-xs font-semibold hover:bg-brand/90">
-              A
-            </button>
+            {hasAccess("Finance") && (
+              <span className="hidden items-center gap-1.5 rounded-full border border-brand/20 bg-brand/10 px-2.5 py-0.5 text-xs font-medium text-brand md:inline-flex">
+                <Shield className="h-3 w-3" /> ZATCA {zatcaIdentity?.onboardingStatus === "ProductionReady" ? "Connected" : zatcaIdentity ? "Pending" : "—"}
+              </span>
+            )}
+            <LanguageSwitcher />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="relative grid h-9 w-9 place-items-center rounded-lg border border-black/10 bg-white text-foreground hover:bg-canvas">
+                  <Bell className="h-4 w-4" />
+                  {notifications && notifications.length > 0 && (
+                    <span className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ${criticalCount > 0 ? "bg-critical" : "bg-warning"}`} />
+                  )}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-80">
+                <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {(!notifications || notifications.length === 0) && (
+                  <p className="px-2 py-3 text-center text-xs text-muted-foreground">No alerts right now.</p>
+                )}
+                {notifications?.map((n) => (
+                  <DropdownMenuItem key={n.id} onClick={() => n.link && navigate({ to: n.link })} className="flex items-start gap-2 py-2">
+                    <span
+                      className={`mt-1 h-1.5 w-1.5 flex-none rounded-full ${
+                        n.severity === "Critical" ? "bg-critical" : n.severity === "Warning" ? "bg-warning" : "bg-brand"
+                      }`}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-xs font-medium text-foreground">{n.message}</span>
+                      <span className="block text-[10px] text-muted-foreground">{n.type}</span>
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="grid h-9 w-9 place-items-center rounded-full bg-brand text-brand-foreground text-xs font-semibold hover:bg-brand/90">
+                  {(user?.name ?? "?").charAt(0)}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>
+                  <p className="truncate text-sm font-semibold text-foreground">{user?.name ?? "—"}</p>
+                  <p className="truncate text-xs font-normal text-muted-foreground">{user?.email ?? ""}</p>
+                  <p className="truncate text-xs font-normal text-muted-foreground">{user?.role ?? ""}</p>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="text-critical focus:text-critical">
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
 
@@ -324,14 +482,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <Building2 className="h-3 w-3 text-brand" /> {statusBar.business}
           </span>
           <span className="text-black/20">·</span>
-          <span><span className="text-foreground/70">Branch:</span> {statusBar.branch}</span>
-          <span className="rounded bg-brand/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-brand">{statusBar.branchCode}</span>
+          <span><span className="text-foreground/70">Branch:</span> {user?.branchName ?? "All Branches"}</span>
           <span className="text-black/20">·</span>
-          <span><span className="text-foreground/70">Terminal:</span> <span className="font-mono text-foreground">{statusBar.terminal}</span></span>
+          <span><span className="text-foreground/70">Terminal:</span> <span className="font-mono text-foreground">{currentTerminal?.code ?? (user?.branchId === null ? "All Terminals" : "Unassigned")}</span></span>
           <span className="text-black/20">·</span>
-          <span><span className="text-foreground/70">User:</span> {statusBar.user} · <span className="text-foreground/60">{statusBar.role}</span></span>
+          <span><span className="text-foreground/70">User:</span> {user?.name ?? "—"} · <span className="text-foreground/60">{user?.role ?? "—"}</span></span>
           <span className="text-black/20">·</span>
-          <span><span className="text-foreground/70">Date:</span> {statusBar.businessDate}</span>
+          <span><span className="text-foreground/70">Date:</span> {new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}</span>
           <span className="ml-auto flex items-center gap-1 text-foreground/60">
             <Globe className="h-3 w-3" /> {statusBar.currency} · auto-refresh 60s
           </span>
