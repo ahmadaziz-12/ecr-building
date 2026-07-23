@@ -1,0 +1,330 @@
+import type { Severity } from "./format";
+
+export const statusBar = {
+  business: "Al Binaa Building Materials Trading",
+  branch: "Riyadh Main Branch",
+  branchCode: "B-RYD-001",
+  terminal: "POS-01",
+  user: "Ahmed Al-Harbi",
+  role: "Store Manager",
+  businessDate: "02 July 2026",
+  shift: "Open since 08:00 AM",
+  sync: "Online",
+  pendingSync: 2,
+  zatca: "Connected",
+  currency: "SAR / ر.س",
+  language: "EN",
+  lastUpdated: "02:45 PM",
+};
+
+/* ================= Dashboard Overview (spec 7.1) ================= */
+
+export const overviewKpis = [
+  { key: "sales", title: "Today's Material Sales", value: "SAR 48,920", sub: "+18.2% vs yesterday", tone: "success" as Severity, icon: "trending" },
+  { key: "net", title: "Net Sales", value: "SAR 44,380", sub: "After discounts & returns", tone: "info" as Severity, icon: "receipt" },
+  { key: "tx", title: "Transactions", value: "286", sub: "Avg basket SAR 171", tone: "info" as Severity, icon: "cart" },
+  { key: "low", title: "Low Stock Materials", value: "34 SKUs", sub: "12 require replenishment", tone: "warning" as Severity, icon: "package" },
+  { key: "del", title: "Pending Deliveries", value: "18", sub: "5 due before 6:00 PM", tone: "warning" as Severity, icon: "truck" },
+  { key: "shift", title: "Open Shifts", value: "6", sub: "1 shift requires review", tone: "info" as Severity, icon: "users" },
+];
+
+export const dispatchPipeline = [
+  { key: "Pending", count: 7, tone: "warning" as Severity },
+  { key: "Assigned", count: 4, tone: "info" as Severity },
+  { key: "Loading", count: 3, tone: "info" as Severity },
+  { key: "Dispatched", count: 4, tone: "info" as Severity },
+  { key: "Delivered", count: 22, tone: "success" as Severity },
+  { key: "Failed / Returned", count: 2, tone: "critical" as Severity },
+];
+
+export const cashierWorkspaceSummary = {
+  activeTerminals: "5 of 6",
+  openShifts: 6,
+  parkedSales: 7,
+  pendingApprovals: 3,
+  offlineTerminals: "POS-03",
+  cashVariance: "SH-1044 · SAR -40",
+  quickActions: ["Start Sale", "Recall Parked Sale", "Create Quotation", "Stock Check", "Open Cashier Workspace"],
+};
+
+/* ================= Sales Performance tab (spec 7.2) ================= */
+
+export const salesPerfKpis = [
+  { key: "gross", title: "Gross Sales", value: "SAR 51,860", sub: "Today", tone: "success" as Severity, icon: "trending" },
+  { key: "net", title: "Net Sales", value: "SAR 44,380", sub: "After discounts", tone: "info" as Severity, icon: "receipt" },
+  { key: "discounts", title: "Discounts", value: "SAR 1,980", sub: "3.8% of gross", tone: "info" as Severity, icon: "chart" },
+  { key: "returns", title: "Completed Returns", value: "SAR 3,240", sub: "12 items", tone: "warning" as Severity, icon: "history" },
+  { key: "basket", title: "Average Basket", value: "SAR 171", sub: "Retail + contractor", tone: "info" as Severity, icon: "cart" },
+  { key: "contractor", title: "Contractor Sales", value: "SAR 21,430", sub: "41% of gross", tone: "success" as Severity, icon: "users" },
+];
+
+export const recentOrders = [
+  { id: "ORD-2026-8091", customer: "Al Noor Contracting", type: "Contractor", value: "SAR 11,850", status: "Delivery Planned", payment: "Account Credit", invoice: "Full Tax Invoice" },
+  { id: "ORD-2026-8092", customer: "Walk-in Customer", type: "Retail", value: "SAR 2,300", status: "Completed", payment: "Card", invoice: "Simplified Invoice" },
+  { id: "ORD-2026-8093", customer: "Modern Villas Est.", type: "Contractor", value: "SAR 4,780", status: "Pick Ready", payment: "Bank Transfer", invoice: "Full Tax Invoice" },
+  { id: "ORD-2026-8094", customer: "Gulf Build Company", type: "Contractor", value: "SAR 22,400", status: "Credit Hold", payment: "Account Credit", invoice: "Pending" },
+  { id: "ORD-2026-8095", customer: "Abdullah Trading", type: "Trade Account", value: "SAR 1,950", status: "Completed", payment: "Cash", invoice: "Simplified Invoice" },
+];
+
+/* ================= Inventory Health tab (spec 7.3) ================= */
+
+export const inventoryKpis = [
+  { key: "avail", title: "Available Stock", value: "12,850", sub: "units on hand", tone: "success" as Severity, icon: "package" },
+  { key: "res", title: "Reserved Stock", value: "1,240", sub: "units held", tone: "info" as Severity, icon: "layers" },
+  { key: "low", title: "Low Stock", value: "34", sub: "SKUs below reorder", tone: "warning" as Severity, icon: "alert" },
+  { key: "oos", title: "Out of Stock", value: "11", sub: "SKUs unavailable", tone: "critical" as Severity, icon: "alert" },
+  { key: "quar", title: "Quarantine", value: "27", sub: "units on hold", tone: "warning" as Severity, icon: "shield" },
+  { key: "trf", title: "Pending Transfers", value: "9", sub: "between branches", tone: "info" as Severity, icon: "truck" },
+];
+
+/* ================= Delivery pipeline detail (spec 7.4) ================= */
+
+export const deliveryDetail = [
+  { no: "DO-1021", order: "ORD-2026-8091", customer: "Al Noor Contracting", materials: "Cement + Steel", qty: "40 bags + 12 bundles", weight: "7.8 t", area: "Riyadh North", promised: "Today, 4:00 PM", driver: "Hamad Al-Qahtani", vehicle: "TRK-07 · Flatbed", status: "Assigned", amount: "SAR 7,850", priority: "High" },
+  { no: "DO-1022", order: "ORD-2026-8092", customer: "Walk-in Customer", materials: "Grey Tiles", qty: "32 boxes", weight: "1.9 t", area: "Olaya", promised: "Today, 6:00 PM", driver: "Unassigned", vehicle: "Unassigned", status: "Pending", amount: "SAR 2,300", priority: "Standard" },
+  { no: "DO-1023", order: "ORD-2026-8093", customer: "Modern Villas Est.", materials: "Paint + Tools", qty: "16 tins + 8 units", weight: "0.85 t", area: "Al Malqa", promised: "Today, 5:30 PM", driver: "Saad Al-Dossari", vehicle: "VAN-02", status: "Dispatched", amount: "SAR 4,780", priority: "High" },
+  { no: "DO-1024", order: "ORD-2026-8084", customer: "Gulf Build Company", materials: "Cement Pallets", qty: "5 pallets", weight: "10 t", area: "Exit 8", promised: "Today, 3:00 PM", driver: "Khaled Al-Harthi", vehicle: "TRK-03 · Flatbed", status: "Delivered", amount: "SAR 11,500", priority: "High" },
+  { no: "DO-1025", order: "ORD-2026-8088", customer: "Abdullah Trading", materials: "Plumbing Materials", qty: "48 pieces", weight: "0.55 t", area: "Dammam Road", promised: "Today, 2:30 PM", driver: "Faisal Al-Mutairi", vehicle: "VAN-05", status: "Failed / Returned", amount: "SAR 1,950", priority: "Standard" },
+];
+
+/* ================= Cashier & Terminal tab (spec 7.5) ================= */
+
+export const cashierKpis = [
+  { key: "act", title: "Active Terminals", value: "5", sub: "of 6 total", tone: "success" as Severity, icon: "monitor" },
+  { key: "off", title: "Offline Terminals", value: "1", sub: "POS-03", tone: "critical" as Severity, icon: "alert" },
+  { key: "op", title: "Open Shifts", value: "6", sub: "in progress", tone: "info" as Severity, icon: "users" },
+  { key: "park", title: "Parked Sales", value: "7", sub: "awaiting resume", tone: "warning" as Severity, icon: "history" },
+  { key: "apr", title: "Pending Approvals", value: "3", sub: "supervisor PIN", tone: "warning" as Severity, icon: "shield" },
+  { key: "var", title: "Cash Variance", value: "SAR -40", sub: "SH-1044", tone: "critical" as Severity, icon: "receipt" },
+];
+
+export const terminalDetail = [
+  { term: "POS-01", cashier: "Ahmed Al-Harbi", shift: "SH-1041", started: "08:00 AM", tx: 72, sales: "SAR 12,400", expected: "SAR 6,500", sync: "Now", printer: "Ready", card: "Connected", status: "Active" },
+  { term: "POS-02", cashier: "Fahad Al-Qahtani", shift: "SH-1042", started: "09:00 AM", tx: 46, sales: "SAR 8,900", expected: "SAR 3,200", sync: "Now", printer: "Ready", card: "Connected", status: "Active" },
+  { term: "POS-03", cashier: "Sara Al-Otaibi", shift: "SH-1043", started: "08:30 AM", tx: 0, sales: "SAR 0", expected: "SAR 1,000", sync: "45 min ago", printer: "Unknown", card: "Offline", status: "Offline" },
+  { term: "POS-04", cashier: "Khalid Al-Mutairi", shift: "SH-1044", started: "10:00 AM", tx: 58, sales: "SAR 9,750", expected: "SAR 4,800", sync: "Now", printer: "Ready", card: "Connected", status: "Review Required" },
+  { term: "POS-05", cashier: "Noura Al-Salem", shift: "SH-1045", started: "11:00 AM", tx: 34, sales: "SAR 5,850", expected: "SAR 2,100", sync: "Now", printer: "Ready", card: "Connected", status: "Idle" },
+];
+
+/* ================= Payments & Returns tab (spec 7.6) ================= */
+
+export const paymentBreakdown = [
+  { method: "Cash", amount: "SAR 16,200", tx: 96, tone: "success" as Severity, icon: "receipt" },
+  { method: "Card", amount: "SAR 21,450", tx: 122, tone: "info" as Severity, icon: "cart" },
+  { method: "Wallet", amount: "SAR 3,800", tx: 24, tone: "info" as Severity, icon: "receipt" },
+  { method: "Bank Transfer", amount: "SAR 2,100", tx: 7, tone: "info" as Severity, icon: "receipt" },
+  { method: "Account Credit", amount: "SAR 5,370", tx: 18, tone: "warning" as Severity, icon: "receipt" },
+  { method: "Loyalty Points", amount: "SAR 620", tx: 19, tone: "success" as Severity, icon: "shield" },
+];
+
+export const returnBreakdown = [
+  { label: "Standard Returns", value: "SAR 1,350" },
+  { label: "Damaged Claims", value: "9 items" },
+  { label: "Surplus / Excess", value: "14 items" },
+  { label: "Exchanges", value: "5" },
+  { label: "VAT Reversal", value: "SAR 422" },
+  { label: "Restocking Fees", value: "SAR 180" },
+  { label: "Pending PIN Auth", value: "3" },
+];
+
+/* ================= Compliance & Alerts tab (spec 7.7) ================= */
+
+export const groupedAlerts: {
+  severity: Severity;
+  module: string;
+  msg: string;
+  age: string;
+  action: string;
+}[] = [
+  { severity: "critical", module: "ZATCA", msg: "Invoice INV-2026-00891 failed transmission", age: "18 minutes", action: "Retry" },
+  { severity: "critical", module: "Network", msg: "POS-03 has been offline for 45 minutes", age: "45 minutes", action: "Open Terminal" },
+  { severity: "warning", module: "Cashier Shift", msg: "Shift SH-1044 has SAR -40 cash variance", age: "25 minutes", action: "Review" },
+  { severity: "warning", module: "Returns", msg: "Return request RET-224 requires manager PIN", age: "35 minutes", action: "Authorise" },
+  { severity: "warning", module: "Stock", msg: "OPC Cement 50KG is below reorder level", age: "12 minutes", action: "Create Purchase Order" },
+  { severity: "info", module: "Procurement", msg: "Purchase Order PO-558 is expected today", age: "2 hours", action: "View PO" },
+];
+
+export const kpis = [
+  { key: "sales", title: "Today's Sales", value: "48,920 ر.س", sub: "+18% vs yesterday", tone: "success" as Severity, icon: "trending" },
+  { key: "net", title: "Net Sales", value: "44,380 ر.س", sub: "After returns & discounts", tone: "info" as Severity, icon: "receipt" },
+  { key: "tx", title: "Transactions", value: "286 Orders", sub: "Avg Basket: 171 ر.س", tone: "info" as Severity, icon: "cart" },
+  { key: "vat", title: "VAT Collected", value: "6,380 ر.س", sub: "ZATCA synced", tone: "success" as Severity, icon: "shield" },
+  { key: "low", title: "Low Stock Items", value: "34 SKUs", sub: "12 critical", tone: "warning" as Severity, icon: "package" },
+  { key: "del", title: "Pending Deliveries", value: "18 Orders", sub: "5 due today", tone: "warning" as Severity, icon: "truck" },
+  { key: "shift", title: "Open Shifts", value: "6 Cashiers", sub: "2 terminals idle", tone: "info" as Severity, icon: "users" },
+  { key: "alerts", title: "Failed Sync / ZATCA", value: "3 Alerts", sub: "Needs review", tone: "critical" as Severity, icon: "alert" },
+];
+
+export const hourlySales = [
+  { time: "08:00", gross: 3200, net: 3050, returns: 0, vat: 420 },
+  { time: "09:00", gross: 5750, net: 5400, returns: 150, vat: 705 },
+  { time: "10:00", gross: 8450, net: 7900, returns: 250, vat: 1020 },
+  { time: "11:00", gross: 6300, net: 6050, returns: 0, vat: 810 },
+  { time: "12:00", gross: 13900, net: 12850, returns: 450, vat: 1660 },
+  { time: "13:00", gross: 9600, net: 8950, returns: 300, vat: 1150 },
+  { time: "14:00", gross: 7200, net: 6950, returns: 100, vat: 925 },
+  { time: "15:00", gross: 10800, net: 10200, returns: 250, vat: 1330 },
+  { time: "16:00", gross: 8400, net: 7980, returns: 180, vat: 1040 },
+  { time: "17:00", gross: 11750, net: 10900, returns: 400, vat: 1420 },
+  { time: "18:00", gross: 12570, net: 11600, returns: 520, vat: 1510 },
+];
+
+export const topCategories = [
+  { name: "Cement & Aggregates", sales: 14500, units: "420 Bags", ret: "1.5%", health: "Low" as const, icon: "layers" },
+  { name: "Steel & Rebar", sales: 10800, units: "74 Bundles", ret: "0.8%", health: "Healthy" as const, icon: "bar" },
+  { name: "Tiles & Flooring", sales: 8900, units: "185 Boxes", ret: "3.2%", health: "Low" as const, icon: "grid" },
+  { name: "Paint & Chemicals", sales: 6200, units: "96 Cans", ret: "2.1%", health: "Critical" as const, icon: "paint" },
+  { name: "Plumbing", sales: 4100, units: "215 Items", ret: "1.0%", health: "Healthy" as const, icon: "pipe" },
+  { name: "Electrical", sales: 3700, units: "188 Items", ret: "0.5%", health: "Healthy" as const, icon: "zap" },
+  { name: "Hardware & Tools", sales: 2950, units: "132 Items", ret: "1.8%", health: "Healthy" as const, icon: "hammer" },
+  { name: "Glass & Aluminum", sales: 2100, units: "28 Panels", ret: "0.0%", health: "Normal" as const, icon: "square" },
+];
+
+export const inventorySummary = [
+  { label: "Available Stock", value: "12,850 Items" },
+  { label: "Reserved Stock", value: "1,240 Items" },
+  { label: "Low Stock SKUs", value: "34 SKUs" },
+  { label: "Out of Stock", value: "11 SKUs" },
+  { label: "Quarantine / Damaged", value: "27 Items" },
+  { label: "Stock Value", value: "1,284,500 ر.س" },
+  { label: "Pending Transfers", value: "9 Transfers" },
+  { label: "Expiring Alerts", value: "7 Items" },
+];
+
+export const lowStock = [
+  { sku: "CEM-OPC-50KG", name: "OPC Cement 50KG", cat: "Cement", branch: "Riyadh", qty: "22 Bags", reorder: "100 Bags", supplier: "Al Noor Cement Co.", status: "Critical" as Severity },
+  { sku: "TILE-GRY-60X60", name: "Grey Tile 60x60", cat: "Tiles", branch: "Jeddah", qty: "8 Boxes", reorder: "50 Boxes", supplier: "Saudi Tiles Trading", status: "Critical" as Severity },
+  { sku: "PAINT-WHT-20L", name: "White Paint 20L", cat: "Paint", branch: "Riyadh", qty: "5 Cans", reorder: "30 Cans", supplier: "ColorPro Paints", status: "Critical" as Severity },
+  { sku: "STEEL-RBR-12MM", name: "Steel Rebar 12MM", cat: "Steel", branch: "Riyadh", qty: "16 Bundles", reorder: "40 Bundles", supplier: "Gulf Steel Supply", status: "warning" as Severity },
+  { sku: "PVC-PIPE-2IN", name: "PVC Pipe 2 Inch", cat: "Plumbing", branch: "Dammam", qty: "34 Pieces", reorder: "80 Pieces", supplier: "FlowLine Trading", status: "warning" as Severity },
+  { sku: "ELEC-CBL-2.5MM", name: "Electric Cable 2.5MM", cat: "Electrical", branch: "Riyadh", qty: "90 Meters", reorder: "250 Meters", supplier: "PowerMax Electrical", status: "warning" as Severity },
+];
+
+export const terminals = [
+  { term: "POS-01", cashier: "Ahmed Al-Harbi", start: "08:00 AM", tx: 72, sales: "12,400 ر.س", cash: "6,500 ر.س", sync: "Online", status: "Active" as Severity },
+  { term: "POS-02", cashier: "Fahad Al-Qahtani", start: "09:00 AM", tx: 46, sales: "8,900 ر.س", cash: "3,200 ر.س", sync: "Online", status: "Active" as Severity },
+  { term: "POS-03", cashier: "Sara Al-Otaibi", start: "08:30 AM", tx: 0, sales: "0 ر.س", cash: "1,000 ر.س", sync: "45 min ago", status: "Offline" as Severity },
+  { term: "POS-04", cashier: "Khalid Al-Mutairi", start: "10:00 AM", tx: 58, sales: "9,750 ر.س", cash: "4,800 ر.س", sync: "Online", status: "Active" as Severity },
+  { term: "POS-05", cashier: "Noura Al-Salem", start: "11:00 AM", tx: 34, sales: "5,850 ر.س", cash: "2,100 ر.س", sync: "Online", status: "Idle" as Severity },
+  { term: "POS-06", cashier: "Abdullah Al-Rashid", start: "08:15 AM", tx: 76, sales: "12,020 ر.س", cash: "5,600 ر.س", sync: "Online", status: "Active" as Severity },
+];
+
+export const shifts = [
+  { id: "SH-1041", cashier: "Ahmed Al-Harbi", opening: 1000, cash: 5500, io: 0, expected: 6500, counted: 6500, variance: 0, status: "Open" },
+  { id: "SH-1042", cashier: "Fahad Al-Qahtani", opening: 1000, cash: 2200, io: 0, expected: 3200, counted: 3190, variance: -10, status: "Open" },
+  { id: "SH-1043", cashier: "Sara Al-Otaibi", opening: 1000, cash: 0, io: 0, expected: 1000, counted: 1000, variance: 0, status: "Offline" },
+  { id: "SH-1044", cashier: "Khalid Al-Mutairi", opening: 1000, cash: 3800, io: 0, expected: 4800, counted: 4760, variance: -40, status: "Needs Review" },
+];
+
+export const deliveryChips = [
+  { label: "Pending", value: 18, tone: "warning" as Severity },
+  { label: "Assigned", value: 9, tone: "info" as Severity },
+  { label: "Dispatched", value: 6, tone: "info" as Severity },
+  { label: "Delivered Today", value: 22, tone: "success" as Severity },
+  { label: "Failed", value: 2, tone: "critical" as Severity },
+  { label: "Returned to Branch", value: 1, tone: "muted" as Severity },
+];
+
+export const deliveries = [
+  { no: "DO-1021", order: "ORD-8091", customer: "Al Noor Contracting", area: "Riyadh North", items: "Steel + Cement", time: "04:00 PM", driver: "Driver 03", status: "Assigned" as Severity, amount: "7,850 ر.س" },
+  { no: "DO-1022", order: "ORD-8092", customer: "Walk-in Customer", area: "Olaya", items: "Tiles", time: "06:00 PM", driver: "Not Assigned", status: "Pending" as Severity, amount: "2,300 ر.س" },
+  { no: "DO-1023", order: "ORD-8093", customer: "Modern Villas Est.", area: "Al Malqa", items: "Paint + Tools", time: "05:30 PM", driver: "Driver 01", status: "Dispatched" as Severity, amount: "4,780 ر.س" },
+  { no: "DO-1024", order: "ORD-8094", customer: "Gulf Build Co.", area: "Exit 8", items: "Cement Pallets", time: "03:00 PM", driver: "Driver 04", status: "Delivered" as Severity, amount: "11,500 ر.س" },
+  { no: "DO-1025", order: "ORD-8095", customer: "Abdullah Trading", area: "Dammam Road", items: "Plumbing Items", time: "07:00 PM", driver: "Driver 02", status: "Failed" as Severity, amount: "1,950 ر.س" },
+];
+
+export const alerts = [
+  { severity: "critical" as Severity, module: "Stock", msg: "OPC Cement 50KG is below reorder level in Riyadh branch", age: "12 min", owner: "Inventory Manager", action: "Create PO" },
+  { severity: "critical" as Severity, module: "Network", msg: "POS-03 offline for 45 minutes", age: "45 min", owner: "IT Support", action: "Check Terminal" },
+  { severity: "warning" as Severity, module: "ZATCA", msg: "Invoice INV-2026-00891 failed submission", age: "18 min", owner: "Finance Manager", action: "Retry" },
+  { severity: "warning" as Severity, module: "Delivery", msg: "Delivery DO-1017 is overdue", age: "1 hr", owner: "Dispatch Supervisor", action: "Assign Driver" },
+  { severity: "critical" as Severity, module: "Cashier Shift", msg: "Cash variance detected in Shift SH-1044", age: "25 min", owner: "Store Manager", action: "Review" },
+  { severity: "warning" as Severity, module: "Returns", msg: "Damaged return RET-224 awaiting approval", age: "35 min", owner: "Supervisor", action: "Approve" },
+  { severity: "info" as Severity, module: "Supplier", msg: "PO-558 expected delivery today", age: "2 hr", owner: "Inventory Manager", action: "View PO" },
+];
+
+export const payments = [
+  { method: "Cash", amount: 16200, tx: 96, refunds: 1250, status: "Reconciled" },
+  { method: "Mada / Card", amount: 21450, tx: 122, refunds: 980, status: "Pending Settlement" },
+  { method: "Wallet", amount: 3800, tx: 24, refunds: 0, status: "Reconciled" },
+  { method: "Bank Transfer", amount: 2100, tx: 7, refunds: 0, status: "Pending Confirmation" },
+  { method: "Account Credit", amount: 5370, tx: 18, refunds: 420, status: "Posted" },
+  { method: "Loyalty Points", amount: 620, tx: 19, refunds: 0, status: "Posted" },
+];
+
+export const returnsSummary = [
+  { label: "Total Returns", value: "3,240 ر.س" },
+  { label: "Standard Returns", value: "1,350 ر.س" },
+  { label: "Damaged Returns", value: "9 Items" },
+  { label: "Surplus Returns", value: "14 Items" },
+  { label: "VAT Reversal", value: "422 ر.س" },
+  { label: "Restocking Fees", value: "180 ر.س" },
+  { label: "Pending Approvals", value: "3" },
+  { label: "Quarantine Added", value: "17 Items" },
+];
+
+export const returns = [
+  { id: "RET-221", inv: "INV-2026-00871", customer: "Walk-in Customer", type: "Standard", product: "PVC Pipe 2 Inch", amount: "180 ر.س", reason: "Wrong Size", status: "Completed" as Severity, by: "Fahad" },
+  { id: "RET-222", inv: "INV-2026-00872", customer: "Al Noor Contracting", type: "Surplus", product: "OPC Cement 50KG", amount: "750 ر.س", reason: "Extra Material", status: "Completed" as Severity, by: "Ahmed" },
+  { id: "RET-223", inv: "INV-2026-00873", customer: "Gulf Build Co.", type: "Damaged", product: "Grey Tile 60x60", amount: "920 ر.س", reason: "Broken Boxes", status: "Quarantine" as Severity, by: "Khalid" },
+  { id: "RET-224", inv: "INV-2026-00880", customer: "Modern Villas Est.", type: "Damaged", product: "White Paint 20L", amount: "430 ر.س", reason: "Leakage", status: "Pending Approval" as Severity, by: "—" },
+  { id: "RET-225", inv: "INV-2026-00885", customer: "Walk-in Customer", type: "Exchange", product: "Electric Cable", amount: "960 ر.س", reason: "Wrong Specification", status: "Completed" as Severity, by: "Sara" },
+];
+
+export const branches = [
+  { branch: "Riyadh Main", sales: "48,920 ر.س", tx: 286, returns: "3,240 ر.س", basket: "171 ر.س", low: 34, shifts: 6 },
+  { branch: "Jeddah Branch", sales: "31,450 ر.س", tx: 184, returns: "1,870 ر.س", basket: "170 ر.س", low: 18, shifts: 4 },
+  { branch: "Dammam Branch", sales: "22,800 ر.س", tx: 119, returns: "920 ر.س", basket: "191 ر.س", low: 11, shifts: 3 },
+  { branch: "Makkah Branch", sales: "18,600 ر.س", tx: 96, returns: "740 ر.س", basket: "193 ر.س", low: 8, shifts: 2 },
+  { branch: "Madinah Branch", sales: "15,980 ر.س", tx: 84, returns: "610 ر.س", basket: "190 ر.س", low: 6, shifts: 2 },
+];
+
+export const zatcaInvoices = [
+  { no: "INV-2026-00888", order: "ORD-8088", type: "Simplified Tax Invoice", amount: "1,250 ر.س", vat: "163 ر.س", status: "Cleared" as Severity, err: "—", action: "View" },
+  { no: "INV-2026-00889", order: "ORD-8089", type: "Full Tax Invoice", amount: "7,850 ر.س", vat: "1,024 ر.س", status: "Cleared" as Severity, err: "—", action: "View" },
+  { no: "INV-2026-00890", order: "ORD-8090", type: "Simplified Tax Invoice", amount: "430 ر.س", vat: "56 ر.س", status: "Queued Offline" as Severity, err: "SYNC-001", action: "Retry" },
+  { no: "INV-2026-00891", order: "ORD-8091", type: "Full Tax Invoice", amount: "11,500 ر.س", vat: "1,500 ر.س", status: "Failed" as Severity, err: "ZATCA-403", action: "Retry" },
+  { no: "INV-2026-00892", order: "ORD-8092", type: "Simplified Tax Invoice", amount: "2,300 ر.س", vat: "300 ر.س", status: "Submitted" as Severity, err: "—", action: "View" },
+];
+
+export const quickActions = [
+  { label: "Start New Sale", badge: null, icon: "plus" },
+  { label: "Recall Parked", badge: 7, icon: "history" },
+  { label: "New Quotation", badge: null, icon: "file" },
+  { label: "Stock Check", badge: null, icon: "search" },
+  { label: "Delivery Queue", badge: 18, icon: "truck" },
+  { label: "View Reports", badge: null, icon: "chart" },
+  { label: "Sync ZATCA", badge: 3, icon: "refresh" },
+  { label: "Close Shift", badge: "6 Open", icon: "power" },
+];
+
+export const filters = {
+  dateRange: ["Today", "Yesterday", "Last 7 Days", "This Month", "Custom"],
+  branch: ["Riyadh Main", "Jeddah", "Dammam", "Makkah", "Madinah"],
+  terminal: ["POS-01", "POS-02", "POS-03", "POS-04", "POS-05", "POS-06"],
+  cashier: ["Ahmed", "Fahad", "Sara", "Khalid", "Noura", "Abdullah"],
+  category: ["Cement", "Steel", "Tiles", "Paint", "Plumbing", "Electrical", "Hardware", "Glass"],
+  payment: ["Cash", "Mada/Card", "Wallet", "Bank Transfer", "Account Credit", "Loyalty"],
+  alertType: ["Stock", "Delivery", "ZATCA", "Network", "Cashier Shift", "Returns"],
+  stockStatus: ["Available", "Low", "Critical", "Out of Stock", "Quarantine"],
+  deliveryStatus: ["Pending", "Assigned", "Dispatched", "Delivered", "Failed"],
+};
+
+export const contractorOrders = [
+  { id: "ORD-8091", customer: "Al Noor Contracting", project: "PRJ-RUH-114", po: "PO-CT-2201", credit: "Approved", value: "24,850 ر.س", delivery: "Site Delivery", invoice: "Full Tax", pay: "Account Credit", status: "Confirmed" as Severity },
+  { id: "ORD-8093", customer: "Modern Villas Est.", project: "PRJ-VLA-089", po: "PO-MV-1487", credit: "Approved", value: "18,420 ر.س", delivery: "Yard Pickup", invoice: "Full Tax", pay: "Bank Transfer", status: "Loading" as Severity },
+  { id: "ORD-8094", customer: "Gulf Build Co.", project: "PRJ-EXT-041", po: "PO-GB-3320", credit: "On Hold", value: "42,300 ر.س", delivery: "Site Delivery", invoice: "Full Tax", pay: "Account Credit", status: "Pending" as Severity },
+  { id: "ORD-8096", customer: "Riyadh Skyline LLC", project: "PRJ-SKY-217", po: "PO-RS-0918", credit: "Approved", value: "9,750 ر.س", delivery: "Site Delivery", invoice: "Full Tax", pay: "Mada / Card", status: "Dispatched" as Severity },
+  { id: "ORD-8097", customer: "Desert Rose Interiors", project: "PRJ-DR-052", po: "PO-DR-1102", credit: "Approved", value: "5,640 ر.س", delivery: "Yard Pickup", invoice: "Simplified", pay: "Cash", status: "Delivered" as Severity },
+];
+
+export const stockYard = [
+  { bin: "A-01", label: "Cement Pallets", branch: "Riyadh · Yard A", capacity: 100, filled: 82, tone: "success" as Severity },
+  { bin: "A-02", label: "Steel Rebar Racks", branch: "Riyadh · Yard A", capacity: 60, filled: 44, tone: "success" as Severity },
+  { bin: "B-11", label: "Tile Pallets", branch: "Riyadh · Yard B", capacity: 80, filled: 18, tone: "warning" as Severity },
+  { bin: "B-12", label: "Paint Cans", branch: "Jeddah · Bay 2", capacity: 200, filled: 42, tone: "critical" as Severity },
+  { bin: "C-05", label: "PVC & Pipes", branch: "Dammam · Bay 1", capacity: 150, filled: 118, tone: "success" as Severity },
+  { bin: "C-08", label: "Electrical Reels", branch: "Riyadh · Yard C", capacity: 90, filled: 71, tone: "info" as Severity },
+  { bin: "D-03", label: "Glass Panels", branch: "Makkah · Bay 3", capacity: 40, filled: 6, tone: "critical" as Severity },
+  { bin: "D-14", label: "Tools & Hardware", branch: "Riyadh · Yard D", capacity: 120, filled: 96, tone: "success" as Severity },
+];

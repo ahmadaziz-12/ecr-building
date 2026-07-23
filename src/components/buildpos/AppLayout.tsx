@@ -1,0 +1,505 @@
+import { Link, useRouterState } from "@tanstack/react-router";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  LayoutDashboard,
+  Search,
+  Bell,
+  Wifi,
+  Circle,
+  Shield,
+  ChevronDown,
+  ScanBarcode,
+  ShoppingBag,
+  Users,
+  UserSquare2,
+  ClipboardList,
+  Boxes,
+  Package,
+  CalendarClock,
+  ArrowLeftRight,
+  Wallet,
+  FileText,
+  Percent,
+  RotateCcw,
+  Receipt,
+  Truck,
+  Undo2,
+  Store,
+  MonitorSmartphone,
+  Printer,
+  BarChart3,
+  FileBarChart,
+  Target,
+  ShieldCheck,
+  Layers,
+  Sliders,
+  UserCog,
+  KeyRound,
+  Cog,
+  ScrollText,
+  CreditCard,
+  Settings2,
+  Blocks,
+  Gift,
+  Building2,
+  UserRound,
+  CalendarDays,
+  FileSignature,
+  Activity,
+  ChevronRight,
+  Globe,
+  QrCode,
+} from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import logoAsset from "@/assets/mimony-logo.png.asset.json";
+import { statusBar } from "@/lib/buildpos/data";
+import { LanguageSwitcher } from "@/components/language-switcher";
+import { useAuth, type ModulePermission } from "@/lib/api/auth";
+import { DeliverySync } from "@/lib/api/delivery-sync";
+import { HrSync } from "@/lib/api/hr-sync";
+import { useNotifications } from "@/lib/api/notifications";
+import { useProducts } from "@/lib/api/catalog";
+import { useCustomers, useCashierShifts } from "@/lib/api/pos";
+import { useTerminals } from "@/lib/api/admin";
+import { useZatcaIdentity } from "@/lib/api/zatca";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+type Item = { to: string; label: string; icon: typeof LayoutDashboard; module?: ModulePermission["module"] };
+type Group = { name: string; items: Item[]; collapsed?: boolean };
+
+const nav: Group[] = [
+  {
+    name: "",
+    items: [{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard }],
+  },
+  {
+    name: "Operate",
+    items: [
+      { to: "/operate/pos-checkout", label: "POS Checkout", icon: ScanBarcode, module: "Pos" },
+      { to: "/operate/orders", label: "Orders & Quotations", icon: ShoppingBag, module: "Orders" },
+      { to: "/operate/customers", label: "Customers & Contractors", icon: Users, module: "Orders" },
+      { to: "/operate/cashier-workspace", label: "Cashier Workspace", icon: UserSquare2, module: "Pos" },
+      { to: "/operate/cashier-shift", label: "Cashier Shifts", icon: ClipboardList, module: "Pos" },
+    ],
+  },
+  {
+    name: "Products & Stock",
+    items: [
+      { to: "/stock/inventory", label: "Product Catalog", icon: Package, module: "Inventory" },
+      { to: "/admin/categories", label: "Categories & Attributes", icon: Layers, module: "Inventory" },
+      { to: "/stock/stocks", label: "Inventory & Stock", icon: Boxes, module: "Inventory" },
+      { to: "/stock/expiry", label: "Material Validity", icon: CalendarClock, module: "Inventory" },
+      { to: "/stock/transfers", label: "Stock Transfers", icon: ArrowLeftRight, module: "Inventory" },
+      { to: "/stock/bundles", label: "Bundles & Systems", icon: Blocks, module: "Inventory" },
+    ],
+  },
+  {
+    name: "Procurement",
+    items: [
+      { to: "/suppliers/suppliers", label: "Suppliers", icon: Truck, module: "Suppliers" },
+      { to: "/finance/purchase-orders", label: "Purchase Orders", icon: FileText, module: "Suppliers" },
+      { to: "/suppliers/rts", label: "Supplier Returns", icon: Undo2, module: "Suppliers" },
+    ],
+  },
+  {
+    name: "Finance & Customers",
+    items: [
+      { to: "/finance/expenses", label: "Expenses", icon: Wallet, module: "Finance" },
+      { to: "/finance/pricing", label: "Pricing, Discounts & Coupons", icon: Percent, module: "Finance" },
+      { to: "/finance/returns", label: "Returns & Refunds", icon: RotateCcw, module: "Finance" },
+      { to: "/finance/loyalty", label: "Loyalty Program", icon: Gift, module: "Finance" },
+      { to: "/finance/tax-zatca", label: "Invoices & Tax Compliance", icon: Receipt, module: "Finance" },
+    ],
+  },
+  {
+    name: "Delivery",
+    items: [
+      { to: "/delivery/dashboard", label: "Delivery Dashboard", icon: Truck, module: "Delivery" },
+      { to: "/delivery/pipeline", label: "Delivery Pipeline", icon: ArrowLeftRight, module: "Delivery" },
+      { to: "/delivery/orders", label: "Delivery Orders", icon: ClipboardList, module: "Delivery" },
+      { to: "/delivery/drivers", label: "Driver Assignments", icon: UserRound, module: "Delivery" },
+      { to: "/delivery/vehicles", label: "Vehicle Assignments", icon: Truck, module: "Delivery" },
+      { to: "/delivery/zones", label: "Delivery Zones", icon: Building2, module: "Delivery" },
+      { to: "/delivery/logs", label: "Delivery Activity Logs", icon: Activity, module: "Delivery" },
+    ],
+  },
+  {
+    name: "HRMS",
+    items: [
+      { to: "/hrms/dashboard", label: "HR Dashboard", icon: LayoutDashboard, module: "Hr" },
+      { to: "/hrms/employees", label: "Employees", icon: UserRound, module: "Hr" },
+      { to: "/hrms/departments", label: "Departments", icon: Building2, module: "Hr" },
+      { to: "/hrms/attendance", label: "Shift & Attendance", icon: CalendarDays, module: "Hr" },
+      { to: "/hrms/leave", label: "Leave Management", icon: CalendarClock, module: "Hr" },
+      { to: "/hrms/documents", label: "Documents & Contracts", icon: FileSignature, module: "Hr" },
+      { to: "/hrms/logs", label: "HR Activity Logs", icon: Activity, module: "Hr" },
+    ],
+  },
+  {
+    name: "Network",
+    items: [
+      { to: "/network/branches", label: "Branches", icon: Store, module: "Network" },
+      { to: "/network/terminals", label: "Terminals", icon: MonitorSmartphone, module: "Network" },
+      { to: "/network/devices", label: "Devices", icon: Printer, module: "Network" },
+    ],
+  },
+  {
+    name: "Insights",
+    items: [
+      { to: "/insights/reports", label: "Reports", icon: FileBarChart, module: "Insights" },
+      { to: "/insights/bi", label: "Analytics", icon: BarChart3, module: "Insights" },
+      { to: "/insights/kpi", label: "KPI Evaluation", icon: Target, module: "Insights" },
+    ],
+  },
+  {
+    name: "Admin",
+    items: [
+      { to: "/admin/overview", label: "Admin Overview", icon: ShieldCheck, module: "Admin" },
+      { to: "/admin/users", label: "Registered Users", icon: UserCog, module: "Admin" },
+      { to: "/admin/roles", label: "Roles & Permissions", icon: KeyRound, module: "Admin" },
+      { to: "/admin/rules", label: "Rules Engine", icon: Sliders, module: "Admin" },
+      { to: "/admin/pos-settings", label: "POS Settings", icon: Cog, module: "Admin" },
+      { to: "/admin/zatca-invoices", label: "ZATCA Invoices", icon: QrCode, module: "Finance" },
+      { to: "/admin/zatca-settings", label: "ZATCA Phase 2 Settings", icon: ShieldCheck, module: "Finance" },
+      { to: "/admin/audit-logs", label: "Audit Logs", icon: ScrollText, module: "Admin" },
+      { to: "/admin/plans", label: "Subscriptions", icon: CreditCard, module: "Admin" },
+      { to: "/admin/settings", label: "General Settings", icon: Settings2, module: "Admin" },
+    ],
+  },
+];
+
+export function AppLayout({ children }: { children: ReactNode }) {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  const { user, hasAccess, logout } = useAuth();
+
+  const [search, setSearch] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const canSearchProducts = hasAccess("Inventory");
+  const canSearchCustomers = hasAccess("Orders");
+  const { data: searchProducts } = useProducts(canSearchProducts && search.trim().length > 0);
+  const { data: searchCustomers } = useCustomers(canSearchCustomers && search.trim().length > 0);
+  const { data: notifications } = useNotifications();
+  const { data: terminals } = useTerminals(hasAccess("Network"));
+  const { data: cashierShifts } = useCashierShifts(hasAccess("Pos"));
+  const { data: zatcaIdentity } = useZatcaIdentity(user?.branchId ?? null, hasAccess("Finance") && user?.branchId != null);
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+
+  useEffect(() => {
+    const goOnline = () => setOnline(true);
+    const goOffline = () => setOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return { products: [], customers: [] };
+    const products = (searchProducts ?? [])
+      .filter((p) => p.sku.toLowerCase().includes(q) || p.nameEn.toLowerCase().includes(q) || (p.barcode?.toLowerCase().includes(q) ?? false))
+      .slice(0, 5);
+    const customers = (searchCustomers ?? [])
+      .filter((c) => c.nameEn.toLowerCase().includes(q) || (c.phone?.toLowerCase().includes(q) ?? false))
+      .slice(0, 5);
+    return { products, customers };
+  }, [search, searchProducts, searchCustomers]);
+  const hasSearchResults = searchResults.products.length > 0 || searchResults.customers.length > 0;
+
+  const openShift = cashierShifts?.find((s) => s.cashierName === user?.name && s.status === "Open");
+  const criticalCount = notifications?.filter((n) => n.severity === "Critical").length ?? 0;
+  const currentTerminal = terminals?.find((t) => t.branchId === user?.branchId) ?? null;
+
+  function goToSearchResult(to: string) {
+    navigate({ to });
+    setSearch("");
+    setSearchFocused(false);
+  }
+
+  function handleSearchEnter(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    if (searchResults.products.length > 0) goToSearchResult("/stock/inventory");
+    else if (searchResults.customers.length > 0) goToSearchResult("/operate/customers");
+  }
+
+  const visibleNav = nav
+    .map((g) => ({ ...g, items: g.items.filter((i) => !i.module || hasAccess(i.module)) }))
+    .filter((g) => g.items.length > 0);
+  const allItems: Item[] = visibleNav.flatMap((g) => g.items);
+
+  const active = allItems.find((m) => m.to === pathname) ?? allItems[0];
+  const activeGroup = visibleNav.find((g) => g.items.some((i) => i.to === pathname))?.name ?? "Dashboard";
+  const [open, setOpen] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(visibleNav.map((g) => [g.name, true]))
+  );
+
+  async function handleLogout() {
+    await logout();
+    navigate({ to: "/" });
+  }
+
+  return (
+    <div className="flex min-h-screen bg-canvas font-sans text-foreground">
+      {hasAccess("Delivery") && <DeliverySync />}
+      {hasAccess("Hr") && <HrSync />}
+      {/* Sidebar */}
+      <aside className="sticky top-0 hidden h-screen w-64 flex-none flex-col border-r border-black/5 bg-sidebar-bg text-sidebar-fg lg:flex relative">
+        <div className="pointer-events-none absolute inset-0 blueprint-grid-dark opacity-60" />
+        <div className="relative flex h-16 items-center border-b border-white/10 px-4">
+          <div className="flex h-10 w-full items-center justify-center rounded-xl bg-white/95 px-3 shadow-sm">
+            <img src={logoAsset.url} alt="Mi Money" className="h-6 w-auto" />
+          </div>
+        </div>
+        <nav className="relative flex-1 space-y-3 overflow-y-auto p-3">
+          {visibleNav.map((g) => {
+            const isOpen = open[g.name] ?? true;
+            if (!g.name) {
+              // ungrouped standalone (Dashboard)
+              return (
+                <ul key="__standalone" className="space-y-0.5">
+                  {g.items.map((m) => {
+                    const Icon = m.icon;
+                    const isActive = pathname === m.to;
+                    return (
+                      <li key={m.to}>
+                        <Link
+                          to={m.to}
+                          className={`flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13px] transition ${
+                            isActive
+                              ? "bg-white text-brand shadow-sm"
+                              : "text-white/85 hover:bg-white/5 hover:text-white"
+                          }`}
+                        >
+                          <Icon className="h-4 w-4 flex-none" />
+                          <span className="font-semibold">{m.label}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            }
+            return (
+              <div key={g.name}>
+                <button
+                  type="button"
+                  onClick={() => setOpen((o) => ({ ...o, [g.name]: !isOpen }))}
+                  className="flex w-full items-center justify-between px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/40 hover:text-white/70"
+                >
+                  {g.name}
+                  <ChevronDown className={`h-3 w-3 transition ${isOpen ? "" : "-rotate-90"}`} />
+                </button>
+                {isOpen && (
+                  <ul className="mt-1 space-y-0.5">
+                    {g.items.map((m) => {
+                      const Icon = m.icon;
+                      const isActive = pathname === m.to;
+                      return (
+                        <li key={m.to}>
+                          <Link
+                            to={m.to}
+                            className={`flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13px] transition ${
+                              isActive
+                                ? "bg-white text-brand shadow-sm"
+                                : "text-white/75 hover:bg-white/5 hover:text-white"
+                            }`}
+                          >
+                            <Icon className="h-4 w-4 flex-none" />
+                            <span className="font-medium">{m.label}</span>
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </nav>
+        <div className="relative border-t border-white/10 p-3">
+          <div className="rounded-lg bg-white/5 p-3 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="grid h-8 w-8 place-items-center rounded-full bg-teal text-teal-foreground font-semibold">
+                {(user?.name ?? "?").charAt(0)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium text-white">{user?.name ?? statusBar.user}</p>
+                <p className="truncate text-white/50">{user?.role ?? statusBar.role}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="grid h-7 w-7 place-items-center rounded-md text-white/50 hover:bg-white/5 hover:text-white"
+                title="Sign out"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-black/5 bg-white/90 px-4 backdrop-blur md:px-6">
+          <div className="lg:hidden">
+            <img src={logoAsset.url} alt="Mi Money" className="h-6 w-auto" />
+          </div>
+          <div className="hidden items-center gap-2 lg:flex">
+            <active.icon className="h-4 w-4 text-brand" />
+            <span className="text-xs text-muted-foreground">{activeGroup}</span>
+            <span className="text-muted-foreground">/</span>
+            <h1 className="font-display text-base font-semibold text-foreground">{active.label}</h1>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="relative hidden md:block">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => window.setTimeout(() => setSearchFocused(false), 150)}
+                onKeyDown={handleSearchEnter}
+                placeholder="Search SKU, customer…"
+                className="h-9 w-64 rounded-lg border border-black/10 bg-canvas pl-8 pr-3 text-sm outline-none focus:border-brand"
+              />
+              {searchFocused && search.trim() !== "" && (
+                <div className="absolute right-0 top-full z-20 mt-1 w-80 rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
+                  {!hasSearchResults && (
+                    <p className="px-2.5 py-2 text-xs text-muted-foreground">No matches for "{search}"</p>
+                  )}
+                  {searchResults.products.length > 0 && (
+                    <div className="mb-1">
+                      <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Products</p>
+                      {searchResults.products.map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => goToSearchResult("/stock/inventory")}
+                          className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
+                        >
+                          <span className="truncate">{p.nameEn}</span>
+                          <span className="ml-2 flex-none font-mono text-[10px] text-muted-foreground">{p.sku}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {searchResults.customers.length > 0 && (
+                    <div>
+                      <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Customers</p>
+                      {searchResults.customers.map((c) => (
+                        <button
+                          key={c.id}
+                          onClick={() => goToSearchResult("/operate/customers")}
+                          className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
+                        >
+                          <span className="truncate">{c.nameEn}</span>
+                          <span className="ml-2 flex-none text-[10px] text-muted-foreground">{c.phone ?? "—"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            {hasAccess("Pos") && (
+              <span className="hidden items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success-foreground md:inline-flex">
+                <Circle className="h-2 w-2 fill-current" /> {openShift ? `Open since ${new Date(openShift.openedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "No active shift"}
+              </span>
+            )}
+            <span className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium md:inline-flex ${online ? "border-teal/30 bg-teal/10 text-foreground" : "border-critical/30 bg-critical/10 text-critical"}`}>
+              <Wifi className={`h-3 w-3 ${online ? "text-teal" : "text-critical"}`} /> {online ? "Online" : "Offline"}
+            </span>
+            {hasAccess("Finance") && (
+              <span className="hidden items-center gap-1.5 rounded-full border border-brand/20 bg-brand/10 px-2.5 py-0.5 text-xs font-medium text-brand md:inline-flex">
+                <Shield className="h-3 w-3" /> ZATCA {zatcaIdentity?.onboardingStatus === "ProductionReady" ? "Connected" : zatcaIdentity ? "Pending" : "—"}
+              </span>
+            )}
+            <LanguageSwitcher />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="relative grid h-9 w-9 place-items-center rounded-lg border border-black/10 bg-white text-foreground hover:bg-canvas">
+                  <Bell className="h-4 w-4" />
+                  {notifications && notifications.length > 0 && (
+                    <span className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ${criticalCount > 0 ? "bg-critical" : "bg-warning"}`} />
+                  )}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-80">
+                <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {(!notifications || notifications.length === 0) && (
+                  <p className="px-2 py-3 text-center text-xs text-muted-foreground">No alerts right now.</p>
+                )}
+                {notifications?.map((n) => (
+                  <DropdownMenuItem key={n.id} onClick={() => n.link && navigate({ to: n.link })} className="flex items-start gap-2 py-2">
+                    <span
+                      className={`mt-1 h-1.5 w-1.5 flex-none rounded-full ${
+                        n.severity === "Critical" ? "bg-critical" : n.severity === "Warning" ? "bg-warning" : "bg-brand"
+                      }`}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-xs font-medium text-foreground">{n.message}</span>
+                      <span className="block text-[10px] text-muted-foreground">{n.type}</span>
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="grid h-9 w-9 place-items-center rounded-full bg-brand text-brand-foreground text-xs font-semibold hover:bg-brand/90">
+                  {(user?.name ?? "?").charAt(0)}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>
+                  <p className="truncate text-sm font-semibold text-foreground">{user?.name ?? "—"}</p>
+                  <p className="truncate text-xs font-normal text-muted-foreground">{user?.email ?? ""}</p>
+                  <p className="truncate text-xs font-normal text-muted-foreground">{user?.role ?? ""}</p>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="text-critical focus:text-critical">
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </header>
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-black/5 bg-white px-4 py-2 text-[11px] text-muted-foreground md:px-6">
+          <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
+            <Building2 className="h-3 w-3 text-brand" /> {statusBar.business}
+          </span>
+          <span className="text-black/20">·</span>
+          <span><span className="text-foreground/70">Branch:</span> {user?.branchName ?? "All Branches"}</span>
+          <span className="text-black/20">·</span>
+          <span><span className="text-foreground/70">Terminal:</span> <span className="font-mono text-foreground">{currentTerminal?.code ?? (user?.branchId === null ? "All Terminals" : "Unassigned")}</span></span>
+          <span className="text-black/20">·</span>
+          <span><span className="text-foreground/70">User:</span> {user?.name ?? "—"} · <span className="text-foreground/60">{user?.role ?? "—"}</span></span>
+          <span className="text-black/20">·</span>
+          <span><span className="text-foreground/70">Date:</span> {new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}</span>
+          <span className="ml-auto flex items-center gap-1 text-foreground/60">
+            <Globe className="h-3 w-3" /> {statusBar.currency} · auto-refresh 60s
+          </span>
+        </div>
+
+        <main className="flex-1 p-4 md:p-6">{children}</main>
+
+        <footer className="border-t border-black/5 bg-white px-4 py-3 text-center text-xs text-muted-foreground md:px-6">
+          BuildPOS · Al Binaa Building Materials Trading · Data source: POS transactions, inventory, cashier shifts, delivery orders, and ZATCA invoice records.
+        </footer>
+      </div>
+    </div>
+  );
+}
