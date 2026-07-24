@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
 using EcrBuilding.Application.Admin;
@@ -69,6 +70,21 @@ public class UsersController(AppDbContext db, IPasswordHasher hasher, IAuditServ
         return Ok(Map(user));
     }
 
+    [HttpPost("{id:int}/reset-pin")]
+    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    public async Task<ActionResult<ResetPinResponse>> ResetPin(int id, CancellationToken ct)
+    {
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id, ct);
+        if (user is null) return NotFound();
+
+        var pin = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
+        user.PinHash = hasher.Hash(pin);
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("admin", "USER_PIN_RESET", id.ToString(), cancellationToken: ct);
+        return Ok(new ResetPinResponse(pin));
+    }
+
     private static UserDto Map(User u) => new(
-        u.Id, u.Name, u.Email, u.RoleId, u.Role?.Name ?? "", u.BranchId, u.Branch?.NameEn, u.Status.ToString(), u.PreferredLocale, u.LastLoginAt);
+        u.Id, u.Name, u.Email, u.RoleId, u.Role?.Name ?? "", u.BranchId, u.Branch?.NameEn, u.Status.ToString(), u.PreferredLocale, u.LastLoginAt,
+        u.PinHash is not null);
 }

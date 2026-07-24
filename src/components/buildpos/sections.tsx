@@ -49,6 +49,7 @@ import {
 } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 import { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -600,6 +601,7 @@ export function InventoryHealth({
   summary?: typeof inventorySummary;
 }) {
   const { values, setValue } = useFilters();
+  const navigate = useNavigate();
   const cat = values.Category;
   const rows = cat === "All Categories" ? allRows : allRows.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
   return (
@@ -622,7 +624,7 @@ export function InventoryHealth({
             variant="ghost"
             size="sm"
             className="text-xs text-brand hover:bg-brand/5 hover:text-brand"
-            onClick={() => toast.info("Low Stock Report", { description: "Opening report…" })}
+            onClick={() => navigate({ to: "/stock/stocks", search: { status: "Low" } })}
           >
             Low Stock Report <ChevronRight className="ml-1 h-3 w-3" />
           </Button>
@@ -1650,6 +1652,7 @@ export function InventoryKpiGrid({ items = inventoryKpis }: { items?: typeof inv
 /* ---------- 7.4 Delivery pipeline board (full, 6 lanes) ---------- */
 
 export function DeliveryPipelineBoard({ cards: allCards = deliveryDetail }: { cards?: typeof deliveryDetail }) {
+  const navigate = useNavigate();
   const lanes: { key: string; tone: Severity }[] = [
     { key: "Pending", tone: "warning" },
     { key: "Assigned", tone: "info" },
@@ -1681,7 +1684,7 @@ export function DeliveryPipelineBoard({ cards: allCards = deliveryDetail }: { ca
                   <div
                     key={d.no}
                     className="bp-enter cursor-pointer rounded-lg border border-black/5 bg-white p-2.5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand/30 hover:shadow"
-                    onClick={() => toast.info(`${d.no} · ${d.customer}`, { description: `${d.materials} · ${d.driver}` })}
+                    onClick={() => navigate({ to: "/delivery/pipeline" })}
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-mono text-[11px] font-semibold text-brand">{d.no}</span>
@@ -1704,7 +1707,7 @@ export function DeliveryPipelineBoard({ cards: allCards = deliveryDetail }: { ca
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
         {["Assign Driver", "Assign Vehicle", "Start Loading", "Mark Dispatched", "Mark Delivered", "Print Delivery Order", "View Timeline"].map((a) => (
-          <Button key={a} size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => toast.info(a)}>
+          <Button key={a} size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => navigate({ to: "/delivery/pipeline" })}>
             {a}
           </Button>
         ))}
@@ -1741,6 +1744,7 @@ export function CashierKpiGrid({ items = cashierKpis }: { items?: typeof cashier
 }
 
 export function TerminalDetailTable({ rows = terminalDetail }: { rows?: typeof terminalDetail }) {
+  const navigate = useNavigate();
   return (
     <SectionCard title="Terminal Status" desc="Cashier · shift · sales · sync · printer · card terminal.">
       <div className="overflow-x-auto">
@@ -1778,7 +1782,7 @@ export function TerminalDetailTable({ rows = terminalDetail }: { rows?: typeof t
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {["View Shift", "Print X-Report", "Request Cash Count", "Review Variance", "Recall Parked Sale", "Reassign Cashier"].map((a) => (
-          <Button key={a} size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => toast.info(a)}>
+          <Button key={a} size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => navigate({ to: "/operate/cashier-shift" })}>
             {a}
           </Button>
         ))}

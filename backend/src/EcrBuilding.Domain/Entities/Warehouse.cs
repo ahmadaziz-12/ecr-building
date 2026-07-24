@@ -44,6 +44,21 @@ public class StockLevel : BaseEntity
     public decimal Available => OnHand - Reserved;
 }
 
+// The branch's own shop-floor on-hand quantity — independent from the warehouse(s) that supply
+// it. POS checkout, void, quotation-conversion, delivery reservation, and return-approval all
+// read/write this, not StockLevel; StockLevel is bulk/backroom stock, moved into here by a Stock
+// Transfer (warehouse -> branch) same as any other transfer leg.
+public class BranchStockLevel : BaseEntity
+{
+    public int ProductId { get; set; }
+    public Product? Product { get; set; }
+    public int BranchId { get; set; }
+    public Branch? Branch { get; set; }
+    public decimal OnHand { get; set; }
+    public decimal Reserved { get; set; }
+    public decimal Available => OnHand - Reserved;
+}
+
 public enum StockBatchStatus
 {
     Healthy = 0,
@@ -71,26 +86,40 @@ public class StockBatch : BaseEntity
     public bool OnPromo { get; set; }
 }
 
+// Numeric values are load-bearing (stored as ints in the DB) — append new members, never renumber.
+// Discrepancy is no longer produced (see StockTransfersController.Dispatch/Receive) but is left
+// defined so any historical rows still deserialize.
 public enum StockTransferStatus
 {
     Draft = 0,
     Approved = 1,
     InTransit = 2,
     Received = 3,
-    Discrepancy = 4
+    Discrepancy = 4,
+    PendingApproval = 5,
+    Cancelled = 6
 }
 
+// Source/destination are each EITHER a warehouse OR a branch — exactly one of the pair set per
+// side (enforced in StockTransfersController, not the schema, matching how this codebase validates
+// elsewhere). A warehouse holds bulk/backroom stock (StockLevel); a branch holds its own
+// independent shop-floor stock (BranchStockLevel) — same product, two different ledgers.
 public class StockTransfer : BaseEntity
 {
     public string TransferNo { get; set; } = string.Empty;
-    public int FromWarehouseId { get; set; }
+    public int? FromWarehouseId { get; set; }
     public Warehouse? FromWarehouse { get; set; }
-    public int ToWarehouseId { get; set; }
+    public int? FromBranchId { get; set; }
+    public Branch? FromBranch { get; set; }
+    public int? ToWarehouseId { get; set; }
     public Warehouse? ToWarehouse { get; set; }
+    public int? ToBranchId { get; set; }
+    public Branch? ToBranch { get; set; }
     public StockTransferStatus Status { get; set; } = StockTransferStatus.Draft;
     public DateTime? Eta { get; set; }
     public string? Carrier { get; set; }
     public string? Notes { get; set; }
+    public int? ApproverUserId { get; set; }
 
     public ICollection<StockTransferLine> Lines { get; set; } = new List<StockTransferLine>();
 }
@@ -104,6 +133,13 @@ public class StockTransferLine
     public Product? Product { get; set; }
     public decimal Qty { get; set; }
     public decimal UnitCost { get; set; }
+    // Actual quantity received at the destination — set on Receive; defaults to the full planned
+    // Qty when the caller doesn't supply an actual (keeps the one-click "Receive" flow working).
+    public decimal ReceivedQty { get; set; }
+    // Optional — only set for shelf-life-sensitive products (cement, paint, sealants). When set,
+    // Dispatch/Receive/Cancel also move the matching StockBatch alongside the aggregate StockLevel.
+    public string? BatchNo { get; set; }
+    public DateTime? ExpiryDate { get; set; }
 }
 
 public class StockAdjustment : BaseEntity

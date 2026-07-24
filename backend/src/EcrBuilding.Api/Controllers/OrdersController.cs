@@ -65,15 +65,11 @@ public class OrdersController(AppDbContext db, IAuditService audit, IPaymentGate
         if (order is null) return NotFound();
         if (order.Status == OrderStatus.Voided) return BadRequest(new { error = "Order is already voided." });
 
-        var warehouse = await db.Warehouses.Where(w => w.BranchId == order.BranchId).OrderBy(w => w.Id).FirstOrDefaultAsync(ct);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
-        if (warehouse is not null)
+        foreach (var line in order.Lines)
         {
-            foreach (var line in order.Lines)
-            {
-                await db.Database.ExecuteSqlInterpolatedAsync(
-                    $"UPDATE StockLevels SET OnHand = OnHand + {line.Qty} WHERE ProductId = {line.ProductId} AND WarehouseId = {warehouse.Id}", ct);
-            }
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE BranchStockLevels SET OnHand = OnHand + {line.Qty} WHERE ProductId = {line.ProductId} AND BranchId = {order.BranchId}", ct);
         }
 
         order.Status = OrderStatus.Voided;
@@ -103,10 +99,14 @@ public class OrdersController(AppDbContext db, IAuditService audit, IPaymentGate
 
         var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         var customer = request.CustomerId is null ? null : await db.Customers.FindAsync([request.CustomerId], ct);
-        var warehouse = await db.Warehouses.Where(w => w.BranchId == request.BranchId).OrderBy(w => w.Id).FirstOrDefaultAsync(ct);
-        if (warehouse is null)
+
+        // Terminal.BranchId is the authoritative source — a raw client-supplied BranchId with no
+        // cross-check would let a misconfigured/compromised terminal claim any branch's stock.
+        if (request.TerminalId is not null)
         {
-            return BadRequest(new { error = "No warehouse configured for this branch." });
+            var terminal = await db.Terminals.FindAsync([request.TerminalId], ct);
+            if (terminal is null) return BadRequest(new { error = "Unknown terminal." });
+            if (terminal.BranchId != request.BranchId) return BadRequest(new { error = "Terminal does not belong to the specified branch." });
         }
 
         // Loyalty points tendered as payment — validated up front, before stock is touched, same
@@ -150,7 +150,7 @@ public class OrdersController(AppDbContext db, IAuditService audit, IPaymentGate
             // both succeed — the second one affects 0 rows and is rejected, instead of both
             // computing "OnHand - qty" off the same stale snapshot and quietly going negative.
             var rowsAffected = await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE StockLevels SET OnHand = OnHand - {line.Qty} WHERE ProductId = {line.ProductId} AND WarehouseId = {warehouse.Id} AND (OnHand - Reserved) >= {line.Qty}",
+                $"UPDATE BranchStockLevels SET OnHand = OnHand - {line.Qty} WHERE ProductId = {line.ProductId} AND BranchId = {request.BranchId} AND (OnHand - Reserved) >= {line.Qty}",
                 ct);
             if (rowsAffected == 0)
             {

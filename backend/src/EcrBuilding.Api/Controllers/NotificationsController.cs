@@ -39,6 +39,14 @@ public class NotificationsController(AppDbContext db) : ControllerBase
             var low = levels.Count(s => s.Available > 0 && s.Available <= (s.Product?.ReorderLevel ?? 0));
             if (critical > 0) notifications.Add(new("stock-critical", "Stock", "Critical", $"{critical} product(s) out of stock", now, "/stock/stocks"));
             if (low > 0) notifications.Add(new("stock-low", "Stock", "Warning", $"{low} product(s) approaching reorder level", now, "/stock/stocks"));
+
+            // Branch shop-floor stock is what a cashier can actually sell — a healthy warehouse
+            // doesn't help if the branch's own shelf is empty, so this is tracked separately.
+            var branchLevels = await db.BranchStockLevels.Include(s => s.Product).ToListAsync(ct);
+            var branchCritical = branchLevels.Count(s => s.Available <= 0);
+            var branchLow = branchLevels.Count(s => s.Available > 0 && s.Available <= (s.Product?.ReorderLevel ?? 0));
+            if (branchCritical > 0) notifications.Add(new("branch-stock-critical", "Branch Stock", "Critical", $"{branchCritical} product(s) out of stock at a branch", now, "/stock/branch-stock"));
+            if (branchLow > 0) notifications.Add(new("branch-stock-low", "Branch Stock", "Warning", $"{branchLow} product(s) approaching reorder level at a branch", now, "/stock/branch-stock"));
         }
 
         if (Can(ModuleArea.Hr))

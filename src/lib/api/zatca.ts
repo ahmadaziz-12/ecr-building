@@ -105,6 +105,7 @@ export function mapZatcaInvoices(rows: ZatcaInvoiceDto[]): LiveTable {
   return {
     columns: ["Invoice", "Order", "Type", "Amount", "VAT", "QR", "Hash / UUID", "Submitted", "Status"],
     statusCol: 8,
+    ids: rows.map((i) => i.id),
     rows: rows.map((i) => [
       i.invoiceNumber, i.orderNo, i.type, `${i.totalAmount.toFixed(2)} ر.س`, `${i.taxAmount.toFixed(2)} ر.س`,
       i.qrCodeBase64 ? "OK" : "—", `${i.invoiceHash.slice(0, 4)}…${i.invoiceHash.slice(-4)}`, fmtDateTime(i.issueDate), i.status,

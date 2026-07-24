@@ -15,6 +15,7 @@ export type ExpenseDto = {
   vat: number;
   method: string;
   status: string;
+  reconciled: boolean;
 };
 export type TaxCodeDto = {
   id: number;
@@ -167,14 +168,30 @@ export function useCreateReturn() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance", "returns"] }),
   });
 }
+export function useReconcileExpense() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiPut<ExpenseDto>(`/api/finance/expenses/${id}/reconcile`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance", "expenses"] }),
+  });
+}
+
+export function useQuarantineReturn() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiPut<ReturnDto>(`/api/finance/returns/${id}/quarantine`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance", "returns"] }),
+  });
+}
+
 export function useApproveReturn() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, warehouseId }: { id: number; warehouseId: number }) =>
-      apiPut<ReturnDto>(`/api/finance/returns/${id}/approve`, { warehouseId }),
+    mutationFn: ({ id, branchId }: { id: number; branchId: number }) =>
+      apiPut<ReturnDto>(`/api/finance/returns/${id}/approve`, { branchId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["finance", "returns"] });
-      queryClient.invalidateQueries({ queryKey: ["inventory", "stock-levels"] });
+      queryClient.invalidateQueries({ queryKey: ["inventory", "branch-stock-levels"] });
       queryClient.invalidateQueries({ queryKey: ["loyalty"] });
       queryClient.invalidateQueries({ queryKey: ["pos", "customers"] });
     },
@@ -219,6 +236,7 @@ export function mapExpenses(rows: ExpenseDto[]): LiveTable {
       "Status",
     ],
     statusCol: 9,
+    ids: rows.map((e) => e.id),
     rows: rows.map((e) => [
       e.expenseNo,
       fmtDate(e.date),
@@ -247,6 +265,7 @@ export function mapTaxCodes(rows: TaxCodeDto[]): LiveTable {
       "Status",
     ],
     statusCol: 7,
+    ids: rows.map((t) => t.id),
     rows: rows.map((t) => [
       t.code,
       t.name,
@@ -274,6 +293,7 @@ export function mapReturns(rows: ReturnDto[]): LiveTable {
       "Status",
     ],
     statusCol: 8,
+    ids: rows.map((r) => r.id),
     rows: rows.map((r) => [
       r.returnNo,
       r.orderNo ?? "—",

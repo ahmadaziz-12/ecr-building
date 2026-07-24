@@ -1,6 +1,6 @@
 import { useCategories, useProducts } from "./catalog";
 import { useBundles } from "./bundles";
-import { fmtDate, useStockBatches, useStockLevels, useStockTransfers } from "./inventory";
+import { fmtDate, useStockBatches, useStockLevels, useStockTransfers, useWarehouses } from "./inventory";
 import {
   usePurchaseOrderHistory,
   usePurchaseOrders,
@@ -11,16 +11,20 @@ import {
 } from "./procurement";
 import { useExpenses, useReturns, useTaxCodes } from "./finance";
 import { usePricingRules } from "./pos";
+import { useBranches, useDevices, useSessionLogs, useTerminals } from "./admin";
+import { useInsightsKpi, useInsightsBi } from "./insights";
 
 export type DetailField = { label: string; value: string };
 export type DetailSection = { heading: string; fields: DetailField[] };
 export type DetailTable = { heading: string; columns: string[]; rows: (string | number)[][] };
+export type DetailTab = { label: string; sections: DetailSection[]; tables?: DetailTable[] };
 export type RowDetail = {
   title: string;
   subtitle?: string;
   statusText?: string;
   sections: DetailSection[];
   tables?: DetailTable[];
+  tabs?: DetailTab[];
 };
 
 /**
@@ -41,10 +45,11 @@ export function useRowDetails(
     pathname === "/admin/categories" || pathname === "/stock/inventory",
   );
   const { data: stockLevels } = useStockLevels(
-    pathname === "/stock/stocks" || pathname === "/stock/inventory",
+    pathname === "/stock/stocks" || pathname === "/stock/inventory" || pathname === "/stock/warehouses",
   );
   const { data: batches } = useStockBatches(pathname === "/stock/expiry");
   const { data: transfers } = useStockTransfers(pathname === "/stock/transfers");
+  const { data: warehouses } = useWarehouses(pathname === "/stock/warehouses");
   const { data: bundles } = useBundles(pathname === "/stock/bundles");
 
   const { data: suppliers } = useSuppliers(pathname === "/suppliers/suppliers");
@@ -66,6 +71,18 @@ export function useRowDetails(
   const { data: pricingRules } = usePricingRules(pathname === "/finance/pricing");
   const { data: customerReturns } = useReturns(pathname === "/finance/returns");
   const { data: taxCodes } = useTaxCodes(pathname === "/finance/tax-zatca");
+
+  const networkPaths = ["/network/branches", "/network/terminals", "/network/devices"];
+  const { data: branches } = useBranches(networkPaths.includes(pathname));
+  const { data: terminals } = useTerminals(networkPaths.includes(pathname));
+  const { data: devices } = useDevices(pathname === "/network/devices");
+  const { data: sessionsForSelected } = useSessionLogs(
+    pathname === "/network/terminals" && selectedId !== undefined,
+    pathname === "/network/terminals" ? { terminalId: selectedId } : undefined,
+  );
+
+  const { data: kpis } = useInsightsKpi(pathname === "/insights/kpi");
+  const { data: biFeeds } = useInsightsBi(pathname === "/insights/bi");
 
   return (id, row) => {
     switch (pathname) {
@@ -238,7 +255,7 @@ export function useRowDetails(
         if (!transfer) return null;
         return {
           title: `Transfer ${transfer.transferNo}`,
-          subtitle: `${transfer.fromWarehouseName} → ${transfer.toWarehouseName}`,
+          subtitle: `${transfer.sourceLabel} → ${transfer.destLabel}`,
           statusText: transfer.status,
           sections: [
             {
@@ -246,6 +263,7 @@ export function useRowDetails(
               fields: [
                 { label: "ETA", value: transfer.eta ? fmtDate(transfer.eta) : "—" },
                 { label: "Carrier", value: transfer.carrier ?? "—" },
+                { label: "Approver", value: transfer.approverName ?? "—" },
                 { label: "Notes", value: transfer.notes ?? "—" },
                 {
                   label: "Total Value",
@@ -257,14 +275,55 @@ export function useRowDetails(
           tables: [
             {
               heading: "Lines",
-              columns: ["SKU", "Product", "Qty", "Unit Cost", "Line Total"],
+              columns: ["SKU", "Product", "Qty", "Received", "Discrepancy", "Batch", "Unit Cost", "Line Total"],
               rows: transfer.lines.map((l) => [
                 l.sku,
                 l.productName,
                 l.qty,
+                transfer.status === "Received" ? l.receivedQty : "—",
+                transfer.status === "Received" && l.discrepancy !== 0 ? l.discrepancy : "—",
+                l.batchNo ?? "—",
                 l.unitCost.toFixed(2),
                 (l.qty * l.unitCost).toFixed(2),
               ]),
+            },
+          ],
+        };
+      }
+
+      case "/stock/warehouses": {
+        const warehouse = warehouses?.find((w) => w.id === id);
+        if (!warehouse) return null;
+        return {
+          title: warehouse.name,
+          subtitle: `${warehouse.code} · ${warehouse.branchName} · ${warehouse.type}`,
+          statusText: warehouse.status,
+          sections: [
+            {
+              heading: "Operations",
+              fields: [
+                { label: "Stock Value", value: `${warehouse.stockValue.toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س` },
+                { label: "Distinct SKUs", value: String(warehouse.skuCount) },
+                { label: "Low Stock Lines", value: String(warehouse.lowStockCount) },
+                { label: "Active Batches", value: String(warehouse.activeBatchCount) },
+                { label: "Open Transfers Out", value: String(warehouse.openTransfersOut) },
+                { label: "Open Transfers In", value: String(warehouse.openTransfersIn) },
+                { label: "Reservations", value: String(warehouse.reservationCount) },
+              ],
+            },
+          ],
+          tables: [
+            {
+              heading: "Stock",
+              columns: ["SKU", "Product", "On Hand", "Reserved", "Available", "Reorder", "Value (ر.س)", "Status"],
+              rows: (stockLevels ?? [])
+                .filter((s) => s.warehouseId === warehouse.id)
+                .map((s) => [s.sku, s.productName, s.onHand, s.reserved, s.available, s.reorderLevel, s.value.toFixed(2), s.status]),
+            },
+            {
+              heading: "Bins",
+              columns: ["Bin", "Label", "Capacity (t)", "Filled (t)"],
+              rows: warehouse.bins.map((b) => [b.binCode, b.label, b.capacityTons, b.filledTons]),
             },
           ],
         };
@@ -595,6 +654,171 @@ export function useRowDetails(
                 { label: "Applies To", value: taxCode.appliesTo },
                 { label: "Effective From", value: fmtDate(taxCode.effectiveFrom) },
                 { label: "GL Account", value: taxCode.glAccountCode ?? "—" },
+              ],
+            },
+          ],
+        };
+      }
+
+      case "/network/branches": {
+        const branch = branches?.find((b) => b.id === id);
+        if (!branch) return null;
+        const branchTerminals = terminals?.filter((t) => t.branchId === id) ?? [];
+        return {
+          title: branch.nameEn,
+          subtitle: branch.code,
+          statusText: branch.status,
+          sections: [
+            {
+              heading: "Branch",
+              fields: [
+                { label: "Name (AR)", value: branch.nameAr ?? "—" },
+                { label: "City", value: branch.city },
+                { label: "Address", value: branch.address ?? "—" },
+                { label: "Business Hours", value: branch.businessHours ?? "—" },
+                { label: "VAT Registration No.", value: branch.vatRegistrationNumber ?? "—" },
+                { label: "Manager", value: branch.managerName ?? "—" },
+                { label: "Warehouse", value: branch.warehouse ?? "—" },
+                { label: "Orders", value: String(branch.ordersCount) },
+              ],
+            },
+          ],
+          tables: [
+            {
+              heading: "Terminals",
+              columns: ["Terminal", "Type", "Status"],
+              rows: branchTerminals.map((t) => [t.code, t.type, t.status]),
+            },
+          ],
+        };
+      }
+
+      case "/network/terminals": {
+        const terminal = terminals?.find((t) => t.id === id);
+        if (!terminal) return null;
+        const shifts = sessionsForSelected ?? [];
+        const openShift = shifts.find((s) => s.status === "Open");
+        const syncLog = [
+          ...(terminal.lastSyncAt ? [{ label: "Last Sync", value: fmtDate(terminal.lastSyncAt) }] : []),
+          ...shifts.slice(0, 5).flatMap((s) => [
+            { label: "Shift Opened", value: `${fmtDate(s.openedAt)} · ${s.cashierName}` },
+            ...(s.closedAt ? [{ label: "Shift Closed", value: `${fmtDate(s.closedAt)} · ${s.cashierName}` }] : []),
+          ]),
+        ];
+        return {
+          title: terminal.name,
+          subtitle: `${terminal.code} · ${terminal.branchName}`,
+          statusText: terminal.status,
+          sections: [],
+          tabs: [
+            {
+              label: "Info",
+              sections: [
+                {
+                  heading: "Terminal",
+                  fields: [
+                    { label: "Code", value: terminal.code },
+                    { label: "Branch", value: terminal.branchName },
+                    { label: "Type", value: terminal.type },
+                    { label: "Assigned Cashier", value: terminal.assignedCashierName ?? "Unassigned" },
+                    { label: "IP Address", value: terminal.ipAddress ?? "—" },
+                    { label: "MAC Address", value: terminal.macAddress ?? "—" },
+                    { label: "Offline Mode", value: terminal.offlineModeEnabled ? "Enabled" : "Disabled" },
+                    { label: "Devices", value: String(terminal.deviceCount) },
+                  ],
+                },
+              ],
+            },
+            {
+              label: "Session",
+              sections: [
+                {
+                  heading: openShift ? "Open Session" : "No Open Session",
+                  fields: openShift
+                    ? [
+                        { label: "Cashier", value: openShift.cashierName },
+                        { label: "Opened At", value: fmtDate(openShift.openedAt) },
+                        { label: "Opening Float", value: `${openShift.openingFloat.toFixed(2)} ر.س` },
+                        { label: "Cash Sales", value: `${openShift.cashSales.toFixed(2)} ر.س` },
+                      ]
+                    : [{ label: "Status", value: "No cashier is currently signed into this terminal." }],
+                },
+              ],
+            },
+            {
+              label: "Sync Log",
+              sections: [{ heading: "Recent Activity", fields: syncLog.length > 0 ? syncLog : [{ label: "Activity", value: "No recent activity recorded." }] }],
+            },
+          ],
+        };
+      }
+
+      case "/network/devices": {
+        const device = devices?.find((d) => d.id === id);
+        if (!device) return null;
+        return {
+          title: device.deviceCode,
+          subtitle: `${device.type} · ${device.model}`,
+          statusText: device.status,
+          sections: [
+            {
+              heading: "Device",
+              fields: [
+                { label: "Terminal", value: device.terminalName },
+                { label: "Branch", value: device.branchName },
+                { label: "Serial", value: device.serial ?? "—" },
+                { label: "Connection", value: device.connection },
+                { label: "IP Address", value: device.ipAddress ?? "—" },
+                { label: "Firmware", value: device.firmware ?? "—" },
+                { label: "Last Test", value: fmtDate(device.lastTestAt) },
+                { label: "Sync Status", value: device.syncStatus },
+                { label: "Behavior Profile", value: device.behaviorProfile ?? "—" },
+              ],
+            },
+          ],
+        };
+      }
+
+      case "/insights/kpi": {
+        const kpi = kpis?.find((k) => k.id === id);
+        if (!kpi) return null;
+        return {
+          title: kpi.name,
+          subtitle: `${kpi.category} · ${kpi.period}`,
+          statusText: kpi.status,
+          sections: [
+            {
+              heading: "Trend",
+              fields: [
+                { label: "Owner", value: kpi.owner },
+                { label: "Target", value: kpi.target.toFixed(1) },
+                { label: "Actual", value: kpi.actual.toFixed(1) },
+                { label: "Variance", value: `${kpi.variancePct > 0 ? "+" : ""}${kpi.variancePct}%` },
+                { label: "Status", value: kpi.status },
+              ],
+            },
+          ],
+        };
+      }
+
+      case "/insights/bi": {
+        const feed = biFeeds?.find((f) => f.id === id);
+        if (!feed) return null;
+        return {
+          title: feed.name,
+          subtitle: `${feed.source} → ${feed.destination}`,
+          statusText: feed.status,
+          sections: [
+            {
+              heading: "Schema / Pipeline",
+              fields: [
+                { label: "Source", value: feed.source },
+                { label: "Destination", value: feed.destination },
+                { label: "Frequency", value: feed.frequency },
+                { label: "Last Run", value: fmtDate(feed.lastRun) },
+                { label: "Rows", value: String(feed.rows) },
+                { label: "Failed", value: String(feed.failed) },
+                { label: "Latency", value: feed.latency },
               ],
             },
           ],

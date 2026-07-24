@@ -75,6 +75,14 @@ export function useCreateSupplier() {
   });
 }
 
+export function useUpdateSupplier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, request }: { id: number; request: UpsertSupplierRequest }) => apiPut<SupplierDto>(`/api/procurement/suppliers/${id}`, request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["procurement", "suppliers"] }),
+  });
+}
+
 export function useSetSupplierStatus() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -150,13 +158,18 @@ function invalidateRts(queryClient: ReturnType<typeof useQueryClient>, id: numbe
   queryClient.invalidateQueries({ queryKey: ["procurement", "rts-history", id] });
 }
 
+function invalidateRtsStock(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: ["inventory", "stock-levels"] });
+  queryClient.invalidateQueries({ queryKey: ["inventory", "stock-batches"] });
+}
+
 export function useDispatchRts() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiPut<ReturnToSupplierDto>(`/api/procurement/rts/${id}/dispatch`),
     onSuccess: (_data, id) => {
       invalidateRts(queryClient, id);
-      queryClient.invalidateQueries({ queryKey: ["inventory", "stock-levels"] });
+      invalidateRtsStock(queryClient);
     },
   });
 }
@@ -165,6 +178,17 @@ export function useRejectRts() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiPut<ReturnToSupplierDto>(`/api/procurement/rts/${id}/reject`),
+    onSuccess: (_data, id) => {
+      invalidateRts(queryClient, id);
+      invalidateRtsStock(queryClient);
+    },
+  });
+}
+
+export function useCancelRts() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiPut<ReturnToSupplierDto>(`/api/procurement/rts/${id}/cancel`),
     onSuccess: (_data, id) => invalidateRts(queryClient, id),
   });
 }

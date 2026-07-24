@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import type { Field, Flow, LineItemColumn } from "@/lib/buildpos/flows";
 import { useProducts } from "@/lib/api/catalog";
 import { useBranches } from "@/lib/api/admin";
+import { useStockLevels, useBranchStockLevels } from "@/lib/api/inventory";
 
 type LineItemRow = Record<string, string>;
 
@@ -52,15 +53,49 @@ function BranchMultiSelect({ value, onChange }: { value: string; onChange: (v: s
   );
 }
 
+// Resolves a "Warehouse: <name>" / "Branch: <name>" location value (see Stock Transfer's location
+// picker) into a sku -> available-quantity map, so a lineItems field can show and validate against
+// real stock. Returns null when there's nothing to resolve — callers gate rendering on that.
+function useLocationAvailability(locationValue: string | undefined): Map<string, number> | null {
+  const isWarehouse = !!locationValue?.toLowerCase().startsWith("warehouse:");
+  const isBranch = !!locationValue?.toLowerCase().startsWith("branch:");
+  const { data: stockLevels } = useStockLevels(isWarehouse);
+  const { data: branchStockLevels } = useBranchStockLevels(isBranch);
+
+  return useMemo(() => {
+    if (!locationValue) return null;
+    if (isWarehouse) {
+      const name = locationValue.slice("warehouse:".length).trim().toLowerCase();
+      const map = new Map<string, number>();
+      stockLevels?.filter((s) => s.warehouseName.toLowerCase() === name).forEach((s) => map.set(s.sku, s.available));
+      return map;
+    }
+    if (isBranch) {
+      const name = locationValue.slice("branch:".length).trim().toLowerCase();
+      const map = new Map<string, number>();
+      branchStockLevels?.filter((s) => s.branchName.toLowerCase() === name).forEach((s) => map.set(s.sku, s.available));
+      return map;
+    }
+    return null;
+  }, [locationValue, isWarehouse, isBranch, stockLevels, branchStockLevels]);
+}
+
 // Renders a lineItems field as a stack of removable row-cards (not a table — a table's fixed
 // columns can't fit 5-6 labeled inputs without truncating text or clipping the branch
 // multi-select). Each row is its own labeled mini-form so every control gets full width.
 // "product"/"branch" columns pull live options here (products/branches are cheap, already-cached
 // queries elsewhere in the app); "select" columns use whatever options the field carries (see
 // Field.lineItemColumns — e.g. Receive PO injects that PO's own outstanding lines there).
-function LineItemsField({ columns, value, onChange }: { columns: LineItemColumn[]; value: string; onChange: (v: string) => void }) {
+function LineItemsField({
+  columns, value, onChange, availabilityMap,
+}: {
+  columns: LineItemColumn[]; value: string; onChange: (v: string) => void;
+  /** sku -> available qty at the location picked in another field — see LineItemColumn.availabilityField. */
+  availabilityMap?: Map<string, number> | null;
+}) {
   const { data: products } = useProducts();
   const rows = parseRows(value).length ? parseRows(value) : [{}];
+  const availabilityColumn = columns.find((c) => c.availabilityField);
 
   function setRows(next: LineItemRow[]) {
     onChange(JSON.stringify(next));
@@ -88,7 +123,13 @@ function LineItemsField({ columns, value, onChange }: { columns: LineItemColumn[
 
   return (
     <div className="space-y-2.5">
-      {rows.map((row, rowIdx) => (
+      {rows.map((row, rowIdx) => {
+        const showsAvailability = !!availabilityColumn && !!availabilityMap;
+        const rowSku = availabilityColumn ? row[availabilityColumn.key] : undefined;
+        const rowAvailable = showsAvailability && rowSku ? availabilityMap!.get(rowSku) : undefined;
+        const rowQty = availabilityColumn?.availabilityQtyKey ? Number(row[availabilityColumn.availabilityQtyKey] || 0) : undefined;
+        const rowOverAvailable = rowAvailable !== undefined && rowQty !== undefined && rowQty > rowAvailable;
+        return (
         <div key={rowIdx} className="relative rounded-lg border border-black/10 bg-canvas/40 p-3 pr-10">
           <button
             type="button"
@@ -103,14 +144,24 @@ function LineItemsField({ columns, value, onChange }: { columns: LineItemColumn[
               <div key={c.key} className={c.type === "branch" ? "col-span-2 sm:col-span-3" : ""}>
                 <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{c.label}</label>
                 {c.type === "product" ? (
-                  <select className={inputClass} value={row[c.key] ?? ""} onChange={(e) => updateCell(rowIdx, c.key, e.target.value)}>
-                    <option value="">Select item…</option>
-                    {products?.map((p) => (
-                      <option key={p.id} value={p.sku}>
-                        {p.sku} — {p.nameEn}
-                      </option>
-                    ))}
-                  </select>
+                  <>
+                    <select className={inputClass} value={row[c.key] ?? ""} onChange={(e) => updateCell(rowIdx, c.key, e.target.value)}>
+                      <option value="">Select item…</option>
+                      {products?.map((p) => {
+                        const avail = showsAvailability ? availabilityMap!.get(p.sku) : undefined;
+                        return (
+                          <option key={p.id} value={p.sku}>
+                            {p.sku} — {p.nameEn}{avail !== undefined ? ` (Avail: ${avail})` : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    {showsAvailability && rowSku && (
+                      <p className={`mt-1 text-[11px] ${rowAvailable !== undefined && rowAvailable <= 0 ? "text-critical" : "text-muted-foreground"}`}>
+                        {rowAvailable !== undefined ? `Available: ${rowAvailable}` : "No stock record at this location."}
+                      </p>
+                    )}
+                  </>
                 ) : c.type === "branch" ? (
                   <BranchMultiSelect value={row[c.key] ?? ""} onChange={(v) => updateCell(rowIdx, c.key, v)} />
                 ) : c.type === "select" ? (
@@ -123,19 +174,25 @@ function LineItemsField({ columns, value, onChange }: { columns: LineItemColumn[
                     ))}
                   </select>
                 ) : (
-                  <input
-                    type={c.type === "number" ? "number" : c.type === "date" ? "date" : "text"}
-                    className={inputClass}
-                    placeholder={c.placeholder}
-                    value={row[c.key] ?? ""}
-                    onChange={(e) => updateCell(rowIdx, c.key, e.target.value)}
-                  />
+                  <>
+                    <input
+                      type={c.type === "number" ? "number" : c.type === "date" ? "date" : "text"}
+                      className={inputClass}
+                      placeholder={c.placeholder}
+                      value={row[c.key] ?? ""}
+                      onChange={(e) => updateCell(rowIdx, c.key, e.target.value)}
+                    />
+                    {c.key === availabilityColumn?.availabilityQtyKey && rowOverAvailable && (
+                      <p className="mt-1 text-[11px] text-critical">Exceeds available ({rowAvailable}).</p>
+                    )}
+                  </>
                 )}
               </div>
             ))}
           </div>
         </div>
-      ))}
+        );
+      })}
       <button
         type="button"
         onClick={addRow}
@@ -261,6 +318,21 @@ export function FlowDialog({
   const isReview = step === steps.length;
   const total = steps.length + 1; // + review
   const hasLineItems = steps.some((s) => s.fields.some((f) => f.type === "lineItems"));
+
+  // At most one lineItems field per flow needs live availability today (Stock Transfer's items
+  // step, checked against whichever location the "from" field holds) — find it once, generically,
+  // rather than hardcoding the flow.
+  const availabilityRef = useMemo(() => {
+    for (const s of steps) {
+      for (const f of s.fields) {
+        if (f.type !== "lineItems") continue;
+        const col = f.lineItemColumns?.find((c) => c.availabilityField);
+        if (col) return { fieldName: f.name, locationField: col.availabilityField! };
+      }
+    }
+    return null;
+  }, [steps]);
+  const availabilityMap = useLocationAvailability(availabilityRef ? values[availabilityRef.locationField] : undefined);
 
   function resolveField(f: Field): Field {
     const override = fieldOverrides?.[f.name];
@@ -477,6 +549,7 @@ export function FlowDialog({
                             columns={f.lineItemColumns ?? []}
                             value={values[f.name] ?? ""}
                             onChange={(v) => setValues((s) => ({ ...s, [f.name]: v }))}
+                            availabilityMap={availabilityRef?.fieldName === f.name ? availabilityMap : null}
                           />
                         ) : (
                           <FieldControl

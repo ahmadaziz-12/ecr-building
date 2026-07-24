@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
+import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   LayoutDashboard,
@@ -466,7 +467,7 @@ function OverviewPage() {
         <TabsContent value="sales" className="bp-fade space-y-4">
           <SalesPerfKpis items={salesPerfKpisReal} />
           <SalesPerformance data={hourlyReal} />
-          <TopCategoriesCompact categories={categoryAggReal} topProductByCategory={topProductByCategoryReal} />
+          <TopCategoriesCompact categories={categoryAggReal} topProductByCategory={topProductByCategoryReal} onViewAll={() => navigate({ to: "/insights/sales" })} />
           <BranchPerformance rows={branchPerformanceReal} />
           <RecentOrdersTable orders={recentOrdersReal} onOpenAnalytics={() => navigate({ to: "/insights/bi" })} />
         </TabsContent>
@@ -496,7 +497,7 @@ function OverviewPage() {
 
         {/* 7. Compliance & Alerts */}
         <TabsContent value="compliance" className="bp-fade space-y-4">
-          <AlertsByGroup alerts={alertsReal} onAction={(a) => a.link && navigate({ to: a.link })} />
+          <AlertsByGroup alerts={alertsReal} onAction={(a) => (a.link ? navigate({ to: a.link }) : toast.info(a.action, { description: a.msg }))} />
         </TabsContent>
       </Tabs>
     </div>

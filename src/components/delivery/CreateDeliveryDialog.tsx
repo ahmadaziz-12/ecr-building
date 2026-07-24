@@ -5,6 +5,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useDeliveryStore, type DeliveryLine, type DeliveryOrder } from "@/lib/delivery/store";
 import { useHrStore, driverAvailable, employeeName } from "@/lib/hr/store";
+import { useBranches } from "@/lib/api/admin";
 
 const STEPS = ["Source Order", "Items", "Address", "Schedule", "Driver & Vehicle", "Charges", "Review"];
 
@@ -15,6 +16,7 @@ const SEED_LINES: DeliveryLine[] = [
 
 export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { open: boolean; onOpenChange: (v: boolean) => void; sourceOrderId?: string }) {
   const [step, setStep] = useState(0);
+  const [saving, setSaving] = useState(false);
   const [f, setF] = useState({
     orderId: sourceOrderId ?? "ORD-2026-8096",
     invoiceId: "",
@@ -22,7 +24,7 @@ export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { op
     customerType: "Contractor" as DeliveryOrder["customerType"],
     project: "PRJ-RYD-221",
     poRef: "PO-AN-7782",
-    branch: "Riyadh Main Branch",
+    branch: "",
     paymentStatus: "Credit" as DeliveryOrder["paymentStatus"],
     lines: SEED_LINES,
     addressType: "Project Site" as const,
@@ -54,6 +56,7 @@ export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { op
   const vehicles = useDeliveryStore((s) => s.vehicles);
   const zones = useDeliveryStore((s) => s.zones);
   const employees = useHrStore((s) => s.employees);
+  const { data: branches } = useBranches();
 
   const totalWeight = useMemo(
     () => f.lines.reduce((sum, l) => sum + (l.deliveryQty * l.unitWeight) / 1000, 0),
@@ -72,9 +75,13 @@ export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { op
     if (!v) setTimeout(() => setStep(0), 200);
   }
 
-  function save(mode: "draft" | "confirm") {
+  async function save(mode: "draft" | "confirm") {
     if (!f.customer || !f.contactName || !f.contactMobile) {
       toast.error("Address and contact number are mandatory.");
+      return;
+    }
+    if (!f.branch) {
+      toast.error("Branch is required.");
       return;
     }
     if (new Date(f.promisedDate) < new Date(new Date().toDateString())) {
@@ -89,7 +96,8 @@ export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { op
       toast.error(`Driver unavailable — ${driverCheck.reason}.`);
       return;
     }
-    const doc = addOrder({
+    setSaving(true);
+    const res = await addOrder({
       orderId: f.orderId,
       invoiceId: f.invoiceId || undefined,
       customer: f.customer,
@@ -127,7 +135,12 @@ export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { op
       stage: mode === "confirm" && f.driverEmpId && f.vehicleId ? "Assigned" : "Pending",
       notes: f.notes,
     });
-    toast.success(`${doc.id} created`, {
+    setSaving(false);
+    if (!res.ok || !res.doc) {
+      toast.error(res.error ?? "Could not create delivery order.");
+      return;
+    }
+    toast.success(`${res.doc.id} created`, {
       description: mode === "confirm" ? "Stock reserved and driver assigned." : "Saved as draft — no stock reserved.",
     });
     close(false);
@@ -193,7 +206,7 @@ export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { op
                   <Select label="Customer Type" v={f.customerType} onChange={(v) => setF({ ...f, customerType: v as DeliveryOrder["customerType"] })} options={["Walk-in", "Retail", "Contractor", "B2B"]} />
                   <Field label="Project Code" v={f.project} onChange={(v) => setF({ ...f, project: v })} />
                   <Field label="PO Reference" v={f.poRef} onChange={(v) => setF({ ...f, poRef: v })} />
-                  <Select label="Branch" v={f.branch} onChange={(v) => setF({ ...f, branch: v })} options={["Riyadh Main Branch", "Jeddah Branch", "Dammam Branch", "Makkah Branch", "Madinah Branch", "Khobar Building Materials Branch"]} />
+                  <Select label="Branch" v={f.branch} onChange={(v) => setF({ ...f, branch: v })} options={(branches ?? []).map((b) => b.nameEn)} />
                   <Select label="Payment Status" v={f.paymentStatus} onChange={(v) => setF({ ...f, paymentStatus: v as DeliveryOrder["paymentStatus"] })} options={["Paid", "Unpaid", "Partial", "Credit"]} />
                 </div>
               )}
@@ -362,9 +375,9 @@ export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { op
                   </Button>
                 ) : (
                   <>
-                    <Button size="sm" variant="outline" onClick={() => save("draft")}>Save Draft</Button>
-                    <Button size="sm" onClick={() => save("confirm")} className="bg-brand text-brand-foreground hover:bg-brand/90">
-                      <Check className="h-4 w-4" /> Reserve & Confirm
+                    <Button size="sm" variant="outline" onClick={() => save("draft")} disabled={saving}>Save Draft</Button>
+                    <Button size="sm" onClick={() => save("confirm")} disabled={saving} className="bg-brand text-brand-foreground hover:bg-brand/90">
+                      <Check className="h-4 w-4" /> {saving ? "Saving…" : "Reserve & Confirm"}
                     </Button>
                   </>
                 )}

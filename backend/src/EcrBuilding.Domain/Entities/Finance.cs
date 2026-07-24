@@ -53,6 +53,8 @@ public class Expense : BaseEntity
     public string Method { get; set; } = "Cash";
     public ExpenseStatus Status { get; set; } = ExpenseStatus.Pending;
     public int? ApproverUserId { get; set; }
+    public bool Reconciled { get; set; }
+    public DateTime? ReconciledAt { get; set; }
 }
 
 public class TaxCode : BaseEntity

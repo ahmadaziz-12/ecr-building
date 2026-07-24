@@ -47,7 +47,8 @@ function inDateRange(iso: string, from: string, to: string): boolean {
 const PAGE_SIZE = 10;
 
 export function OrdersPage() {
-  const { user } = useAuth();
+  const { user, hasAccess } = useAuth();
+  const canReturn = hasAccess("Finance");
   const { data: branches } = useBranches(user?.branchId == null);
   const { data: terminals } = useTerminals(true);
   const effectiveBranchId = user?.branchId ?? branches?.[0]?.id ?? null;
@@ -284,7 +285,7 @@ export function OrdersPage() {
                           { label: "View", onClick: () => setDetailOrder(o) },
                           { label: "Reprint Receipt", onClick: () => { setDetailOrder(o); setTimeout(() => window.print(), 150); } },
                           "separator",
-                          { label: "Create Return", onClick: () => setReturnTarget(o), disabled: o.status === "Voided" },
+                          ...(canReturn ? [{ label: "Create Return", onClick: () => setReturnTarget(o), disabled: o.status === "Voided" }] : []),
                           { label: "Void Order", onClick: () => setVoidTarget(o), destructive: true, disabled: o.status === "Voided" },
                         ]}
                       />

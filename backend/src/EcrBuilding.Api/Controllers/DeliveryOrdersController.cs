@@ -213,12 +213,9 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit) : Co
         var order = await db.DeliveryOrders.Include(o => o.Lines).FirstOrDefaultAsync(o => o.Id == id, ct);
         if (order is null) return NotFound();
 
-        var warehouse = await db.Warehouses.FirstOrDefaultAsync(w => w.BranchId == order.BranchId, ct);
-        if (warehouse is null) return BadRequest(new { error = "No warehouse configured for this branch." });
-
         foreach (var line in order.Lines)
         {
-            var stock = await db.StockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.WarehouseId == warehouse.Id, ct);
+            var stock = await db.BranchStockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.BranchId == order.BranchId, ct);
             if (stock is null || stock.Available < line.DeliveryQty)
             {
                 return BadRequest(new { error = $"Insufficient stock to reserve for product {line.ProductId}." });

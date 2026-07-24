@@ -42,6 +42,7 @@ public class Product : BaseEntity
     public EntityStatus Status { get; set; } = EntityStatus.Active;
 
     public ICollection<StockLevel> StockLevels { get; set; } = new List<StockLevel>();
+    public ICollection<BranchStockLevel> BranchStockLevels { get; set; } = new List<BranchStockLevel>();
 }
 
 public class ProductBundle : BaseEntity

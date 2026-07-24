@@ -2,9 +2,11 @@ namespace EcrBuilding.Application.Delivery;
 
 public record DriverDto(int Id, string Name, int BranchId, string BranchName, string Mobile, string License, DateTime LicenseExpiry, int? VehicleId, string Status, int DeliveriesToday, bool Available);
 public record UpsertDriverRequest(string Name, int BranchId, string Mobile, string License, DateTime LicenseExpiry);
+public record UpdateDriverRequest(string Name, int BranchId, string Mobile, string License, DateTime LicenseExpiry, int? VehicleId, string Status);
 
 public record VehicleDto(int Id, string Registration, string Type, int BranchId, string BranchName, decimal CapacityTons, decimal CurrentLoad, string Status, string DeviceStatus);
 public record UpsertVehicleRequest(string Registration, string Type, int BranchId, decimal CapacityTons);
+public record UpdateVehicleRequest(string Registration, string Type, int BranchId, decimal CapacityTons, string Status);
 
 public record ZoneDto(int Id, string Name, string City, decimal DistanceKm, decimal Fee);
 public record UpsertZoneRequest(string Name, string City, decimal DistanceKm, decimal Fee);

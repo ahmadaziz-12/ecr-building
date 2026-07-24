@@ -12,21 +12,27 @@ import {
 import { useBundles, useSetBundleStatus } from "./bundles";
 import {
   useApproveTransfer,
+  useCancelTransfer,
   useCreateStockAdjustment,
   useCreateStockTransfer,
+  useCreateWarehouseBin,
   useDispatchTransfer,
   usePromoBatch,
   useQuarantineBatch,
   useReceiveTransfer,
+  useSetWarehouseStatus,
   useStockBatches,
+  useStockTransfers,
+  useSubmitTransfer,
+  useUpdateWarehouse,
   useWarehouses,
   useWriteOffBatch,
 } from "./inventory";
-import { parseSkuQtyLines } from "./flow-submit-handlers";
 import { usePrintLabel } from "./print";
 import {
   useApprovePurchaseOrder,
   useCancelPurchaseOrder,
+  useCancelRts,
   useCreditRts,
   useDispatchPurchaseOrder,
   useDispatchRts,
@@ -37,6 +43,7 @@ import {
   useSuppliers,
   usePurchaseOrders,
   useReturnsToSupplier,
+  useUpdateSupplier,
 } from "./procurement";
 import {
   useApproveReturn,
@@ -49,6 +56,46 @@ import {
 } from "./finance";
 import { usePricingRules, useUpdatePricingRuleStatus } from "./pos";
 import { useSubmitZatcaInvoice, useZatcaInvoices } from "./zatca";
+import {
+  useUsers, useRoles, useBranches, useTerminals, useDevices,
+  useUpdateUser, useUpdateRole, useUpdateBranch, useUpdateTerminal, useUpdateDevice,
+  useSetTerminalStatus, useSetDeviceStatus,
+  useRules, useCompliance, useMaintenance, useSettings,
+  useUpdateRule, useUpdateCompliance, useUpdateMaintenanceStatus, useUpsertSetting,
+  TERMINAL_TYPE_TO_BACKEND, TERMINAL_TYPE_TO_FRONTEND, CONNECTION_TO_BACKEND, CONNECTION_TO_FRONTEND,
+  RULE_DOMAIN_TO_BACKEND, RULE_DOMAIN_TO_FRONTEND, RULE_PRIORITY_TO_NUMBER, rulePriorityLabel,
+  type RoleDto,
+} from "./admin";
+
+function confirmed(message: string, fn: () => Promise<unknown>, okMsg: string): () => void {
+  return () => {
+    if (!window.confirm(message)) return;
+    guarded(fn, okMsg)();
+  };
+}
+
+export function permFieldValues(role: RoleDto): Record<string, string> {
+  const level = (m: string) => role.permissions.find((p) => p.module === m)?.level ?? "None";
+  return {
+    name: role.name,
+    description: role.description ?? "",
+    approvalCap: String(role.approvalCap),
+    permPos: level("Pos"), permOrders: level("Orders"), permInventory: level("Inventory"), permFinance: level("Finance"),
+    permAdmin: level("Admin"), permDelivery: level("Delivery"), permHr: level("Hr"), permInsights: level("Insights"),
+    permSuppliers: level("Suppliers"), permNetwork: level("Network"),
+  };
+}
+
+export function permissionsFromValues(values: Record<string, string>): Record<string, string> {
+  const permMap: Record<string, string | undefined> = {
+    Pos: values.permPos, Orders: values.permOrders, Inventory: values.permInventory, Finance: values.permFinance,
+    Admin: values.permAdmin, Delivery: values.permDelivery, Hr: values.permHr, Insights: values.permInsights,
+    Suppliers: values.permSuppliers, Network: values.permNetwork,
+  };
+  return Object.fromEntries(
+    Object.entries(permMap).filter((entry): entry is [string, string] => Boolean(entry[1]) && entry[1] !== "None"),
+  );
+}
 
 export type RowAction = { label: string; onClick: () => void; tone?: "default" | "critical" };
 
@@ -73,6 +120,7 @@ export function useRowActions(
     onSubmit: (values: Record<string, string>) => Promise<void>,
     fieldOverrides?: Record<string, Partial<Field>>,
   ) => void,
+  openKioskPairing?: (terminalId: number) => void,
 ): (id: number | undefined, row: (string | number)[], statusText: string) => RowAction[] {
   const navigate = useNavigate();
 
@@ -89,24 +137,31 @@ export function useRowActions(
   const setCategoryStatus = useSetCategoryStatus();
   const updateCategory = useUpdateCategory();
 
-  const { data: warehouses } = useWarehouses(pathname === "/stock/stocks");
+  const { data: warehouses } = useWarehouses(pathname === "/stock/stocks" || pathname === "/stock/warehouses");
   const createStockAdjustment = useCreateStockAdjustment();
   const createStockTransfer = useCreateStockTransfer();
+  const { data: transfers } = useStockTransfers(pathname === "/stock/transfers");
+  const updateWarehouse = useUpdateWarehouse();
+  const setWarehouseStatus = useSetWarehouseStatus();
+  const createWarehouseBin = useCreateWarehouseBin();
 
   const { data: batches } = useStockBatches(pathname === "/stock/expiry");
   const quarantineBatch = useQuarantineBatch();
   const writeOffBatch = useWriteOffBatch();
   const promoBatch = usePromoBatch();
 
+  const submitTransfer = useSubmitTransfer();
   const approveTransfer = useApproveTransfer();
   const dispatchTransfer = useDispatchTransfer();
   const receiveTransfer = useReceiveTransfer();
+  const cancelTransfer = useCancelTransfer();
 
   const { data: bundles } = useBundles(pathname === "/stock/bundles");
   const setBundleStatus = useSetBundleStatus();
 
   const { data: suppliers } = useSuppliers(pathname === "/suppliers/suppliers");
   const setSupplierStatus = useSetSupplierStatus();
+  const updateSupplier = useUpdateSupplier();
 
   const { data: purchaseOrders } = usePurchaseOrders(pathname === "/finance/purchase-orders");
   const submitPo = useSubmitPurchaseOrder();
@@ -119,6 +174,7 @@ export function useRowActions(
   const dispatchRts = useDispatchRts();
   const creditRts = useCreditRts();
   const rejectRts = useRejectRts();
+  const cancelRts = useCancelRts();
 
   const { data: expenses } = useExpenses(pathname === "/finance/expenses");
   const updateExpenseStatus = useUpdateExpenseStatus();
@@ -135,6 +191,32 @@ export function useRowActions(
 
   const { data: zatcaInvoices } = useZatcaInvoices(undefined, pathname === "/admin/zatca-invoices");
   const submitZatcaInvoice = useSubmitZatcaInvoice();
+
+  const { data: users } = useUsers(pathname === "/admin/users" || pathname === "/admin/rules" || pathname === "/network/terminals");
+  const { data: roles } = useRoles(pathname === "/admin/users" || pathname === "/admin/roles");
+  const { data: branches } = useBranches(
+    pathname === "/admin/users" || pathname === "/network/branches" || pathname === "/network/terminals"
+      || pathname === "/stock/warehouses" || pathname === "/stock/stocks" || pathname === "/finance/returns",
+  );
+  const { data: terminals } = useTerminals(pathname === "/network/terminals" || pathname === "/network/devices");
+  const { data: devices } = useDevices(pathname === "/network/devices");
+  const updateUser = useUpdateUser();
+  const updateRole = useUpdateRole();
+  const updateBranch = useUpdateBranch();
+  const updateTerminal = useUpdateTerminal();
+  const updateDevice = useUpdateDevice();
+  const setTerminalStatus = useSetTerminalStatus();
+  const setDeviceStatus = useSetDeviceStatus();
+
+  const { data: rules } = useRules(pathname === "/admin/rules");
+  const { data: compliance } = useCompliance(pathname === "/admin/compliance");
+  const { data: maintenance } = useMaintenance(pathname === "/admin/maintenance");
+  const { data: systemSettings } = useSettings("System", pathname === "/admin/settings");
+  const { data: posSettings } = useSettings("Pos", pathname === "/admin/pos-settings");
+  const updateRule = useUpdateRule();
+  const updateCompliance = useUpdateCompliance();
+  const updateMaintenanceStatus = useUpdateMaintenanceStatus();
+  const upsertSetting = useUpsertSetting();
 
   return (id, row, statusText) => {
     switch (pathname) {
@@ -367,30 +449,45 @@ export function useRowActions(
             onClick: () =>
               openFlow(
                 "Create Transfer",
-                { from: String(warehouseName), skus: `${sku} x 1` },
+                { from: `Warehouse: ${String(warehouseName)}`, items: JSON.stringify([{ sku: String(sku), qty: "1" }]) },
                 async (values) => {
                   if (!values.from || !values.to)
-                    throw new Error("From and To warehouse are required.");
-                  const from = warehouses?.find(
-                    (w) => w.name.toLowerCase() === values.from.toLowerCase(),
-                  );
-                  const to = warehouses?.find(
-                    (w) => w.name.toLowerCase() === values.to.toLowerCase(),
-                  );
-                  if (!from) throw new Error(`Unknown warehouse "${values.from}".`);
-                  if (!to) throw new Error(`Unknown warehouse "${values.to}".`);
-                  if (from.id === to.id) throw new Error("From and To warehouse must differ.");
-                  if (!values.skus) throw new Error("At least one SKU x Qty line is required.");
-                  const lines = parseSkuQtyLines(values.skus).map(({ sku: lineSku, qty }) => {
-                    const p = products?.find(
-                      (pr) => pr.sku.toLowerCase() === lineSku.toLowerCase(),
-                    );
-                    if (!p) throw new Error(`Unknown SKU "${lineSku}".`);
-                    return { productId: p.id, qty, unitCost: p.costPrice };
+                    throw new Error("From and To location are required.");
+                  const resolve = (value: string) => {
+                    if (value.toLowerCase().startsWith("warehouse:")) {
+                      const name = value.slice("warehouse:".length).trim();
+                      const w = warehouses?.find((x) => x.name.toLowerCase() === name.toLowerCase());
+                      if (!w) throw new Error(`Unknown warehouse "${name}".`);
+                      return { warehouseId: w.id as number | null, branchId: null as number | null };
+                    }
+                    if (value.toLowerCase().startsWith("branch:")) {
+                      const name = value.slice("branch:".length).trim();
+                      const b = branches?.find((x) => x.nameEn.toLowerCase() === name.toLowerCase());
+                      if (!b) throw new Error(`Unknown branch "${name}".`);
+                      return { warehouseId: null as number | null, branchId: b.id as number | null };
+                    }
+                    throw new Error(`"${value}" must be prefixed "Warehouse:" or "Branch:".`);
+                  };
+                  const from = resolve(values.from);
+                  const to = resolve(values.to);
+                  if (from.warehouseId !== null && from.warehouseId === to.warehouseId) throw new Error("Source and destination warehouse must differ.");
+                  if (from.branchId !== null && from.branchId === to.branchId) throw new Error("Source and destination branch must differ.");
+                  if (!values.items) throw new Error("At least one line item is required.");
+                  const rows = JSON.parse(values.items) as { sku?: string; qty?: string; unitCost?: string; batchNo?: string; expiryDate?: string }[];
+                  const lines = rows.map((row) => {
+                    if (!row.sku || !row.qty) throw new Error("Every line needs an item and a quantity.");
+                    const p = products?.find((pr) => pr.sku.toLowerCase() === row.sku!.toLowerCase());
+                    if (!p) throw new Error(`Unknown SKU "${row.sku}".`);
+                    return {
+                      productId: p.id, qty: Number(row.qty), unitCost: Number(row.unitCost || p.costPrice),
+                      batchNo: row.batchNo || null, expiryDate: row.expiryDate || null,
+                    };
                   });
                   await createStockTransfer.mutateAsync({
-                    fromWarehouseId: from.id,
-                    toWarehouseId: to.id,
+                    fromWarehouseId: from.warehouseId,
+                    fromBranchId: from.branchId,
+                    toWarehouseId: to.warehouseId,
+                    toBranchId: to.branchId,
                     eta: values.eta || null,
                     carrier: values.carrier || null,
                     notes: values.notes || null,
@@ -431,21 +528,142 @@ export function useRowActions(
       case "/stock/transfers": {
         if (!id) return [];
         const actions: RowAction[] = [];
-        if (statusText === "Draft")
+        if (statusText === "Draft") {
+          actions.push({
+            label: "Submit for Approval",
+            onClick: guarded(() => submitTransfer.mutateAsync(id), "Transfer submitted for approval"),
+          });
+          actions.push({
+            label: "Cancel",
+            onClick: guarded(() => cancelTransfer.mutateAsync(id), "Transfer cancelled"),
+            tone: "critical",
+          });
+        }
+        if (statusText === "PendingApproval") {
           actions.push({
             label: "Approve",
-            onClick: guarded(() => approveTransfer.mutateAsync(id), "Transfer approved"),
+            onClick: guarded(() => approveTransfer.mutateAsync({ id, approverUserId: null }), "Transfer approved"),
           });
-        if (statusText === "Approved")
+          actions.push({
+            label: "Cancel",
+            onClick: guarded(() => cancelTransfer.mutateAsync(id), "Transfer cancelled"),
+            tone: "critical",
+          });
+        }
+        if (statusText === "Approved") {
           actions.push({
             label: "Dispatch",
             onClick: guarded(() => dispatchTransfer.mutateAsync(id), "Transfer dispatched"),
           });
-        if (statusText === "InTransit")
+          actions.push({
+            label: "Cancel",
+            onClick: guarded(() => cancelTransfer.mutateAsync(id), "Transfer cancelled"),
+            tone: "critical",
+          });
+        }
+        if (statusText === "InTransit") {
+          const transfer = transfers?.find((t) => t.id === id);
           actions.push({
             label: "Receive",
-            onClick: guarded(() => receiveTransfer.mutateAsync(id), "Transfer received"),
+            onClick: () =>
+              openFlow(
+                "Receive Transfer",
+                {
+                  lines: JSON.stringify(
+                    (transfer?.lines ?? []).map((l) => ({ line: String(l.id), qty: String(l.qty) })),
+                  ),
+                },
+                async (values) => {
+                  if (!values.lines) throw new Error("At least one line to receive is required.");
+                  const rows = JSON.parse(values.lines) as { line?: string; qty?: string }[];
+                  const lines = rows
+                    .filter((r) => r.line && r.qty)
+                    .map((r) => ({ lineId: Number(r.line), receivedQty: Number(r.qty) }));
+                  if (!lines.length) throw new Error("At least one line to receive is required.");
+                  await receiveTransfer.mutateAsync({ id, lines });
+                },
+                {
+                  lines: {
+                    lineItemColumns: [
+                      {
+                        key: "line",
+                        label: "Transfer Line",
+                        type: "select",
+                        options: (transfer?.lines ?? []).map((l) => ({
+                          value: String(l.id),
+                          label: `${l.sku} (planned ${l.qty})`,
+                        })),
+                      },
+                      { key: "qty", label: "Qty Received", type: "number", placeholder: "0" },
+                    ],
+                  },
+                },
+              ),
           });
+          actions.push({
+            label: "Cancel (Recall)",
+            onClick: guarded(() => cancelTransfer.mutateAsync(id), "Transfer cancelled — stock restored"),
+            tone: "critical",
+          });
+        }
+        return actions;
+      }
+
+      case "/stock/warehouses": {
+        const warehouse = warehouses?.find((w) => w.id === id);
+        if (!warehouse) return [];
+        const actions: RowAction[] = [
+          {
+            label: "Edit",
+            onClick: () =>
+              openFlow(
+                "Add Warehouse",
+                { code: warehouse.code, name: warehouse.name, branch: warehouse.branchName, type: warehouse.type },
+                async (values) => {
+                  if (!values.code || !values.name) throw new Error("Code and Name are required.");
+                  if (!values.branch) throw new Error("Branch is required.");
+                  const branch = branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase());
+                  if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
+                  if (!values.type) throw new Error("Type is required.");
+                  await updateWarehouse.mutateAsync({
+                    id: warehouse.id,
+                    request: { code: values.code, name: values.name, branchId: branch.id, type: values.type, status: warehouse.status },
+                  });
+                },
+              ),
+          },
+          {
+            label: "Add Bin",
+            onClick: () =>
+              openFlow(
+                "Bin Setup",
+                { warehouse: warehouse.name },
+                async (values) => {
+                  if (!values.binCode || !values.label) throw new Error("Bin Code and Label are required.");
+                  await createWarehouseBin.mutateAsync({
+                    warehouseId: warehouse.id,
+                    request: { binCode: values.binCode, label: values.label, capacityTons: Number(values.capacity || 0) },
+                  });
+                },
+              ),
+          },
+          warehouse.status === "Active"
+            ? {
+                label: "Deactivate",
+                onClick: guarded(
+                  () => setWarehouseStatus.mutateAsync({ id: warehouse.id, status: "Inactive" }),
+                  "Warehouse deactivated",
+                ),
+                tone: "critical",
+              }
+            : {
+                label: "Activate",
+                onClick: guarded(
+                  () => setWarehouseStatus.mutateAsync({ id: warehouse.id, status: "Active" }),
+                  "Warehouse activated",
+                ),
+              },
+        ];
         return actions;
       }
 
@@ -476,6 +694,47 @@ export function useRowActions(
         const supplier = suppliers?.find((s) => s.id === id);
         if (!supplier) return [];
         return [
+          {
+            label: "Edit",
+            onClick: () =>
+              openFlow(
+                "Edit Supplier",
+                {
+                  code: supplier.code,
+                  nameEn: supplier.nameEn,
+                  nameAr: supplier.nameAr ?? "",
+                  type: supplier.type,
+                  vat: supplier.vatNo ?? "",
+                  phone: supplier.phone ?? "",
+                  email: supplier.email ?? "",
+                  categories: supplier.categories.join(", "),
+                  terms: supplier.terms,
+                  currency: supplier.currency,
+                  leadTime: String(supplier.leadTimeDays),
+                  iban: supplier.iban ?? "",
+                },
+                async (values) => {
+                  if (!values.code || !values.nameEn) throw new Error("Supplier code and legal name are required.");
+                  await updateSupplier.mutateAsync({
+                    id: supplier.id,
+                    request: {
+                      code: values.code,
+                      nameEn: values.nameEn,
+                      nameAr: values.nameAr || null,
+                      type: values.type || supplier.type,
+                      vatNo: values.vat || null,
+                      phone: values.phone || null,
+                      email: values.email || null,
+                      categories: values.categories ? values.categories.split(",").map((s) => s.trim()).filter(Boolean) : [],
+                      terms: values.terms || supplier.terms,
+                      currency: values.currency || supplier.currency,
+                      leadTimeDays: Number(values.leadTime || supplier.leadTimeDays),
+                      iban: values.iban || null,
+                    },
+                  });
+                },
+              ),
+          },
           supplier.status === "Active"
             ? {
                 label: "Deactivate",
@@ -597,8 +856,13 @@ export function useRowActions(
               "Return dispatched to supplier",
             ),
           });
+          actions.push({
+            label: "Cancel",
+            onClick: guarded(() => cancelRts.mutateAsync(rts.id), "Return cancelled"),
+            tone: "critical",
+          });
         }
-        if (rts.status === "Dispatched" || rts.status === "AwaitingCredit") {
+        if (rts.status === "Dispatched") {
           actions.push({
             label: "Record Credit Note",
             onClick: () =>
@@ -609,7 +873,7 @@ export function useRowActions(
           });
           actions.push({
             label: "Reject",
-            onClick: guarded(() => rejectRts.mutateAsync(rts.id), "Return rejected"),
+            onClick: guarded(() => rejectRts.mutateAsync(rts.id), "Return rejected — stock restored"),
             tone: "critical",
           });
         }
@@ -694,12 +958,12 @@ export function useRowActions(
             label: "Approve & Refund",
             onClick: () =>
               openFlow("Approve Return", {}, async (values) => {
-                if (!values.warehouse) throw new Error("Warehouse is required.");
-                const warehouse = warehouses?.find(
-                  (w) => w.name.toLowerCase() === values.warehouse.toLowerCase(),
+                if (!values.branch) throw new Error("Branch is required.");
+                const branch = branches?.find(
+                  (b) => b.nameEn.toLowerCase() === values.branch.toLowerCase(),
                 );
-                if (!warehouse) throw new Error(`Unknown warehouse "${values.warehouse}".`);
-                await approveReturn.mutateAsync({ id: ret.id, warehouseId: warehouse.id });
+                if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
+                await approveReturn.mutateAsync({ id: ret.id, branchId: branch.id });
               }),
           });
         }
@@ -776,6 +1040,424 @@ export function useRowActions(
           ];
         }
         return [];
+      }
+
+      case "/admin/users": {
+        const user = users?.find((u) => u.id === id);
+        if (!user) return [];
+        return [
+          {
+            label: "Edit",
+            onClick: () =>
+              openFlow(
+                "Edit User",
+                {
+                  name: user.name,
+                  role: user.roleName,
+                  branch: user.branchName ?? "All Branches",
+                  status: user.status,
+                },
+                async (values) => {
+                  if (!values.name) throw new Error("Name is required.");
+                  const role = roles?.find((r) => r.name.toLowerCase() === (values.role ?? "").toLowerCase());
+                  if (!role) throw new Error(`Unknown role "${values.role}".`);
+                  const branch =
+                    values.branch && values.branch !== "All Branches"
+                      ? branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase())
+                      : undefined;
+                  await updateUser.mutateAsync({
+                    id: user.id,
+                    request: {
+                      name: values.name,
+                      roleId: role.id,
+                      branchId: branch?.id ?? null,
+                      status: values.status || user.status,
+                    },
+                  });
+                },
+              ),
+          },
+          user.status === "Active"
+            ? {
+                label: "Suspend",
+                onClick: guarded(
+                  () => updateUser.mutateAsync({ id: user.id, request: { name: user.name, roleId: user.roleId, branchId: user.branchId, status: "Suspended" } }),
+                  "User suspended",
+                ),
+                tone: "critical",
+              }
+            : {
+                label: "Reactivate",
+                onClick: guarded(
+                  () => updateUser.mutateAsync({ id: user.id, request: { name: user.name, roleId: user.roleId, branchId: user.branchId, status: "Active" } }),
+                  "User reactivated",
+                ),
+              },
+        ];
+      }
+
+      case "/admin/roles": {
+        const role = roles?.find((r) => r.id === id);
+        if (!role) return [];
+        return [
+          {
+            label: "Edit",
+            onClick: () =>
+              openFlow("Edit Role", permFieldValues(role), async (values) => {
+                if (!values.name) throw new Error("Role name is required.");
+                await updateRole.mutateAsync({
+                  id: role.id,
+                  request: {
+                    name: values.name,
+                    description: values.description || null,
+                    approvalCap: Number(values.approvalCap || 0),
+                    permissions: permissionsFromValues(values),
+                  },
+                });
+              }),
+          },
+        ];
+      }
+
+      case "/network/branches": {
+        const branch = branches?.find((b) => b.id === id);
+        if (!branch) return [];
+        return [
+          {
+            label: "Edit",
+            onClick: () =>
+              openFlow(
+                "Edit Branch",
+                {
+                  code: branch.code,
+                  nameEn: branch.nameEn,
+                  nameAr: branch.nameAr ?? "",
+                  city: branch.city,
+                  address: branch.address ?? "",
+                  manager: branch.managerName ?? "",
+                  warehouse: branch.warehouse ?? "",
+                  hours: branch.businessHours ?? "",
+                  zatca: branch.vatRegistrationNumber ?? "",
+                },
+                async (values) => {
+                  if (!values.code || !values.nameEn) throw new Error("Branch code and name are required.");
+                  await updateBranch.mutateAsync({
+                    id: branch.id,
+                    request: {
+                      code: values.code,
+                      nameEn: values.nameEn,
+                      nameAr: values.nameAr || null,
+                      city: values.city || branch.city,
+                      address: values.address || null,
+                      businessHours: values.hours || null,
+                      vatRegistrationNumber: values.zatca || null,
+                      managerName: values.manager || null,
+                      warehouse: values.warehouse || null,
+                      status: branch.status,
+                    },
+                  });
+                },
+              ),
+          },
+          branch.status === "Active"
+            ? {
+                label: "Delete",
+                onClick: confirmed(
+                  `Deactivate branch "${branch.nameEn}"? It can be reactivated later.`,
+                  () =>
+                    updateBranch.mutateAsync({
+                      id: branch.id,
+                      request: {
+                        code: branch.code, nameEn: branch.nameEn, nameAr: branch.nameAr, city: branch.city,
+                        address: branch.address, businessHours: branch.businessHours, vatRegistrationNumber: branch.vatRegistrationNumber,
+                        managerName: branch.managerName, warehouse: branch.warehouse, status: "Inactive",
+                      },
+                    }),
+                  "Branch deactivated",
+                ),
+                tone: "critical",
+              }
+            : {
+                label: "Activate",
+                onClick: guarded(
+                  () =>
+                    updateBranch.mutateAsync({
+                      id: branch.id,
+                      request: {
+                        code: branch.code, nameEn: branch.nameEn, nameAr: branch.nameAr, city: branch.city,
+                        address: branch.address, businessHours: branch.businessHours, vatRegistrationNumber: branch.vatRegistrationNumber,
+                        managerName: branch.managerName, warehouse: branch.warehouse, status: "Active",
+                      },
+                    }),
+                  "Branch activated",
+                ),
+              },
+        ];
+      }
+
+      case "/network/terminals": {
+        const terminal = terminals?.find((t) => t.id === id);
+        if (!terminal) return [];
+        const cashier = users?.find((u) => u.name.toLowerCase() === terminal.assignedCashierName?.toLowerCase());
+        return [
+          {
+            label: "Edit",
+            onClick: () =>
+              openFlow(
+                "Edit Terminal",
+                {
+                  id: terminal.code,
+                  name: terminal.name,
+                  branch: terminal.branchName,
+                  type: TERMINAL_TYPE_TO_FRONTEND[terminal.type] ?? "Fixed POS",
+                  operator: terminal.assignedCashierName ?? "Unassigned",
+                  offline: terminal.offlineModeEnabled ? "on" : "",
+                },
+                async (values) => {
+                  if (!values.id || !values.branch) throw new Error("Terminal ID and branch are required.");
+                  const branch = branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase());
+                  if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
+                  const assignedCashier = values.operator && values.operator !== "Unassigned"
+                    ? users?.find((u) => u.name.toLowerCase() === values.operator.toLowerCase())
+                    : undefined;
+                  await updateTerminal.mutateAsync({
+                    id: terminal.id,
+                    request: {
+                      code: values.id,
+                      name: values.name || values.id,
+                      branchId: branch.id,
+                      type: TERMINAL_TYPE_TO_BACKEND[values.type] ?? terminal.type,
+                      assignedCashierId: assignedCashier ? assignedCashier.id : cashier?.id ?? null,
+                      offlineModeEnabled: values.offline === "on",
+                      ipAddress: terminal.ipAddress,
+                      macAddress: terminal.macAddress,
+                    },
+                  });
+                },
+              ),
+          },
+          ...(terminal.type === "Kiosk" && openKioskPairing
+            ? [{ label: "Kiosk Pairing", onClick: () => openKioskPairing(terminal.id) }]
+            : []),
+          terminal.status === "Offline"
+            ? {
+                label: "Activate",
+                onClick: guarded(
+                  () => setTerminalStatus.mutateAsync({ id: terminal.id, status: "Online" }),
+                  "Terminal activated",
+                ),
+              }
+            : {
+                label: "Deactivate",
+                onClick: guarded(
+                  () => setTerminalStatus.mutateAsync({ id: terminal.id, status: "Offline" }),
+                  "Terminal deactivated",
+                ),
+                tone: "critical",
+              },
+        ];
+      }
+
+      case "/network/devices": {
+        const device = devices?.find((d) => d.id === id);
+        if (!device) return [];
+        return [
+          {
+            label: "Edit",
+            onClick: () =>
+              openFlow(
+                "Edit Device",
+                {
+                  model: device.model,
+                  serial: device.serial ?? "",
+                  connection: CONNECTION_TO_FRONTEND[device.connection] ?? "USB",
+                  ip: device.ipAddress ?? "",
+                  behaviorProfile: device.behaviorProfile ?? "",
+                },
+                async (values) => {
+                  await updateDevice.mutateAsync({
+                    id: device.id,
+                    request: {
+                      terminalId: device.terminalId,
+                      model: values.model || device.model,
+                      serial: values.serial || null,
+                      connection: CONNECTION_TO_BACKEND[values.connection] ?? device.connection,
+                      ipAddress: values.ip || null,
+                      behaviorProfile: values.behaviorProfile || null,
+                    },
+                  });
+                },
+              ),
+          },
+          ...(device.status !== "Healthy"
+            ? [{ label: "Mark Healthy", onClick: guarded(() => setDeviceStatus.mutateAsync({ id: device.id, status: "Healthy" }), "Device marked healthy") }]
+            : [{ label: "Mark Faulty", onClick: guarded(() => setDeviceStatus.mutateAsync({ id: device.id, status: "Faulty" }), "Device flagged faulty"), tone: "critical" as const }]),
+          device.status !== "Disconnected"
+            ? {
+                label: "Disconnect",
+                onClick: guarded(
+                  () => setDeviceStatus.mutateAsync({ id: device.id, status: "Disconnected" }),
+                  "Device disconnected",
+                ),
+                tone: "critical",
+              }
+            : {
+                label: "Reconnect",
+                onClick: guarded(
+                  () => setDeviceStatus.mutateAsync({ id: device.id, status: "Healthy" }),
+                  "Device reconnected",
+                ),
+              },
+        ];
+      }
+
+      case "/admin/rules": {
+        const rule = rules?.find((r) => r.id === id);
+        if (!rule) return [];
+        const resolveApprover = (name: string) => (name ? users?.find((u) => u.name.toLowerCase() === name.toLowerCase())?.id ?? null : null);
+        const requestFor = (overrides: Partial<{ active: boolean }>) => ({
+          name: rule.name, domain: rule.domain, priority: rule.priority, whenTrigger: rule.whenTrigger,
+          condition: rule.condition, action: rule.action, approverUserId: resolveApprover(rule.approverName ?? ""),
+          active: overrides.active ?? rule.active, notes: rule.notes,
+        });
+        return [
+          {
+            label: "Edit",
+            onClick: () =>
+              openFlow(
+                "Edit Rule",
+                {
+                  name: rule.name,
+                  domain: RULE_DOMAIN_TO_FRONTEND[rule.domain] ?? "Approvals",
+                  priority: rulePriorityLabel(rule.priority),
+                  when: rule.whenTrigger,
+                  if: rule.condition,
+                  action: rule.action,
+                  approver: rule.approverName ?? "",
+                  active: rule.active ? "on" : "",
+                  notes: rule.notes ?? "",
+                },
+                async (values) => {
+                  if (!values.name) throw new Error("Rule name is required.");
+                  await updateRule.mutateAsync({
+                    id: rule.id,
+                    request: {
+                      name: values.name,
+                      domain: RULE_DOMAIN_TO_BACKEND[values.domain] ?? rule.domain,
+                      priority: RULE_PRIORITY_TO_NUMBER[values.priority] ?? rule.priority,
+                      whenTrigger: values.when || rule.whenTrigger,
+                      condition: values.if || rule.condition,
+                      action: values.action || rule.action,
+                      approverUserId: resolveApprover(values.approver ?? ""),
+                      active: values.active === "on",
+                      notes: values.notes || null,
+                    },
+                  });
+                },
+              ),
+          },
+          rule.active
+            ? {
+                label: "Deactivate",
+                onClick: guarded(() => updateRule.mutateAsync({ id: rule.id, request: requestFor({ active: false }) }), "Rule deactivated"),
+                tone: "critical",
+              }
+            : {
+                label: "Activate",
+                onClick: guarded(() => updateRule.mutateAsync({ id: rule.id, request: requestFor({ active: true }) }), "Rule activated"),
+              },
+        ];
+      }
+
+      case "/admin/compliance": {
+        const control = compliance?.find((c) => c.id === id);
+        if (!control) return [];
+        return [
+          {
+            label: "Edit",
+            onClick: () =>
+              openFlow(
+                "Edit Control",
+                {
+                  control: control.control,
+                  framework: control.framework,
+                  owner: control.owner,
+                  lastReview: control.lastReview.slice(0, 10),
+                  nextDue: control.nextDue.slice(0, 10),
+                  evidence: control.evidence ?? "",
+                  findings: control.findings ?? "",
+                  status: control.status,
+                },
+                async (values) => {
+                  if (!values.control || !values.owner || !values.nextDue)
+                    throw new Error("Control name, owner and next-due date are required.");
+                  await updateCompliance.mutateAsync({
+                    id: control.id,
+                    request: {
+                      control: values.control,
+                      framework: values.framework || control.framework,
+                      owner: values.owner,
+                      lastReview: values.lastReview || control.lastReview,
+                      nextDue: values.nextDue,
+                      evidence: values.evidence || null,
+                      findings: values.findings || null,
+                      status: values.status || control.status,
+                    },
+                  });
+                },
+              ),
+          },
+        ];
+      }
+
+      case "/admin/maintenance": {
+        const ticket = maintenance?.find((t) => t.id === id);
+        if (!ticket) return [];
+        const actions: RowAction[] = [];
+        if (ticket.status === "Open") {
+          actions.push({
+            label: "Start Progress",
+            onClick: guarded(() => updateMaintenanceStatus.mutateAsync({ id: ticket.id, status: "InProgress" }), "Ticket in progress"),
+          });
+        }
+        if (ticket.status === "InProgress") {
+          actions.push({
+            label: "Resolve",
+            onClick: guarded(() => updateMaintenanceStatus.mutateAsync({ id: ticket.id, status: "Resolved" }), "Ticket resolved"),
+          });
+        }
+        if (ticket.status === "Resolved") {
+          actions.push({
+            label: "Close",
+            onClick: guarded(() => updateMaintenanceStatus.mutateAsync({ id: ticket.id, status: "Closed" }), "Ticket closed"),
+          });
+        }
+        return actions;
+      }
+
+      case "/admin/settings":
+      case "/admin/pos-settings": {
+        const list = pathname === "/admin/settings" ? systemSettings : posSettings;
+        const setting = list?.find((s) => s.id === id);
+        if (!setting) return [];
+        return [
+          {
+            label: "Edit",
+            onClick: () =>
+              openFlow("Edit Setting", { value: setting.value }, async (values) => {
+                if (!values.value) throw new Error("Value is required.");
+                await upsertSetting.mutateAsync({
+                  category: setting.category,
+                  group: setting.group,
+                  key: setting.key,
+                  value: values.value,
+                  scope: setting.scope,
+                  branchId: setting.branchId,
+                  effectiveFrom: new Date().toISOString().slice(0, 10),
+                });
+              }),
+          },
+        ];
       }
 
       default:

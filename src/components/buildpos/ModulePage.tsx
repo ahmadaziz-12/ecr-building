@@ -1,9 +1,12 @@
-import { useRouterState } from "@tanstack/react-router";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Download, Filter, MoreHorizontal, Plus, RefreshCw, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -17,7 +20,9 @@ import { FlowDialog } from "@/components/buildpos/FlowDialog";
 import { useModuleLiveData } from "@/lib/api/module-live-data";
 import { useFlowSubmitHandlers } from "@/lib/api/flow-submit-handlers";
 import { useRowActions, type RowAction } from "@/lib/api/row-actions";
-import { useRowDetails, type RowDetail } from "@/lib/api/row-details";
+import { useRowDetails, type DetailSection, type DetailTable, type RowDetail } from "@/lib/api/row-details";
+import { useBulkActions } from "@/lib/api/bulk-actions";
+import { BulkActionSheet } from "@/components/buildpos/BulkActionSheet";
 
 function tone(status: string): Severity {
   const k = status.toLowerCase();
@@ -45,6 +50,7 @@ const FILTER_ALIASES: Record<string, string> = {
   "UOM Type": "Stock UOM",
   "VAT Rate": "VAT",
   "Days to Expiry": "Days Left",
+  "Sync Date": "Last Sync",
 };
 
 function resolveFilterColumn(filterLabel: string, columns: string[]): number | null {
@@ -65,9 +71,11 @@ const REFRESH_KEYS: Record<string, string[][]> = {
   "/stock/inventory": [["catalog", "products"]],
   "/admin/categories": [["catalog", "categories"]],
   "/stock/stocks": [["inventory", "stock-levels"]],
+  "/stock/branch-stock": [["inventory", "branch-stock-levels"]],
   "/stock/expiry": [["inventory", "stock-batches"]],
   "/stock/transfers": [["inventory", "transfers"]],
   "/stock/bundles": [["catalog", "bundles"]],
+  "/insights/bi": [["insights", "bi"]],
 };
 
 const PAGE_SIZE = 10;
@@ -79,16 +87,22 @@ type ActiveFlow = {
   fieldOverrides?: Record<string, Partial<Field>>;
 };
 
-export function ModulePage() {
+type SavedView = { name: string; columnFilters: Record<string, string>; activeTab: number; searchText: string };
+
+export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (terminalId: number) => void } = {}) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const search = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
+  const navigate = useNavigate();
   const m = getModule(pathname);
   const [activeFlow, setActiveFlow] = useState<ActiveFlow | null>(null);
   const [activeTab, setActiveTab] = useState(0);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [dateRangeFilters, setDateRangeFilters] = useState<Record<string, { from: string; to: string }>>({});
   const [searchText, setSearchText] = useState("");
   const [page, setPage] = useState(1);
   const [detailRow, setDetailRow] = useState<{ id: number | undefined; row: (string | number)[] } | null>(null);
+  const [activeBulkLabel, setActiveBulkLabel] = useState<string | null>(null);
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
 
   const live = useModuleLiveData(pathname);
   const submitHandlers = useFlowSubmitHandlers();
@@ -105,8 +119,10 @@ export function ModulePage() {
     setActiveFlow({ flow: f, initialValues, onSubmit, fieldOverrides });
   }
 
-  const rowActionsFor = useRowActions(pathname, openFlow);
+  const rowActionsFor = useRowActions(pathname, openFlow, onOpenKioskPairing);
   const rowDetailFor = useRowDetails(pathname, detailRow?.id);
+  const showDetail = (id: number, row: (string | number)[]) => setDetailRow({ id, row });
+  const bulkActions = useBulkActions(pathname, openFlow, showDetail);
 
   // A cross-linked page load (e.g. a category's "View SKUs" -> /stock/inventory?category=Cement)
   // seeds the filter/search state instead of landing on an unfiltered table.
@@ -114,11 +130,39 @@ export function ModulePage() {
     const seeded: Record<string, string> = {};
     if (typeof search.category === "string") seeded.Category = search.category;
     if (typeof search.status === "string") seeded.Status = search.status;
+    if (typeof search.module === "string") seeded.Module = search.module;
     setColumnFilters(seeded);
     setSearchText(typeof search.sku === "string" ? search.sku : typeof search.code === "string" ? search.code : "");
     setActiveTab(0);
     setPage(1);
-  }, [pathname, search.category, search.status, search.sku, search.code]);
+  }, [pathname, search.category, search.status, search.module, search.sku, search.code]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`buildpos:views:${pathname}`);
+      setSavedViews(raw ? (JSON.parse(raw) as SavedView[]) : []);
+    } catch {
+      setSavedViews([]);
+    }
+  }, [pathname]);
+
+  function handleSaveView() {
+    const name = window.prompt("Name this view:");
+    if (!name) return;
+    const next = [...savedViews.filter((v) => v.name !== name), { name, columnFilters, activeTab, searchText }];
+    setSavedViews(next);
+    localStorage.setItem(`buildpos:views:${pathname}`, JSON.stringify(next));
+    toast.success(`View "${name}" saved.`);
+  }
+
+  function handleLoadView(name: string) {
+    const view = savedViews.find((v) => v.name === name);
+    if (!view) return;
+    setColumnFilters(view.columnFilters);
+    setActiveTab(view.activeTab);
+    setSearchText(view.searchText);
+    setPage(1);
+  }
 
   const flow = getFlow(m?.primaryAction);
 
@@ -146,12 +190,23 @@ export function ModulePage() {
       if (colIdx === null) continue;
       rows = rows.filter(({ row }) => String(row[colIdx] ?? "").toLowerCase().includes(value.toLowerCase()));
     }
+    for (const [label, range] of Object.entries(dateRangeFilters)) {
+      if (!range.from && !range.to) continue;
+      const colIdx = resolveFilterColumn(label, columns);
+      if (colIdx === null) continue;
+      const from = range.from ? new Date(range.from).getTime() : -Infinity;
+      const to = range.to ? new Date(range.to).getTime() + 86_400_000 : Infinity;
+      rows = rows.filter(({ row }) => {
+        const ms = Date.parse(String(row[colIdx] ?? ""));
+        return Number.isNaN(ms) ? true : ms >= from && ms <= to;
+      });
+    }
     if (searchText.trim()) {
       const needle = searchText.trim().toLowerCase();
       rows = rows.filter(({ row }) => row.some((cell) => String(cell).toLowerCase().includes(needle)));
     }
     return rows;
-  }, [indexed, m?.tabs, activeTab, statusCol, columnFilters, searchText, columns]);
+  }, [indexed, m?.tabs, activeTab, statusCol, columnFilters, dateRangeFilters, searchText, columns]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const clampedPage = Math.min(page, pageCount);
@@ -159,6 +214,7 @@ export function ModulePage() {
 
   function clearFilters() {
     setColumnFilters({});
+    setDateRangeFilters({});
     setSearchText("");
     setActiveTab(0);
     setPage(1);
@@ -185,7 +241,30 @@ export function ModulePage() {
 
   function handleBarAction(label: string) {
     if (label === "Export") { handleExport(); return; }
+    if (label === "Refresh") { handleRefresh(); return; }
+    if (label === "Save View") { handleSaveView(); return; }
+    // "Audit" always means the same thing everywhere it appears: jump to this record's real,
+    // already-filterable audit trail instead of duplicating that view inline.
+    if (label === "Audit" && pathname !== "/admin/audit-logs") {
+      navigate({ to: "/admin/audit-logs", search: { module: "Admin" } });
+      return;
+    }
+    // Plans has no real payment gateway (see Admin Overview's own health check) — "Upgrade" and
+    // "Contact Sales" honestly route to a real lead instead of faking a charge.
+    if (label === "Upgrade" || label === "Contact Sales") {
+      window.location.href = `mailto:sales@buildpos.example?subject=${encodeURIComponent(`${label} request`)}&body=${encodeURIComponent("Hi team,\n\nWe'd like to talk about our BuildPOS subscription plan.\n\nThanks")}`;
+      return;
+    }
+    if (label === "Download Invoice") { handleExport(); return; }
     if (label === m?.primaryAction && flow) { openFlow(label, {}, submitHandlers[flow.key]); return; }
+    // A row-scoped action (Approve, Dispatch, Activate…) with no single row selected here opens a
+    // picker over the live-eligible records instead of silently no-opping.
+    if (bulkActions?.[label]) { setActiveBulkLabel(label); return; }
+    // Any other declared action (e.g. "Bin Setup") opens its own flow if one is defined —
+    // previously only the primary action ever did anything, silently no-opping every other button.
+    const f = getFlow(label);
+    if (f) { openFlow(label, {}, submitHandlers[f.key]); return; }
+    toast.error(`"${label}" isn't wired up yet.`);
   }
 
   if (!m) {
@@ -280,6 +359,37 @@ export function ModulePage() {
             </select>
           );
         })}
+        {m.dateRangeFilters?.map((f) => (
+          <div key={f} className="flex items-center gap-1">
+            <input
+              type="date"
+              value={dateRangeFilters[f]?.from ?? ""}
+              onChange={(e) => { setDateRangeFilters((s) => ({ ...s, [f]: { from: e.target.value, to: s[f]?.to ?? "" } })); setPage(1); }}
+              className="h-8 rounded-md border border-black/10 bg-canvas px-2 text-xs text-foreground outline-none focus:border-brand/40"
+              title={`${f} from`}
+            />
+            <span className="text-xs text-muted-foreground">–</span>
+            <input
+              type="date"
+              value={dateRangeFilters[f]?.to ?? ""}
+              onChange={(e) => { setDateRangeFilters((s) => ({ ...s, [f]: { from: s[f]?.from ?? "", to: e.target.value } })); setPage(1); }}
+              className="h-8 rounded-md border border-black/10 bg-canvas px-2 text-xs text-foreground outline-none focus:border-brand/40"
+              title={`${f} to`}
+            />
+          </div>
+        ))}
+        {savedViews.length > 0 && (
+          <select
+            value=""
+            onChange={(e) => e.target.value && handleLoadView(e.target.value)}
+            className="h-8 rounded-md border border-black/10 bg-canvas px-2 text-xs font-medium text-foreground hover:border-brand/40 focus:border-brand/40 focus:outline-none"
+          >
+            <option value="">Saved views…</option>
+            {savedViews.map((v) => (
+              <option key={v.name} value={v.name}>{v.name}</option>
+            ))}
+          </select>
+        )}
         <Button size="sm" variant="ghost" onClick={clearFilters} className="ml-auto h-8 gap-1 text-muted-foreground hover:text-foreground">
           <X className="h-3.5 w-3.5" /> Clear
         </Button>
@@ -305,14 +415,137 @@ export function ModulePage() {
         ))}
       </div>
 
-      {/* Main table */}
+      {/* Progress stats (Devices-style health/sync/connectivity bars) */}
+      {live?.progressStats && live.progressStats.length > 0 && (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {live.progressStats.map((p) => (
+            <div key={p.label} className="rounded-2xl border border-black/5 bg-white p-3.5 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{p.label}</p>
+                <span className="text-xs font-semibold text-foreground">{p.pct}%</span>
+              </div>
+              <Progress value={p.pct} className="mt-2 h-1.5" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Main content: card grid or table */}
+      {m.layout === "cards" ? (
+        <SectionCard
+          title={m.tableTitle}
+          desc={live ? `${filtered.length} of ${baseRows.length} records · live data` : `${filtered.length} of ${baseRows.length} records · showing filtered results`}
+          action={
+            m.actions && (
+              <div className="flex flex-wrap gap-1.5">
+                {m.actions.map((a) => (
+                  <button
+                    key={a}
+                    onClick={() => handleBarAction(a)}
+                    className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs font-medium text-foreground hover:border-brand/40 hover:bg-brand/5 hover:text-brand"
+                  >
+                    {a}
+                  </button>
+                ))}
+              </div>
+            )
+          }
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {pageRows.map(({ row, id }, i) => {
+              const statusText = statusCol !== undefined ? String(row[statusCol] ?? "") : "";
+              const actions = rowActionsFor(id, row, statusText);
+              const cfg = m.cardConfig;
+              const title = cfg ? String(row[cfg.titleCol] ?? "") : String(row[0] ?? "");
+              const subtitle = cfg?.subtitleCol !== undefined ? String(row[cfg.subtitleCol] ?? "") : undefined;
+              return (
+                <Card
+                  key={id ?? i}
+                  onClick={() => setDetailRow({ id, row })}
+                  className="cursor-pointer p-4 transition hover:border-brand/30 hover:shadow-md"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate font-display text-base font-bold text-foreground">{title}</p>
+                      {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
+                    </div>
+                    {statusText && <Pill tone={tone(statusText)}>{statusText}</Pill>}
+                  </div>
+                  {cfg?.statCols && cfg.statCols.length > 0 && (
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      {cfg.statCols.map((s) => (
+                        <div key={s.label} className="rounded-lg bg-canvas px-2.5 py-1.5">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{s.label}</p>
+                          <p className="text-sm font-semibold text-foreground">{row[s.col]}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {actions.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5 border-t border-black/5 pt-3" onClick={(e) => e.stopPropagation()}>
+                      {actions.map((a) => (
+                        <button
+                          key={a.label}
+                          onClick={a.onClick}
+                          className={`rounded-md border px-2 py-1 text-[11px] font-medium ${
+                            a.tone === "critical"
+                              ? "border-critical/30 text-critical hover:bg-critical/5"
+                              : "border-black/10 text-foreground hover:border-brand/40 hover:bg-brand/5 hover:text-brand"
+                          }`}
+                        >
+                          {a.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+            {pageRows.length === 0 && (
+              <p className="col-span-full py-8 text-center text-sm text-muted-foreground">No records match the current filters.</p>
+            )}
+          </div>
+          <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+            <span>
+              Showing {filtered.length === 0 ? 0 : (clampedPage - 1) * PAGE_SIZE + 1}–{Math.min(clampedPage * PAGE_SIZE, filtered.length)} of {filtered.length}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={clampedPage <= 1}
+                className="rounded-md border border-black/10 px-2 py-1 hover:border-brand/40 disabled:opacity-40"
+              >
+                Prev
+              </button>
+              {Array.from({ length: pageCount }, (_, i) => i + 1)
+                .slice(Math.max(0, clampedPage - 3), Math.max(0, clampedPage - 3) + 5)
+                .map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    className={`rounded-md border px-2 py-1 ${p === clampedPage ? "border-brand/40 bg-brand/5 text-brand" : "border-black/10 hover:border-brand/40"}`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              <button
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                disabled={clampedPage >= pageCount}
+                className="rounded-md border border-black/10 px-2 py-1 hover:border-brand/40 disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </SectionCard>
+      ) : (
       <SectionCard
         title={m.tableTitle}
         desc={live ? `${filtered.length} of ${baseRows.length} records · live data` : `${filtered.length} of ${baseRows.length} records · showing filtered results`}
         action={
           m.actions && (
             <div className="flex flex-wrap gap-1.5">
-              {m.actions.slice(0, 4).map((a) => (
+              {m.actions.map((a) => (
                 <button
                   key={a}
                   onClick={() => handleBarAction(a)}
@@ -432,6 +665,7 @@ export function ModulePage() {
           </div>
         </div>
       </SectionCard>
+      )}
       <FlowDialog
         flow={activeFlow?.flow}
         open={!!activeFlow}
@@ -439,6 +673,10 @@ export function ModulePage() {
         onSubmit={activeFlow?.onSubmit}
         initialValues={activeFlow?.initialValues}
         fieldOverrides={activeFlow?.fieldOverrides}
+      />
+      <BulkActionSheet
+        config={activeBulkLabel ? bulkActions?.[activeBulkLabel] ?? null : null}
+        onOpenChange={(v) => !v && setActiveBulkLabel(null)}
       />
       <RowDetailSheet
         detailRow={detailRow}
@@ -486,49 +724,21 @@ function RowDetailSheet({
               {statusText && (
                 <Pill tone={tone(statusText)}>{statusText}</Pill>
               )}
-              {detail ? (
-                <>
-                  {detail.sections.map((s) => (
-                    <div key={s.heading}>
-                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{s.heading}</p>
-                      <dl className="grid grid-cols-2 gap-2">
-                        {s.fields.map((f) => (
-                          <div key={f.label} className="rounded-lg bg-canvas px-3 py-2">
-                            <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{f.label}</dt>
-                            <dd className="mt-0.5 truncate text-sm font-medium text-foreground">{f.value}</dd>
-                          </div>
-                        ))}
-                      </dl>
-                    </div>
+              {detail?.tabs && detail.tabs.length > 0 ? (
+                <Tabs defaultValue={detail.tabs[0].label}>
+                  <TabsList>
+                    {detail.tabs.map((t) => (
+                      <TabsTrigger key={t.label} value={t.label}>{t.label}</TabsTrigger>
+                    ))}
+                  </TabsList>
+                  {detail.tabs.map((t) => (
+                    <TabsContent key={t.label} value={t.label} className="space-y-5">
+                      <DetailSections sections={t.sections} tables={t.tables} />
+                    </TabsContent>
                   ))}
-                  {detail.tables?.map((t) => (
-                    <div key={t.heading}>
-                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{t.heading}</p>
-                      <div className="overflow-x-auto rounded-lg border border-black/5">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="hover:bg-transparent">
-                              {t.columns.map((c) => (
-                                <TableHead key={c} className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                                  {c}
-                                </TableHead>
-                              ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {t.rows.map((r, i) => (
-                              <TableRow key={i} className="hover:bg-transparent">
-                                {r.map((cell, j) => (
-                                  <TableCell key={j} className="whitespace-nowrap text-xs">{cell}</TableCell>
-                                ))}
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  ))}
-                </>
+                </Tabs>
+              ) : detail ? (
+                <DetailSections sections={detail.sections} tables={detail.tables} />
               ) : (
                 <dl className="grid grid-cols-2 gap-2">
                   {columns.map((c, j) => (
@@ -558,5 +768,52 @@ function RowDetailSheet({
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+function DetailSections({ sections, tables }: { sections: DetailSection[]; tables?: DetailTable[] }) {
+  return (
+    <>
+      {sections.map((s) => (
+        <div key={s.heading}>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{s.heading}</p>
+          <dl className="grid grid-cols-2 gap-2">
+            {s.fields.map((f) => (
+              <div key={f.label} className="rounded-lg bg-canvas px-3 py-2">
+                <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{f.label}</dt>
+                <dd className="mt-0.5 truncate text-sm font-medium text-foreground">{f.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ))}
+      {tables?.map((t) => (
+        <div key={t.heading}>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{t.heading}</p>
+          <div className="overflow-x-auto rounded-lg border border-black/5">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  {t.columns.map((c) => (
+                    <TableHead key={c} className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {c}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {t.rows.map((r, i) => (
+                  <TableRow key={i} className="hover:bg-transparent">
+                    {r.map((cell, j) => (
+                      <TableCell key={j} className="whitespace-nowrap text-xs">{cell}</TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      ))}
+    </>
   );
 }

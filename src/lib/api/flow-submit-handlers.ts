@@ -4,9 +4,17 @@ import {
   useCreateStockAdjustment,
   useCreateStockBatch,
   useCreateStockTransfer,
+  useCreateWarehouse,
+  useCreateWarehouseBin,
   useWarehouses,
 } from "./inventory";
-import { useUsers, useBranches } from "./admin";
+import {
+  useUsers, useBranches, useRoles, useTerminals,
+  useCreateUser, useCreateRole, useCreateBranch, useCreateTerminal, useCreateDevice,
+  useCreateRule, useCreateCompliance, useCreateMaintenance,
+  TERMINAL_TYPE_TO_BACKEND, DEVICE_TYPE_TO_BACKEND, CONNECTION_TO_BACKEND,
+  RULE_DOMAIN_TO_BACKEND, RULE_PRIORITY_TO_NUMBER,
+} from "./admin";
 import {
   useCreatePurchaseOrder,
   useCreateRts,
@@ -66,8 +74,20 @@ export function useFlowSubmitHandlers(): Record<
   const createStockAdjustment = useCreateStockAdjustment();
   const createStockBatch = useCreateStockBatch();
   const createTransfer = useCreateStockTransfer();
+  const createWarehouse = useCreateWarehouse();
+  const createWarehouseBin = useCreateWarehouseBin();
   const createBundle = useCreateBundle();
   const { data: branches } = useBranches();
+  const { data: roles } = useRoles();
+  const { data: terminals } = useTerminals();
+  const createUser = useCreateUser();
+  const createRole = useCreateRole();
+  const createBranch = useCreateBranch();
+  const createTerminal = useCreateTerminal();
+  const createDevice = useCreateDevice();
+  const createRule = useCreateRule();
+  const createCompliance = useCreateCompliance();
+  const createMaintenance = useCreateMaintenance();
   const { data: suppliers } = useSuppliers();
   const { data: purchaseOrders } = usePurchaseOrders();
   const createSupplier = useCreateSupplier();
@@ -79,6 +99,25 @@ export function useFlowSubmitHandlers(): Record<
   const createPricingRule = useCreatePricingRule();
   const { data: orders } = useOrders();
   const { data: customers } = useCustomers();
+
+  // A Stock Transfer's source/destination is either a warehouse (bulk stock) or a branch (shop-floor
+  // stock) — the picker's options are prefixed "Warehouse: <name>" / "Branch: <name>" so one field
+  // can pick either kind of location.
+  function resolveTransferLocation(value: string): { warehouseId: number | null; branchId: number | null } {
+    if (value.toLowerCase().startsWith("warehouse:")) {
+      const name = value.slice("warehouse:".length).trim();
+      const warehouse = warehouses?.find((w) => w.name.toLowerCase() === name.toLowerCase());
+      if (!warehouse) throw new Error(`Unknown warehouse "${name}".`);
+      return { warehouseId: warehouse.id, branchId: null };
+    }
+    if (value.toLowerCase().startsWith("branch:")) {
+      const name = value.slice("branch:".length).trim();
+      const branch = branches?.find((b) => b.nameEn.toLowerCase() === name.toLowerCase());
+      if (!branch) throw new Error(`Unknown branch "${name}".`);
+      return { warehouseId: null, branchId: branch.id };
+    }
+    throw new Error(`"${value}" must be prefixed "Warehouse:" or "Branch:".`);
+  }
 
   function findWarehouseForBranch(branchName: string) {
     const branch = branches?.find((b) => b.nameEn.toLowerCase() === branchName.toLowerCase());
@@ -191,24 +230,61 @@ export function useFlowSubmitHandlers(): Record<
       });
     },
 
-    "create-transfer": async (values) => {
-      if (!values.from || !values.to) throw new Error("From and To warehouse are required.");
-      const from = warehouses?.find((w) => w.name.toLowerCase() === values.from.toLowerCase());
-      const to = warehouses?.find((w) => w.name.toLowerCase() === values.to.toLowerCase());
-      if (!from) throw new Error(`Unknown warehouse "${values.from}".`);
-      if (!to) throw new Error(`Unknown warehouse "${values.to}".`);
-      if (from.id === to.id) throw new Error("From and To warehouse must differ.");
-      if (!values.skus) throw new Error("At least one SKU x Qty line is required.");
+    "add-warehouse": async (values) => {
+      if (!values.code || !values.name) throw new Error("Code and Name are required.");
+      if (!values.branch) throw new Error("Branch is required.");
+      const branch = branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase());
+      if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
+      if (!values.type) throw new Error("Type is required.");
 
-      const lines = parseSkuQtyLines(values.skus).map(({ sku, qty }) => {
-        const product = products?.find((p) => p.sku.toLowerCase() === sku.toLowerCase());
-        if (!product) throw new Error(`Unknown SKU "${sku}".`);
-        return { productId: product.id, qty, unitCost: product.costPrice };
+      await createWarehouse.mutateAsync({
+        code: values.code,
+        name: values.name,
+        branchId: branch.id,
+        type: values.type,
+      });
+    },
+
+    "bin-setup": async (values) => {
+      if (!values.warehouse) throw new Error("Warehouse is required.");
+      const warehouse = warehouses?.find((w) => w.name.toLowerCase() === values.warehouse.toLowerCase());
+      if (!warehouse) throw new Error(`Unknown warehouse "${values.warehouse}".`);
+      if (!values.binCode || !values.label) throw new Error("Bin Code and Label are required.");
+
+      await createWarehouseBin.mutateAsync({
+        warehouseId: warehouse.id,
+        request: { binCode: values.binCode, label: values.label, capacityTons: Number(values.capacity || 0) },
+      });
+    },
+
+    "create-transfer": async (values) => {
+      if (!values.from || !values.to) throw new Error("From and To location are required.");
+      const from = resolveTransferLocation(values.from);
+      const to = resolveTransferLocation(values.to);
+      if (from.warehouseId !== null && from.warehouseId === to.warehouseId) throw new Error("Source and destination warehouse must differ.");
+      if (from.branchId !== null && from.branchId === to.branchId) throw new Error("Source and destination branch must differ.");
+
+      const rows = parseLineItemRows(values.items);
+      if (!rows.length) throw new Error("At least one line item is required.");
+
+      const lines = rows.map((row) => {
+        if (!row.sku || !row.qty) throw new Error("Every line needs an item and a quantity.");
+        const product = products?.find((p) => p.sku.toLowerCase() === row.sku.toLowerCase());
+        if (!product) throw new Error(`Unknown SKU "${row.sku}".`);
+        return {
+          productId: product.id,
+          qty: Number(row.qty),
+          unitCost: Number(row.unitCost || product.costPrice),
+          batchNo: row.batchNo || null,
+          expiryDate: row.expiryDate || null,
+        };
       });
 
       await createTransfer.mutateAsync({
-        fromWarehouseId: from.id,
-        toWarehouseId: to.id,
+        fromWarehouseId: from.warehouseId,
+        fromBranchId: from.branchId,
+        toWarehouseId: to.warehouseId,
+        toBranchId: to.branchId,
         eta: values.eta || null,
         carrier: values.carrier || null,
         notes: values.notes || null,
@@ -423,6 +499,95 @@ export function useFlowSubmitHandlers(): Record<
       });
     },
 
+    "add-user": async (values) => {
+      if (!values.name || !values.email || !values.password)
+        throw new Error("Name, email and password are required.");
+      const role = roles?.find((r) => r.name.toLowerCase() === (values.role ?? "").toLowerCase());
+      if (!role) throw new Error(`Unknown role "${values.role}" — pick one that exists in Roles & Permissions.`);
+      const branch =
+        values.branch && values.branch !== "All Branches"
+          ? branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase())
+          : undefined;
+
+      await createUser.mutateAsync({
+        name: values.name,
+        email: values.email,
+        password: values.password,
+        roleId: role.id,
+        branchId: branch?.id ?? null,
+      });
+    },
+
+    "create-role": async (values) => {
+      if (!values.name) throw new Error("Role name is required.");
+      const permMap: Record<string, string | undefined> = {
+        Pos: values.permPos, Orders: values.permOrders, Inventory: values.permInventory, Finance: values.permFinance,
+        Admin: values.permAdmin, Delivery: values.permDelivery, Hr: values.permHr, Insights: values.permInsights,
+        Suppliers: values.permSuppliers, Network: values.permNetwork,
+      };
+      const permissions = Object.fromEntries(
+        Object.entries(permMap).filter((entry): entry is [string, string] => Boolean(entry[1]) && entry[1] !== "None"),
+      );
+
+      await createRole.mutateAsync({
+        name: values.name,
+        description: values.description || null,
+        approvalCap: Number(values.approvalCap || 0),
+        permissions,
+      });
+    },
+
+    "add-branch": async (values) => {
+      if (!values.code || !values.nameEn) throw new Error("Branch code and name are required.");
+      await createBranch.mutateAsync({
+        code: values.code,
+        nameEn: values.nameEn,
+        nameAr: values.nameAr || null,
+        city: values.city || "Riyadh",
+        address: values.address || null,
+        businessHours: values.hours || null,
+        vatRegistrationNumber: values.zatca || null,
+        managerName: values.manager && values.manager !== "Assign later" ? values.manager : null,
+        warehouse: values.warehouse && values.warehouse !== "Create new" ? values.warehouse : null,
+      });
+    },
+
+    "add-terminal": async (values) => {
+      if (!values.id || !values.branch) throw new Error("Terminal ID and branch are required.");
+      const branch = branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase());
+      if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
+      const assignedCashier = values.operator && values.operator !== "Unassigned"
+        ? users?.find((u) => u.name.toLowerCase() === values.operator.toLowerCase())
+        : undefined;
+
+      await createTerminal.mutateAsync({
+        code: values.id,
+        name: values.name || values.id,
+        branchId: branch.id,
+        type: TERMINAL_TYPE_TO_BACKEND[values.type] ?? "Fixed",
+        assignedCashierId: assignedCashier?.id ?? null,
+        offlineModeEnabled: values.offline === "on",
+        ipAddress: null,
+        macAddress: null,
+      });
+    },
+
+    "pair-device": async (values) => {
+      if (!values.type) throw new Error("Device type is required.");
+      const terminal = terminals?.find((t) => t.code === values.terminal);
+      if (!terminal) throw new Error(`Unknown terminal "${values.terminal}" — pick one that exists in Terminals.`);
+
+      await createDevice.mutateAsync({
+        type: DEVICE_TYPE_TO_BACKEND[values.type] ?? "ReceiptPrinter",
+        model: values.model || "Unknown",
+        serial: values.serial || null,
+        terminalId: terminal.id,
+        connection: CONNECTION_TO_BACKEND[values.connection] ?? "Usb",
+        ipAddress: values.ip || null,
+        behaviorProfile: values.behaviorProfile || null,
+      });
+    },
+
     "add-tax-code": async (values) => {
       if (!values.code || !values.name || !values.rate || !values.appliesTo) {
         throw new Error("Code, name, rate and applies-to are required.");
@@ -435,6 +600,48 @@ export function useFlowSubmitHandlers(): Record<
         appliesTo: values.appliesTo,
         effectiveFrom: values.effectiveFrom || new Date().toISOString().slice(0, 10),
         glAccountCode: values.glAccount || null,
+      });
+    },
+
+    "create-rule": async (values) => {
+      if (!values.name) throw new Error("Rule name is required.");
+      const approver = values.approver ? users?.find((u) => u.name.toLowerCase() === values.approver.toLowerCase()) : undefined;
+      await createRule.mutateAsync({
+        name: values.name,
+        domain: RULE_DOMAIN_TO_BACKEND[values.domain] ?? "Admin",
+        priority: RULE_PRIORITY_TO_NUMBER[values.priority] ?? 20,
+        whenTrigger: values.when || "On Sale Add Line",
+        condition: values.if || "Any",
+        action: values.action || "Warn & Log",
+        approverUserId: approver?.id ?? null,
+        active: values.active === "on",
+        notes: values.notes || null,
+      });
+    },
+
+    "add-control": async (values) => {
+      if (!values.control || !values.owner || !values.nextDue) throw new Error("Control name, owner and next-due date are required.");
+      await createCompliance.mutateAsync({
+        control: values.control,
+        framework: values.framework || "Internal Policy",
+        owner: values.owner,
+        lastReview: values.lastReview || new Date().toISOString().slice(0, 10),
+        nextDue: values.nextDue,
+        evidence: values.evidence || null,
+        findings: values.findings || null,
+        status: values.status || "Compliant",
+      });
+    },
+
+    "create-ticket": async (values) => {
+      if (!values.deviceOrModule || !values.owner) throw new Error("Device/module and assignee are required.");
+      const branch = values.branch && values.branch !== "All Branches" ? branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase()) : undefined;
+      await createMaintenance.mutateAsync({
+        deviceOrModule: values.deviceOrModule,
+        branchId: branch?.id ?? null,
+        severity: values.severity || "Warning",
+        owner: values.owner,
+        slaHours: Number(values.slaHours || 24),
       });
     },
   };

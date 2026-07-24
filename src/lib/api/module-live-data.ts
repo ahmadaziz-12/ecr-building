@@ -5,7 +5,7 @@ import {
 } from "./admin";
 import { useCategories, useProducts, mapCategories, mapProducts } from "./catalog";
 import { useBundles, mapBundles } from "./bundles";
-import { useWarehouses, useStockLevels, useStockBatches, useStockTransfers, mapWarehouses, mapStockLevels, mapStockBatches, mapStockTransfers } from "./inventory";
+import { useWarehouses, useStockLevels, useBranchStockLevels, useStockBatches, useStockTransfers, mapWarehouses, mapStockLevels, mapBranchStockLevels, mapStockBatches, mapStockTransfers } from "./inventory";
 import { useSuppliers, usePurchaseOrders, useReturnsToSupplier, mapSuppliers, mapPurchaseOrders, mapRts } from "./procurement";
 import { usePricingRules, mapPricingRules } from "./pos";
 import { useExpenses, useTaxCodes, useReturns, mapExpenses, mapTaxCodes, mapReturns } from "./finance";
@@ -26,12 +26,13 @@ export function useModuleLiveData(pathname: string): LiveTable | undefined {
   const compliance = useCompliance(pathname === "/admin/compliance");
   const maintenance = useMaintenance(pathname === "/admin/maintenance");
   const subscription = useSubscription(pathname === "/admin/plans");
-  const auditLogs = useAuditLogs(pathname === "/admin/audit-logs");
+  const auditLogs = useAuditLogs(undefined, pathname === "/admin/audit-logs");
 
   const categories = useCategories(pathname === "/admin/categories");
   const products = useProducts(pathname === "/stock/inventory");
   const warehouses = useWarehouses(pathname === "/stock/warehouses");
   const stockLevels = useStockLevels(pathname === "/stock/stocks");
+  const branchStockLevels = useBranchStockLevels(pathname === "/stock/branch-stock");
   const stockBatches = useStockBatches(pathname === "/stock/expiry");
   const transfers = useStockTransfers(pathname === "/stock/transfers");
   const bundles = useBundles(pathname === "/stock/bundles");
@@ -83,6 +84,8 @@ export function useModuleLiveData(pathname: string): LiveTable | undefined {
       return warehouses.data ? mapWarehouses(warehouses.data) : undefined;
     case "/stock/stocks":
       return stockLevels.data ? mapStockLevels(stockLevels.data) : undefined;
+    case "/stock/branch-stock":
+      return branchStockLevels.data ? mapBranchStockLevels(branchStockLevels.data) : undefined;
     case "/stock/expiry":
       return stockBatches.data ? mapStockBatches(stockBatches.data) : undefined;
     case "/stock/transfers":

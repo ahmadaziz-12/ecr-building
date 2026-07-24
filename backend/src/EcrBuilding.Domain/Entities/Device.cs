@@ -11,11 +11,17 @@ public class Device : BaseEntity
     public string? Serial { get; set; }
     public int TerminalId { get; set; }
     public Terminal? Terminal { get; set; }
+    public int BranchId { get; set; }
+    public Branch? Branch { get; set; }
     public DeviceConnection Connection { get; set; } = DeviceConnection.Usb;
     public string? IpAddress { get; set; }
     public string? Firmware { get; set; }
     public DateTime? LastTestAt { get; set; }
     public DeviceStatus Status { get; set; } = DeviceStatus.Healthy;
+    public DeviceSyncStatus SyncStatus { get; set; } = DeviceSyncStatus.Synced;
+
+    // Free-text alerting hint for monitoring (e.g. "Alert on idle > 10m").
+    public string? BehaviorProfile { get; set; }
 
     // Name QZ Tray reports for the physical OS printer this device maps to (e.g. "Epson TM-T88VI"
     // from qz.printers.find()). Null means no physical printer is mapped yet — printing for this

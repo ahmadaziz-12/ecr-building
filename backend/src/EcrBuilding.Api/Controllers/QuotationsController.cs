@@ -110,9 +110,6 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
             return BadRequest(new { error = $"Cannot convert a quotation in {quotation.Status} status." });
         }
 
-        var warehouse = await db.Warehouses.Where(w => w.BranchId == quotation.BranchId).OrderBy(w => w.Id).FirstOrDefaultAsync(ct);
-        if (warehouse is null) return BadRequest(new { error = "No warehouse configured for this branch." });
-
         var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         var order = new Order
         {
@@ -127,7 +124,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
         foreach (var line in quotation.Lines)
         {
             var rowsAffected = await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE StockLevels SET OnHand = OnHand - {line.Qty} WHERE ProductId = {line.ProductId} AND WarehouseId = {warehouse.Id} AND (OnHand - Reserved) >= {line.Qty}",
+                $"UPDATE BranchStockLevels SET OnHand = OnHand - {line.Qty} WHERE ProductId = {line.ProductId} AND BranchId = {quotation.BranchId} AND (OnHand - Reserved) >= {line.Qty}",
                 ct);
             if (rowsAffected == 0)
             {

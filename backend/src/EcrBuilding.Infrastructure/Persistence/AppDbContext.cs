@@ -37,6 +37,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
     public DbSet<WarehouseBin> WarehouseBins => Set<WarehouseBin>();
     public DbSet<StockLevel> StockLevels => Set<StockLevel>();
+    public DbSet<BranchStockLevel> BranchStockLevels => Set<BranchStockLevel>();
     public DbSet<StockBatch> StockBatches => Set<StockBatch>();
     public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
     public DbSet<StockTransferLine> StockTransferLines => Set<StockTransferLine>();
@@ -125,12 +126,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             b.HasIndex(x => x.Code).IsUnique();
             b.HasOne(x => x.Branch).WithMany(x => x.Terminals).HasForeignKey(x => x.BranchId);
+            b.HasOne(x => x.Operator).WithMany().HasForeignKey(x => x.OperatorUserId).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<Device>(b =>
         {
             b.HasIndex(x => x.DeviceCode).IsUnique();
             b.HasOne(x => x.Terminal).WithMany(x => x.Devices).HasForeignKey(x => x.TerminalId);
+            b.HasOne(x => x.Branch).WithMany().HasForeignKey(x => x.BranchId);
         });
 
         modelBuilder.Entity<Role>(b =>
@@ -222,6 +225,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.Ignore(x => x.Available);
         });
 
+        modelBuilder.Entity<BranchStockLevel>(b =>
+        {
+            b.HasIndex(x => new { x.ProductId, x.BranchId }).IsUnique();
+            b.HasOne(x => x.Product).WithMany(x => x.BranchStockLevels).HasForeignKey(x => x.ProductId);
+            b.HasOne(x => x.Branch).WithMany(x => x.StockLevels).HasForeignKey(x => x.BranchId);
+            b.Ignore(x => x.Available);
+        });
+
         modelBuilder.Entity<StockBatch>(b =>
         {
             b.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId);
@@ -233,6 +244,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasIndex(x => x.TransferNo).IsUnique();
             b.HasOne(x => x.FromWarehouse).WithMany().HasForeignKey(x => x.FromWarehouseId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.ToWarehouse).WithMany().HasForeignKey(x => x.ToWarehouseId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.FromBranch).WithMany().HasForeignKey(x => x.FromBranchId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.ToBranch).WithMany().HasForeignKey(x => x.ToBranchId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<StockTransferLine>(b =>
