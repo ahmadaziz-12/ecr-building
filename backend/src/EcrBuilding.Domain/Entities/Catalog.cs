@@ -37,6 +37,14 @@ public class Product : BaseEntity
     public Category? Category { get; set; }
     public string? Brand { get; set; }
     public decimal CostPrice { get; set; }
+    // BRD §7 (CR-038): SellingPrice is the Retail list price. The three below are genuinely
+    // distinct list prices for the other segments — null means "no override configured for this
+    // product," so checkout falls back to SellingPrice for that segment rather than a computed
+    // discount. Never derived arithmetically from SellingPrice; each is set independently by
+    // whoever holds Role.CanManagePriceListAndUsers (see CatalogController).
+    public decimal? ContractorPrice { get; set; }
+    public decimal? WholesalePrice { get; set; }
+    public decimal? ProjectPrice { get; set; }
     public decimal SellingPrice { get; set; }
     public decimal VatRate { get; set; } = 15m;
     public string StockUom { get; set; } = "Piece";

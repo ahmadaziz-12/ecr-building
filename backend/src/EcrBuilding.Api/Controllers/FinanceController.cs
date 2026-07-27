@@ -175,7 +175,8 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
         .Include(r => r.Order).ThenInclude(o => o!.Branch)
         .Include(r => r.Order).ThenInclude(o => o!.Cashier)
         .Include(r => r.Customer).Include(r => r.ApprovedBy).Include(r => r.ExchangeOrder)
-        .Include(r => r.Lines).ThenInclude(l => l.Product);
+        .Include(r => r.Lines).ThenInclude(l => l.Product)
+        .Include(r => r.ExchangeLines).ThenInclude(l => l.Product);
 
     // BRD §3.2.1/§3.2.4: the return window and dual-authorization cash threshold — configured from
     // this page directly, not a generic Admin Settings browser. Reads the exact same Setting keys
@@ -193,6 +194,14 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
     [RequireModule("/finance/returns", PermissionAction.Edit)]
     public async Task<ActionResult<ReturnPolicyConfigDto>> UpdatePolicyConfig(ReturnPolicyConfigDto request, CancellationToken ct)
     {
+        // BRD §10.1: editing the return WINDOW/threshold policy itself is a distinct authority from
+        // ordinary Finance-module edit access — Role.CanConfigureReturnRulesAndFees was minted as a
+        // JWT claim and editable on the Roles page, but nothing ever checked it here before this.
+        var canConfigure = string.Equals(User.FindFirst("posCeiling:canConfigureReturnRulesAndFees")?.Value, "True", StringComparison.OrdinalIgnoreCase);
+        if (!canConfigure)
+        {
+            return StatusCode(403, new { error = "Configuring return policy (window/threshold) requires the Configure Return Rules & Fees permission." });
+        }
         if (request.DualAuthCashThreshold < 0) return BadRequest(new { error = "The dual-authorization threshold can't be negative." });
         if (request.StandardWindowDays < 0 || request.SurplusWindowDays < 0) return BadRequest(new { error = "A return window can't be negative." });
 
@@ -267,7 +276,25 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
         }
 
         var computed = await ComputeReturnAsync(order, type, request.Lines, ct);
-        return Ok(computed.Preview);
+        var preview = computed.Preview;
+
+        // BRD §3.2.1 Exchange: preview the replacement item(s) too, so the cashier sees the net
+        // settlement (owed vs. refunded) before confirming — same live-preview principle as the
+        // return side above.
+        if (type == ReturnType.Exchange && request.ExchangeLines is { Count: > 0 })
+        {
+            var (exchangeLines, error) = await ComputeExchangeLinesAsync(request.ExchangeLines, ct);
+            if (error is not null) return BadRequest(new { error });
+            var exchangeLinesTotal = exchangeLines.Sum(l => l.LineTotal);
+            preview = preview with
+            {
+                ExchangeLines = exchangeLines.Select(ToExchangeLineDto).ToList(),
+                ExchangeLinesTotal = exchangeLinesTotal,
+                ExchangeNetPayable = Math.Round(exchangeLinesTotal - preview.NetCashback, 2),
+            };
+        }
+
+        return Ok(preview);
     }
 
     [HttpPost]
@@ -282,6 +309,14 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
         {
             return BadRequest(new { error = $"Unknown return type \"{request.Type}\"." });
         }
+
+        // BRD §3.2.2 (no-receipt returns): no original order to draw down against at all — a
+        // separate, simpler path gated by a DIFFERENT permission than the rest of this endpoint.
+        if (request.OrderId is null)
+        {
+            return await CreateNoReceiptReturnAsync(request, type, ct);
+        }
+
         if (request.Lines.Count == 0 || request.Lines.All(l => l.Qty <= 0))
         {
             return BadRequest(new { error = "Select at least one line and quantity to return." });
@@ -317,11 +352,30 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
             }
         }
 
-        Order? exchangeOrder = null;
-        if (type == ReturnType.Exchange && request.ExchangeOrderId is not null)
+        // BRD §3.2.1 exchange workflow: the REAL flow prices the replacement item(s) here and turns
+        // them into an actual Order only at Approve (stock deducted, GL posted, difference settled
+        // then). The ExchangeOrderId manual-link path (an already-existing order id, no ExchangeLines)
+        // stays available for backward compatibility, but is otherwise dead — nothing in this app's
+        // own UI uses it.
+        Order? linkedExchangeOrder = null;
+        List<ReturnExchangeLine> exchangeLines = [];
+        if (type == ReturnType.Exchange)
         {
-            exchangeOrder = await db.Orders.FindAsync([request.ExchangeOrderId], ct);
-            if (exchangeOrder is null) return BadRequest(new { error = "The linked exchange order does not exist." });
+            if (request.ExchangeLines is { Count: > 0 })
+            {
+                var (lines, error) = await ComputeExchangeLinesAsync(request.ExchangeLines, ct);
+                if (error is not null) return BadRequest(new { error });
+                exchangeLines = lines;
+            }
+            else if (request.ExchangeOrderId is not null)
+            {
+                linkedExchangeOrder = await db.Orders.FindAsync([request.ExchangeOrderId], ct);
+                if (linkedExchangeOrder is null) return BadRequest(new { error = "The linked exchange order does not exist." });
+            }
+            else
+            {
+                return BadRequest(new { error = "Select at least one replacement item for this exchange." });
+            }
         }
 
         var ret = new Return
@@ -339,14 +393,83 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
             RestockingFeePct = computed.Preview.RestockingFeePct,
             RestockingFeeAmount = computed.Preview.RestockingFeeAmount,
             NetCashback = computed.Preview.NetCashback,
-            ExchangeOrderId = exchangeOrder?.Id,
+            ExchangeOrderId = linkedExchangeOrder?.Id,
             Lines = computed.Lines,
+            ExchangeLines = exchangeLines,
         };
         db.Returns.Add(ret);
         await db.SaveChangesAsync(ct);
         await audit.LogAsync("finance", "RETURN_CREATED", ret.Id.ToString(),
-            newValue: new { ret.ReturnNo, ret.DgrnNo, Type = type.ToString(), order.OrderNo, ret.NetCashback, DamageReason = damageReason?.ToString() },
+            newValue: new { ret.ReturnNo, ret.DgrnNo, Type = type.ToString(), order.OrderNo, ret.NetCashback, DamageReason = damageReason?.ToString(), ExchangeLineCount = exchangeLines.Count },
             cancellationToken: ct);
+
+        var created = await WithIncludes().FirstAsync(r => r.Id == ret.Id, ct);
+        return Ok(Map(created));
+    }
+
+    // BRD §3.2.2 (no-receipt returns): gated by Role.CanAuthorizeStandardReturnWithoutReceipt — no
+    // original order to draw down against, so pricing uses the product's CURRENT SellingPrice/VatRate
+    // (nothing else to go on, unlike a real receipt's frozen sale price) and the refund can only be
+    // StoreCredit against a real customer account (there is no original payment to refund to).
+    private async Task<ActionResult<ReturnDto>> CreateNoReceiptReturnAsync(CreateReturnRequest request, ReturnType type, CancellationToken ct)
+    {
+        var canWaiveReceipt = string.Equals(User.FindFirst("posCeiling:canAuthorizeStandardReturnWithoutReceipt")?.Value, "True", StringComparison.OrdinalIgnoreCase);
+        if (!canWaiveReceipt)
+        {
+            return StatusCode(403, new { error = "Returns without a receipt require Supervisor (or higher) authorization." });
+        }
+        if (type != ReturnType.Standard)
+        {
+            return BadRequest(new { error = "Only Standard returns can be created without a receipt." });
+        }
+        if (request.CustomerId is null)
+        {
+            return BadRequest(new { error = "A customer account is required for a no-receipt return — the refund can only be issued as store credit." });
+        }
+        var customer = await db.Customers.FindAsync([request.CustomerId], ct);
+        if (customer is null) return BadRequest(new { error = "Unknown customer." });
+        if (request.NoReceiptLines is not { Count: > 0 } || request.NoReceiptLines.All(l => l.Qty <= 0))
+        {
+            return BadRequest(new { error = "Select at least one product and quantity to return." });
+        }
+
+        var returnLines = new List<ReturnLine>();
+        decimal grossRefund = 0, vatReversal = 0;
+        foreach (var input in request.NoReceiptLines.Where(l => l.Qty > 0))
+        {
+            var product = await db.Products.Include(p => p.Category).FirstOrDefaultAsync(p => p.Id == input.ProductId, ct);
+            if (product is null) return BadRequest(new { error = $"Unknown product {input.ProductId}." });
+            if (product.IsCutToSize) return BadRequest(new { error = $"{product.Sku}: cut-to-size items cannot be returned without a receipt." });
+            if (product is { Returnable: false } || product.Category is { Returnable: false })
+            {
+                return BadRequest(new { error = $"{product.Sku} is flagged non-returnable." });
+            }
+            var baseRefund = Math.Round(input.Qty * product.SellingPrice, 2);
+            var vat = Math.Round(baseRefund * product.VatRate / 100, 2);
+            grossRefund += baseRefund;
+            vatReversal += vat;
+            returnLines.Add(new ReturnLine
+            {
+                ProductId = product.Id, Qty = input.Qty, StockQty = input.Qty,
+                UnitPricePaid = product.SellingPrice, VatRate = product.VatRate,
+                Amount = baseRefund + vat,
+            });
+        }
+
+        var ret = new Return
+        {
+            ReturnNo = $"RET-{DateTime.UtcNow:yyyy}-{await db.Returns.CountAsync(ct) + 1:D4}",
+            OrderId = null, CustomerId = customer.Id, Type = ReturnType.Standard, Reason = request.Reason,
+            Status = ReturnStatus.PendingApproval, IsNoReceipt = true,
+            GrossRefund = Math.Round(grossRefund, 2), VatReversal = Math.Round(vatReversal, 2),
+            NetCashback = Math.Round(grossRefund + vatReversal, 2),
+            RefundMethod = "StoreCredit",
+            Lines = returnLines,
+        };
+        db.Returns.Add(ret);
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("finance", "RETURN_CREATED", ret.Id.ToString(),
+            newValue: new { ret.ReturnNo, Type = "Standard (no receipt)", CustomerId = customer.Id, ret.NetCashback }, cancellationToken: ct);
 
         var created = await WithIncludes().FirstAsync(r => r.Id == ret.Id, ct);
         return Ok(Map(created));
@@ -361,6 +484,7 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
             .Include(r => r.Order).ThenInclude(o => o!.Branch)
             .Include(r => r.Order).ThenInclude(o => o!.Cashier)
             .Include(r => r.ApprovedBy).Include(r => r.ExchangeOrder).Include(r => r.Lines).ThenInclude(l => l.Product)
+            .Include(r => r.ExchangeLines).ThenInclude(l => l.Product)
             .FirstOrDefaultAsync(r => r.Id == id, ct);
         if (ret is null) return NotFound();
         if (ret.Status == ReturnStatus.Completed) return BadRequest(new { error = "This return has already been completed." });
@@ -399,6 +523,29 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
         {
             return BadRequest(new { error = "Account credit refunds are only available for B2B / contractor customers." });
         }
+        // BRD §3.2.2: a no-receipt return has no original payment to refund to — StoreCredit is the
+        // only coherent option, same as it was frozen at Create.
+        if (ret.IsNoReceipt && refundMethod != "StoreCredit")
+        {
+            return BadRequest(new { error = "A no-receipt return can only be refunded as store credit." });
+        }
+
+        // BRD §3.2.1 Exchange: if the replacement item(s) cost more than this return's own cashback,
+        // the cashier must collect the difference NOW — validated up front, before any stock/GL/order
+        // work begins, exactly like every other "can this even proceed" check in this method.
+        var exchangeLinesTotal = ret.ExchangeLines.Sum(l => l.LineTotal);
+        if (ret.Type == ReturnType.Exchange && ret.ExchangeLines.Count > 0)
+        {
+            var netSettlementCheck = exchangeLinesTotal - EffectiveCashback(ret);
+            if (netSettlementCheck > 0)
+            {
+                var paymentsTotal = (request.Payments ?? []).Sum(p => p.Amount);
+                if (Math.Abs(paymentsTotal - netSettlementCheck) > 0.05m)
+                {
+                    return BadRequest(new { error = $"This exchange requires an additional payment of {netSettlementCheck:F2} ر.س — payments provided total {paymentsTotal:F2} ر.س." });
+                }
+            }
+        }
 
         // BRD §3.2.4: cash refunds above the threshold need TWO people — the approver plus a second
         // supervisor-tier user confirming with their own PIN in the same request. (Module 15 upgrades
@@ -433,24 +580,74 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
         else
         {
             // BRD §3.2.2: damaged stock goes to a QUARANTINE holding, never back to sellable OnHand —
-            // recorded as a quarantined stock batch under the DGRN number so the warehouse/QA team can
-            // find, assess, and eventually write off or restore each one.
-            var warehouse = await db.Warehouses.FirstOrDefaultAsync(w => w.BranchId == request.BranchId, ct)
-                ?? await db.Warehouses.FirstOrDefaultAsync(ct);
-            if (warehouse is not null)
+            // recorded as a quarantined BRANCH stock batch under the DGRN number (the item is
+            // physically at the branch that took the return, not some arbitrary warehouse) so the
+            // branch/QA team can find it in the same Expiry & Batches list, assess, and eventually
+            // write off or restore it. Previously this looked up "any warehouse linked to this
+            // branch, else whichever warehouse happens to be first in the whole system" — a branch
+            // with no warehouse of its own silently quarantined into a random other branch's
+            // warehouse. Branch-level batches need no warehouse at all.
+            foreach (var line in ret.Lines)
             {
-                foreach (var line in ret.Lines)
+                db.BranchStockBatches.Add(new BranchStockBatch
                 {
-                    db.StockBatches.Add(new StockBatch
-                    {
-                        ProductId = line.ProductId, WarehouseId = warehouse.Id,
-                        BatchNo = ret.DgrnNo ?? ret.ReturnNo, ReceivedDate = DateTime.UtcNow,
-                        ExpiryDate = DateTime.UtcNow.AddYears(1),
-                        Qty = line.StockQty > 0 ? line.StockQty : line.Qty,
-                        ManualStatus = StockBatchStatus.Quarantine,
-                    });
-                }
+                    ProductId = line.ProductId, BranchId = request.BranchId,
+                    BatchNo = ret.DgrnNo ?? ret.ReturnNo, ReceivedDate = DateTime.UtcNow,
+                    ExpiryDate = DateTime.UtcNow.AddYears(1),
+                    Qty = line.StockQty > 0 ? line.StockQty : line.Qty,
+                    ManualStatus = StockBatchStatus.Quarantine,
+                });
             }
+        }
+
+        // BRD §3.2.1 Exchange: deduct stock for the replacement item(s) in the SAME transaction as
+        // the returned item's restock above — a stock shortfall on the replacement aborts the whole
+        // approval atomically (same atomic-conditional-decrement pattern OrdersController.Checkout
+        // uses), rather than leaving the return half-processed.
+        Order? exchangeOrder = null;
+        if (ret.Type == ReturnType.Exchange && ret.ExchangeLines.Count > 0)
+        {
+            exchangeOrder = new Order
+            {
+                OrderNo = $"ORD-{DateTime.UtcNow:yyyy}-{await db.Orders.CountAsync(ct) + 1:D4}",
+                BranchId = request.BranchId, CashierUserId = userId ?? 0, CustomerId = ret.CustomerId,
+                Type = ret.Order?.Type ?? OrderType.Retail, Status = OrderStatus.Completed, PaymentStatus = PaymentStatus.Paid,
+                Notes = $"Exchange replacement for {ret.ReturnNo}",
+            };
+            foreach (var line in ret.ExchangeLines)
+            {
+                var deductQty = (double)(line.StockQty > 0 ? line.StockQty : line.Qty);
+                var rowsAffected = await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE BranchStockLevels SET OnHand = OnHand - {deductQty} WHERE ProductId = {line.ProductId} AND BranchId = {request.BranchId} AND (OnHand - Reserved) >= {deductQty}",
+                    ct);
+                if (rowsAffected == 0)
+                {
+                    return BadRequest(new { error = $"Insufficient stock for the replacement item {line.Product?.Sku} ({line.StockQty} {line.Uom} needed)." });
+                }
+                exchangeOrder.Lines.Add(new OrderLine
+                {
+                    ProductId = line.ProductId, Qty = line.Qty, Uom = line.Uom, StockQty = line.StockQty,
+                    UnitPrice = line.UnitPrice, VatRate = line.VatRate, LineTotal = line.LineTotal, DiscountPct = 0,
+                });
+            }
+            exchangeOrder.SubTotal = ret.ExchangeLines.Sum(l => l.Qty * l.UnitPrice);
+            exchangeOrder.VatTotal = exchangeLinesTotal - exchangeOrder.SubTotal;
+            exchangeOrder.GrandTotal = exchangeLinesTotal;
+            // The portion of the replacement sale covered by this return's own cashback is a
+            // PaymentMethod.ReturnCredit line (mirrors AccountCredit: never touches IPaymentGateway) —
+            // only the shortfall (if any) is a real tender, validated above and charged after commit.
+            var creditPortion = Math.Min(exchangeLinesTotal, EffectiveCashback(ret));
+            if (creditPortion > 0)
+            {
+                exchangeOrder.Payments.Add(new OrderPayment { Method = PaymentMethod.ReturnCredit, Amount = creditPortion, Status = PaymentRecordStatus.Completed });
+            }
+            foreach (var payment in request.Payments ?? [])
+            {
+                exchangeOrder.Payments.Add(new OrderPayment { Method = Enum.Parse<PaymentMethod>(payment.Method, ignoreCase: true), Amount = payment.Amount, Status = PaymentRecordStatus.Completed });
+            }
+            db.Orders.Add(exchangeOrder);
+            await db.SaveChangesAsync(ct); // materialize the new order's Id for the FK link below
+            ret.ExchangeOrderId = exchangeOrder.Id;
         }
 
         // BRD §3.2.4: refund routing. "Original" splits proportionally across the original payment
@@ -488,6 +685,15 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
                 movementType == StockMovementType.ReturnRestock ? qty : -qty,
                 refTable: "Return", refId: id.ToString(), userId: userId, cancellationToken: ct);
         }
+        if (exchangeOrder is not null)
+        {
+            foreach (var line in ret.ExchangeLines)
+            {
+                await stockMovements.RecordAsync(line.ProductId, request.BranchId, StockMovementType.Sale,
+                    -(line.StockQty > 0 ? line.StockQty : line.Qty),
+                    refTable: "Order", refId: exchangeOrder.Id.ToString(), userId: userId, cancellationToken: ct);
+            }
+        }
 
         var totalAmount = EffectiveCashback(ret);
         if (totalAmount > 0)
@@ -507,10 +713,49 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
                 lines.Add(new GlLine("4000", 0, ret.RestockingFeeAmount));
             }
             await gl.PostAsync(ret.ReturnNo, $"{ret.Type} return refund to {ret.Customer?.NameEn ?? "Walk-in Customer"}", lines, ct);
-            if (refundMethod is "Original" or "Cash")
+            // BRD §3.2.1 Exchange: the actual cash movement is netted against the replacement sale
+            // below (this posting still recognizes the FULL return reversal on its own — standard
+            // double-entry bookkeeping, the two full-amount postings net to the real money moved on
+            // the shared cash/AR account) — skip the standalone refund call here for that case.
+            if (refundMethod is "Original" or "Cash" && !(ret.Type == ReturnType.Exchange && ret.ExchangeLines.Count > 0))
             {
                 await paymentGateway.ChargeAsync("Refund", -totalAmount, ct);
             }
+        }
+
+        // BRD §3.2.1 Exchange: post the replacement sale's own full GL recognition (mirrors
+        // OrdersController.Checkout's sale posting exactly) and settle only the NET difference via a
+        // real payment/refund call — the two full-amount postings above/below net to the true cash
+        // movement on the shared account, exactly like a cashier "evening up" one exchange at the
+        // counter instead of ringing two disconnected transactions.
+        if (ret.Type == ReturnType.Exchange && ret.ExchangeLines.Count > 0 && exchangeOrder is not null)
+        {
+            var exchangeVat = ret.ExchangeLines.Sum(l => l.LineTotal - l.Qty * l.UnitPrice);
+            var exchangeRevenue = exchangeLinesTotal - exchangeVat;
+            var exchangeAccountCreditAmt = (request.Payments ?? []).Where(p => p.Method.Equals("AccountCredit", StringComparison.OrdinalIgnoreCase)).Sum(p => p.Amount);
+            var exchangeCashPortion = exchangeLinesTotal - exchangeAccountCreditAmt;
+            var exchangeSaleLines = new List<GlLine> { new("4000", 0, exchangeRevenue), new("2100", 0, exchangeVat) };
+            if (exchangeCashPortion > 0) exchangeSaleLines.Add(new GlLine("1000", exchangeCashPortion, 0));
+            if (exchangeAccountCreditAmt > 0) exchangeSaleLines.Add(new GlLine("1100", exchangeAccountCreditAmt, 0));
+            await gl.PostAsync(exchangeOrder.OrderNo, $"Exchange replacement sale for {ret.ReturnNo}", exchangeSaleLines, ct);
+
+            var netSettlement = exchangeLinesTotal - totalAmount; // > 0 = customer owed more, < 0 = customer is owed the difference
+            if (netSettlement > 0)
+            {
+                foreach (var payment in request.Payments ?? [])
+                {
+                    await paymentGateway.ChargeAsync(payment.Method, payment.Amount, ct);
+                }
+                if (exchangeAccountCreditAmt > 0 && ret.Customer is { Type: CustomerType.B2B or CustomerType.Contractor })
+                {
+                    ret.Customer.Outstanding += exchangeAccountCreditAmt;
+                }
+            }
+            else if (netSettlement < 0 && refundMethod is "Original" or "Cash")
+            {
+                await paymentGateway.ChargeAsync("Refund", netSettlement, ct);
+            }
+            await db.SaveChangesAsync(ct);
         }
 
         // Claw back whatever loyalty points this order's returned amount had earned — capped to
@@ -722,6 +967,35 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
     private static decimal EffectiveCashback(Return r) =>
         r.NetCashback > 0 ? r.NetCashback : r.Lines.Sum(l => l.Amount);
 
+    // BRD §3.2.1 exchange workflow: prices the replacement item(s) at the product's CURRENT
+    // SellingPrice × UOM factor + its own VatRate — deliberately simple (no contractor/loyalty/promo
+    // pricing-engine stacking; an exchange is a like-for-like swap at the counter, not a full re-run
+    // of checkout). Shared by Preview and Create so what the cashier reviewed is what gets frozen.
+    private async Task<(List<ReturnExchangeLine> Lines, string? Error)> ComputeExchangeLinesAsync(List<ExchangeLineInput> inputs, CancellationToken ct)
+    {
+        var lines = new List<ReturnExchangeLine>();
+        foreach (var input in inputs.Where(i => i.Qty > 0))
+        {
+            var product = await db.Products.Include(p => p.UomConversions).FirstOrDefaultAsync(p => p.Id == input.ProductId, ct);
+            if (product is null) return (lines, $"Unknown replacement product {input.ProductId}.");
+            var sellUom = string.IsNullOrWhiteSpace(input.Uom) ? product.StockUom : input.Uom!;
+            var factor = UomMath.FactorToStock(sellUom, product.StockUom, product.UomConversions.Select(c => (c.Uom, c.FactorToStock)));
+            if (factor is null) return (lines, $"No conversion factor is configured for {product.Sku} in UOM \"{sellUom}\".");
+            var stockQty = UomMath.ToStockQty(input.Qty, factor.Value);
+            var unitPrice = product.SellingPrice * factor.Value;
+            var lineTotal = Math.Round(input.Qty * unitPrice * (1 + product.VatRate / 100), 2);
+            lines.Add(new ReturnExchangeLine
+            {
+                ProductId = product.Id, Product = product, Qty = input.Qty, Uom = sellUom, StockQty = stockQty,
+                UnitPrice = unitPrice, VatRate = product.VatRate, LineTotal = lineTotal,
+            });
+        }
+        return (lines, null);
+    }
+
+    private static ExchangeLineDto ToExchangeLineDto(ReturnExchangeLine l) =>
+        new(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.Uom, l.UnitPrice, l.VatRate, l.LineTotal);
+
     // Ignoring Category/Group/BranchId and taking "whichever row with this Key has the highest Id"
     // meant whichever branch's override was saved MOST RECENTLY silently became every branch's
     // return-window/dual-auth policy. A branch-scoped row (Setting.Scope=Branch, BranchId=branchId)
@@ -764,8 +1038,13 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
         r.DgrnNo, r.DamageReason?.ToString(), r.PhotoReference,
         r.GrossRefund, r.VatReversal, r.RestockingFeePct, r.RestockingFeeAmount, r.NetCashback,
         r.RefundMethod, r.RefundSplitJson, r.ExchangeOrderId, r.ExchangeOrder?.OrderNo,
-        r.ExchangeOrderId is not null && r.ExchangeOrder is not null ? Math.Round(r.ExchangeOrder.GrandTotal - EffectiveCashback(r), 2) : null,
-        r.Order?.BranchId, r.Order?.Branch?.NameEn, r.Order?.Cashier?.Name);
+        // The REAL exchange flow prices ExchangeLines at Create — that's the source of truth for the
+        // net-payable figure the moment it exists, even before Approve turns them into a real Order.
+        // Falls back to the legacy manual-link calc only when there are no ExchangeLines at all.
+        r.ExchangeLines.Count > 0 ? Math.Round(r.ExchangeLines.Sum(l => l.LineTotal) - EffectiveCashback(r), 2)
+            : r.ExchangeOrderId is not null && r.ExchangeOrder is not null ? Math.Round(r.ExchangeOrder.GrandTotal - EffectiveCashback(r), 2) : null,
+        r.Order?.BranchId, r.Order?.Branch?.NameEn, r.Order?.Cashier?.Name,
+        r.ExchangeLines.Select(ToExchangeLineDto).ToList(), r.IsNoReceipt);
 }
 
 [ApiController]

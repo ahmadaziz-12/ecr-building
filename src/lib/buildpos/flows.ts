@@ -237,7 +237,10 @@ export const flows: Record<string, Flow> = {
             name: "priceList",
             label: "Assign Price List",
             type: "select",
-            options: ["Retail", "Contractor A", "Contractor B", "Wholesale"],
+            // BRD §7 (CR-038): which of the product's list prices (set on each SKU's Pricing & Tax
+            // step) this customer is charged — independent of Customer Type above.
+            options: ["Retail", "Contractor", "Wholesale", "Project"],
+            default: "Retail",
           },
         ],
       },
@@ -345,6 +348,24 @@ export const flows: Record<string, Flow> = {
           { name: "cost", label: "Cost (ر.س)", type: "number", required: true },
           { name: "price", label: "Selling Price (ر.س)", type: "number", required: true },
           {
+            name: "contractorPrice",
+            label: "Contractor Price (ر.س)",
+            type: "number",
+            hint: "BRD §7: a distinct list price for Contractor-list customers — leave blank to charge them the Selling Price. Requires the Manage Price List permission to change.",
+          },
+          {
+            name: "wholesalePrice",
+            label: "Wholesale Price (ر.س)",
+            type: "number",
+            hint: "A distinct list price for Wholesale-list customers — leave blank to charge them the Selling Price.",
+          },
+          {
+            name: "projectPrice",
+            label: "Project Price (ر.س)",
+            type: "number",
+            hint: "A distinct list price for Project-list customers — leave blank to charge them the Selling Price.",
+          },
+          {
             name: "vat",
             label: "VAT Rate",
             type: "select",
@@ -430,6 +451,24 @@ export const flows: Record<string, Flow> = {
         fields: [
           { name: "cost", label: "Cost (ر.س)", type: "number", required: true },
           { name: "price", label: "Selling Price (ر.س)", type: "number", required: true },
+          {
+            name: "contractorPrice",
+            label: "Contractor Price (ر.س)",
+            type: "number",
+            hint: "BRD §7: a distinct list price for Contractor-list customers — leave blank to charge them the Selling Price. Requires the Manage Price List permission to change.",
+          },
+          {
+            name: "wholesalePrice",
+            label: "Wholesale Price (ر.س)",
+            type: "number",
+            hint: "A distinct list price for Wholesale-list customers — leave blank to charge them the Selling Price.",
+          },
+          {
+            name: "projectPrice",
+            label: "Project Price (ر.س)",
+            type: "number",
+            hint: "A distinct list price for Project-list customers — leave blank to charge them the Selling Price.",
+          },
           {
             name: "vat",
             label: "VAT Rate",
@@ -1881,58 +1920,10 @@ export const flows: Record<string, Flow> = {
   // not this generic flow — Trade Tier/Quantity/Coupon rules need structured, type-specific fields
   // a free-text Condition/Action pair can't drive.
 
-  "New Return": {
-    key: "new-return",
-    title: "New Return",
-    subtitle: "Process a customer return, exchange or damaged-goods claim",
-    icon: Undo2,
-    steps: [
-      {
-        name: "Source",
-        fields: [
-          {
-            name: "invoice",
-            label: "Order / Invoice #",
-            type: "text",
-            placeholder: "e.g. ORD-2026-0042",
-          },
-          {
-            name: "customer",
-            label: "Customer",
-            type: "text",
-            placeholder: "Leave blank for walk-in",
-          },
-          {
-            name: "type",
-            label: "Return Type",
-            type: "select",
-            options: ["Standard", "Surplus", "Damaged", "Exchange"],
-            required: true,
-          },
-          {
-            name: "reason",
-            label: "Reason",
-            type: "text",
-            placeholder: "e.g. Wrong Size, Broken Boxes",
-            required: true,
-          },
-        ],
-      },
-      {
-        name: "Items",
-        fields: [
-          {
-            name: "items",
-            label: "SKU · Qty · Refund Amount",
-            type: "tags",
-            placeholder: "PVC-PIPE-2IN x 4 @ 180, TILE-GRY-60X60 x 2 @ 92",
-            full: true,
-            required: true,
-          },
-        ],
-      },
-    ],
-  },
+  // "New Return" (BRD §3.2.2 no-receipt returns) is handled by the bespoke NoReceiptReturnDialog
+  // (see ModulePage.tsx), not this generic flow — this used to be a mock free-text "SKU · Qty ·
+  // Refund Amount" tags field with no real backing at all; a no-receipt return needs a real
+  // customer + product picker, not a string the server never parsed.
 
   "Approve Return": {
     key: "approve-return",

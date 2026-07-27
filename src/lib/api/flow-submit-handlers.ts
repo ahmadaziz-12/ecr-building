@@ -186,6 +186,9 @@ export function useFlowSubmitHandlers(): Record<
         brand: values.brand || null,
         costPrice: Number(values.cost || 0),
         sellingPrice: Number(values.price || 0),
+        contractorPrice: values.contractorPrice ? Number(values.contractorPrice) : null,
+        wholesalePrice: values.wholesalePrice ? Number(values.wholesalePrice) : null,
+        projectPrice: values.projectPrice ? Number(values.projectPrice) : null,
         vatRate,
         stockUom: values.stockUom || "Piece",
         // Display-label list, derived from the same conversions the cashier can actually sell in —

@@ -9,10 +9,13 @@ import { useCreateCustomer, useUpdateCustomer, type CustomerDto } from "@/lib/ap
 
 const TYPES = ["WalkIn", "Retail", "Contractor", "B2B"];
 const TYPE_LABELS: Record<string, string> = { WalkIn: "Walk-in", Retail: "Retail", Contractor: "Contractor", B2B: "B2B" };
+// BRD §7 (CR-038): which of the product's list prices this customer is charged — independent of
+// Type above (a Contractor-type customer isn't automatically Contractor-priced).
+const PRICE_LIST_TYPES = ["Retail", "Contractor", "Wholesale", "Project"];
 
 const EMPTY = {
   type: "Retail", nameEn: "", nameAr: "", phone: "", email: "", vatNo: "", creditLimit: "0",
-  city: "", district: "", address: "", projectName: "", creditTermDays: "",
+  city: "", district: "", address: "", projectName: "", creditTermDays: "", priceListType: "Retail",
 };
 
 export function CustomerFormDialog({ customer, open, onOpenChange }: { customer: CustomerDto | null; open: boolean; onOpenChange: (v: boolean) => void }) {
@@ -30,6 +33,7 @@ export function CustomerFormDialog({ customer, open, onOpenChange }: { customer:
         email: customer.email ?? "", vatNo: customer.vatNo ?? "", creditLimit: String(customer.creditLimit),
         city: customer.city ?? "", district: customer.district ?? "", address: customer.address ?? "",
         projectName: customer.projectName ?? "", creditTermDays: customer.creditTermDays ? String(customer.creditTermDays) : "",
+        priceListType: customer.priceListType ?? "Retail",
       });
     } else {
       setForm(EMPTY);
@@ -52,6 +56,7 @@ export function CustomerFormDialog({ customer, open, onOpenChange }: { customer:
       city: form.city || null, district: form.district || null, address: form.address || null,
       loyaltyEnrolled: customer?.loyaltyEnrolled ?? false,
       projectName: form.projectName || null, creditTermDays: form.creditTermDays ? Number(form.creditTermDays) : null,
+      priceListType: form.priceListType,
     };
     try {
       if (isEdit) {
@@ -100,6 +105,15 @@ export function CustomerFormDialog({ customer, open, onOpenChange }: { customer:
           <div>
             <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">VAT / CR Number</label>
             <Input value={form.vatNo} onChange={(e) => set("vatNo", e.target.value)} />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Price List</label>
+            <Select value={form.priceListType} onValueChange={(v) => set("priceListType", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PRICE_LIST_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
 
           {(form.type === "Contractor" || form.type === "B2B") && (

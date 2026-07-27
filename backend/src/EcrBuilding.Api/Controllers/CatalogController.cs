@@ -122,6 +122,11 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             return BadRequest(new { error = $"\"{request.Barcode}\" is not a valid EAN-13 barcode (checksum failed)." });
         }
 
+        if (!CanSetPriceLists() && (request.ContractorPrice is not null || request.WholesalePrice is not null || request.ProjectPrice is not null))
+        {
+            return StatusCode(403, new { error = "Setting a Contractor/Wholesale/Project price requires the Manage Price List & Users permission." });
+        }
+
         var product = new Product
         {
             Sku = request.Sku, Barcode = request.Barcode, NameEn = request.NameEn, NameAr = request.NameAr,
@@ -131,6 +136,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             Returnable = request.Returnable, ReorderLevel = request.ReorderLevel, ReorderQty = request.ReorderQty,
             ImageUrl = request.ImageUrl, IsCutToSize = request.IsCutToSize, CutToSizeUnit = request.CutToSizeUnit,
             SupplierId = request.SupplierId, BinLocation = request.BinLocation,
+            ContractorPrice = request.ContractorPrice, WholesalePrice = request.WholesalePrice, ProjectPrice = request.ProjectPrice,
         };
         product.UomConversions = BuildUomConversions(request.UomConversions, request.StockUom);
         product.Attributes = BuildAttributes(request.Attributes);
@@ -160,6 +166,14 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         {
             return BadRequest(new { error = $"\"{request.Barcode}\" is not a valid EAN-13 barcode (checksum failed)." });
         }
+        // BRD §7 (CR-039): editing Contractor/Wholesale/Project list prices is gated separately from
+        // the rest of the catalog form — a plain Inventory editor can still fix the SKU/name/stock
+        // fields on a row that already carries price-list overrides without being blocked.
+        if (!CanSetPriceLists() && (request.ContractorPrice != product.ContractorPrice
+            || request.WholesalePrice != product.WholesalePrice || request.ProjectPrice != product.ProjectPrice))
+        {
+            return StatusCode(403, new { error = "Setting a Contractor/Wholesale/Project price requires the Manage Price List & Users permission." });
+        }
 
         product.Sku = request.Sku; product.Barcode = request.Barcode; product.NameEn = request.NameEn; product.NameAr = request.NameAr;
         product.CategoryId = request.CategoryId; product.Brand = request.Brand; product.CostPrice = request.CostPrice;
@@ -168,6 +182,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         product.Returnable = request.Returnable; product.ReorderLevel = request.ReorderLevel; product.ReorderQty = request.ReorderQty;
         product.ImageUrl = request.ImageUrl; product.IsCutToSize = request.IsCutToSize; product.CutToSizeUnit = request.CutToSizeUnit;
         product.SupplierId = request.SupplierId; product.BinLocation = request.BinLocation;
+        product.ContractorPrice = request.ContractorPrice; product.WholesalePrice = request.WholesalePrice; product.ProjectPrice = request.ProjectPrice;
         // Replace-all, same pattern as RolePermissions in RolesController.Update — the request's list
         // is the complete intended state, not a delta.
         db.ProductUomConversions.RemoveRange(product.UomConversions);
@@ -194,6 +209,12 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         await audit.LogAsync("inventory", "PRODUCT_STATUS_CHANGED", product.Id.ToString(), newValue: request, cancellationToken: ct);
         return Ok(Map(product));
     }
+
+    // BRD §7 (CR-039): "restrict manual price changes based on user permissions" — reuses the
+    // existing Role.CanManagePriceListAndUsers ceiling (already issued as a JWT claim and already
+    // editable on the Roles admin page; it just had no consumer before this).
+    private bool CanSetPriceLists() =>
+        string.Equals(User.FindFirst("posCeiling:canManagePriceListAndUsers")?.Value, "True", StringComparison.OrdinalIgnoreCase);
 
     private static List<ProductAttribute> BuildAttributes(List<ProductAttributeDto>? attributes) =>
         (attributes ?? [])
@@ -228,7 +249,8 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
                 p.SellingPrice, p.VatRate, p.StockUom, JsonSerializer.Deserialize<string[]>(p.SellUomsJson) ?? [], p.Weight,
                 p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
                 branchLevels.Sum(s => s.OnHand), branchLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
-                attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit);
+                attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit,
+                p.ContractorPrice, p.WholesalePrice, p.ProjectPrice);
         }
 
         return new(
@@ -236,7 +258,8 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             p.SellingPrice, p.VatRate, p.StockUom, JsonSerializer.Deserialize<string[]>(p.SellUomsJson) ?? [], p.Weight,
             p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
             p.StockLevels.Sum(s => s.OnHand), p.StockLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
-            attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit);
+            attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit,
+            p.ContractorPrice, p.WholesalePrice, p.ProjectPrice);
     }
 }
 

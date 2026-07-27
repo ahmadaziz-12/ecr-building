@@ -4,9 +4,11 @@ public record CustomerDto(int Id, string NameEn, string? NameAr, string Type, st
     // Module 7 (BRD §4.3.2): SAR-spend tier progress + Gold's dedicated manager + Platinum's priority billing.
     decimal LoyaltyLifetimeSpend = 0, int? AccountManagerUserId = null, string? AccountManagerName = null, bool PriorityBilling = false,
     // Module 20 (BRD §4.3.4): birthday-bonus source + "points lapse next month" cashier alert.
-    DateTime? DateOfBirth = null, bool PointsExpiringSoon = false);
+    DateTime? DateOfBirth = null, bool PointsExpiringSoon = false,
+    // BRD §7 (CR-038): which Product price list this customer is charged — independent of Type.
+    string PriceListType = "Retail");
 public record UpsertCustomerRequest(string NameEn, string? NameAr, string Type, string? Phone, string? Email, string? VatNo, decimal CreditLimit, string? City, string? District, string? Address, bool LoyaltyEnrolled, string? ProjectName, int? CreditTermDays,
-    int? AccountManagerUserId = null, bool PriorityBilling = false, DateTime? DateOfBirth = null);
+    int? AccountManagerUserId = null, bool PriorityBilling = false, DateTime? DateOfBirth = null, string PriceListType = "Retail");
 public record CustomerStatementDto(int CustomerId, string CustomerName, decimal CreditLimit, decimal Outstanding, IReadOnlyList<OrderDto> Orders);
 
 // Mirrors EcrBuilding.Application.Procurement.SupplierLedgerLineDto's shape — same GL-reconstruction
@@ -55,7 +57,10 @@ public record OrderDto(
 // ManualDiscountPct (BRD §2.3/§6.2): a cashier-entered per-line discount %, separate from the
 // automatic contractor/loyalty-tier/quantity discount already applied to the line — subject to the
 // same discount-authorization ceiling as the order-level ManualDiscount below (OrdersController.Checkout).
-public record CartLineInput(int ProductId, decimal Qty, string? Uom = null, decimal? LengthM = null, decimal? WidthM = null, bool RequiresDelivery = false, decimal? HeightM = null, string? Notes = null, decimal? ManualDiscountPct = null);
+// ManualUnitPrice (BRD §7 CR-039): an absolute price override for this line — replaces the resolved
+// list price entirely (no further discount stacks on top), gated by Role.CanOverrideItemPrice or a
+// PriceOverride approval (OrdersController.Checkout), distinct from a discount.
+public record CartLineInput(int ProductId, decimal Qty, string? Uom = null, decimal? LengthM = null, decimal? WidthM = null, bool RequiresDelivery = false, decimal? HeightM = null, string? Notes = null, decimal? ManualDiscountPct = null, decimal? ManualUnitPrice = null);
 
 // BRD §3.5: captured once per checkout (not per line) — every delivery-flagged line in the cart ships
 // to this single address/date. ZoneId (optional): when set, the delivery fee auto-calculates from the
@@ -86,7 +91,10 @@ public record CreateOrderRequest(
     int? CreditOverrideApprovalRequestId = null,
     // BRD §3.5: required when any Lines entry has RequiresDelivery=true — the shared address/date/
     // driver-vehicle-preference for every delivery-flagged line in this sale.
-    DeliveryDetailsInput? Delivery = null);
+    DeliveryDetailsInput? Delivery = null,
+    // Required when any line's ManualUnitPrice needs authorization the cashier doesn't hold (BRD §7
+    // CR-039) — the id of an already-Approved ApprovalRequest (Type=PriceOverride).
+    int? PriceOverrideApprovalRequestId = null);
 
 public record CashierShiftDto(int Id, int TerminalId, string TerminalName, string CashierName, DateTime OpenedAt, DateTime? ClosedAt, decimal OpeningFloat, decimal CashSales, decimal CashIn, decimal CashOut, decimal ExpectedCash, decimal? CountedCash, decimal? Variance, string Status);
 public record OpenShiftRequest(int TerminalId, decimal OpeningFloat);
@@ -130,8 +138,9 @@ public record ApprovalRequestDto(
 public record CreateApprovalRequestInput(string Type, int BranchId, decimal Amount, string Reason, int? RelatedOrderId);
 
 // BranchId/BranchName null = applies company-wide.
-public record PricingRuleDto(int Id, string Name, string Type, string Scope, string Condition, string Action, int Priority, DateTime? ValidUntil, string Status, string? Code, string DiscountType, decimal Value, int? BranchId = null, string? BranchName = null, decimal? MinQuantity = null, string? Sku = null);
-public record UpsertPricingRuleRequest(string Name, string Type, string Scope, string Condition, string Action, int Priority, DateTime? ValidUntil, string? Code, string DiscountType, decimal Value, int? BranchId = null, decimal? MinQuantity = null, string? Sku = null);
+// ValidFrom (BRD §7 CR-040): a Promotional rule's start date — null = active immediately.
+public record PricingRuleDto(int Id, string Name, string Type, string Scope, string Condition, string Action, int Priority, DateTime? ValidUntil, string Status, string? Code, string DiscountType, decimal Value, int? BranchId = null, string? BranchName = null, decimal? MinQuantity = null, string? Sku = null, DateTime? ValidFrom = null);
+public record UpsertPricingRuleRequest(string Name, string Type, string Scope, string Condition, string Action, int Priority, DateTime? ValidUntil, string? Code, string DiscountType, decimal Value, int? BranchId = null, decimal? MinQuantity = null, string? Sku = null, DateTime? ValidFrom = null);
 public record ValidateCouponResponse(bool Valid, string? Code, string? Name, string DiscountType, decimal Value, string? Reason);
 
 public record ParkedLineDto(int ProductId, string Sku, string ProductName, decimal Qty, decimal UnitPrice);

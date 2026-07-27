@@ -22,6 +22,9 @@ export type ProductDto = {
   totalOnHand: number; totalAvailable: number;
   uomConversions: ProductUomConversionDto[]; isCutToSize: boolean; cutToSizeUnit: CutToSizeUnit;
   attributes: ProductAttributeDto[];
+  // BRD §7 (CR-038): distinct list prices for Contractor/Wholesale/Project — null = not configured,
+  // checkout falls back to sellingPrice (the Retail price) for that segment.
+  contractorPrice?: number | null; wholesalePrice?: number | null; projectPrice?: number | null;
 };
 
 export const useCategories = (enabled = true) => useQuery({ queryKey: ["catalog", "categories"], queryFn: () => apiGet<CategoryDto[]>("/api/catalog/categories"), enabled });
@@ -89,6 +92,7 @@ export type CreateProductRequest = {
   returnable: boolean; reorderLevel: number; reorderQty: number; imageUrl: string | null;
   uomConversions?: ProductUomConversionDto[]; isCutToSize?: boolean; cutToSizeUnit?: CutToSizeUnit;
   attributes?: ProductAttributeDto[];
+  contractorPrice?: number | null; wholesalePrice?: number | null; projectPrice?: number | null;
 };
 
 export function useCreateProduct() {

@@ -6,8 +6,10 @@ public enum OrderType { Retail = 0, Contractor = 1, Quotation = 2, Delivery = 3 
 public enum OrderStatus { Pending = 0, Completed = 1, Dispatched = 2, Delivered = 3, Returned = 4, Voided = 5 }
 public enum PaymentStatus { Unpaid = 0, Paid = 1, PartiallyPaid = 2, Refunded = 3, Cancelled = 4 }
 // AccountCredit never touches IPaymentGateway — it's an internal ledger operation against the
-// customer's B2B credit line (see OrdersController.Checkout), not a real payment rail.
-public enum PaymentMethod { Cash = 0, Mada = 1, ApplePay = 2, StcPay = 3, Transfer = 4, Loyalty = 5, AccountCredit = 6 }
+// customer's B2B credit line (see OrdersController.Checkout), not a real payment rail. ReturnCredit
+// is the same idea for an Exchange's replacement order (ReturnsController.Approve): the portion of
+// the new sale settled by the linked return's own cashback, never charged again.
+public enum PaymentMethod { Cash = 0, Mada = 1, ApplePay = 2, StcPay = 3, Transfer = 4, Loyalty = 5, AccountCredit = 6, ReturnCredit = 7 }
 public enum PaymentRecordStatus { Completed = 0, Pending = 1, Failed = 2 }
 
 public class Order : BaseEntity

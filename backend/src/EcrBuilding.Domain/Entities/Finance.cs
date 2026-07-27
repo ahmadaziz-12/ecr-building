@@ -122,10 +122,22 @@ public class Return : BaseEntity
     public string? RefundSplitJson { get; set; }
 
     // BRD §3.2.1 exchange workflow: the replacement sale this return nets against, when Type=Exchange.
+    // Populated at Approve time once ExchangeLines below are actually turned into a real Order (stock
+    // deducted, GL posted) — legacy manual-link path also still sets this at Create if a client passes
+    // an already-existing order id with no ExchangeLines.
     public int? ExchangeOrderId { get; set; }
     public Order? ExchangeOrder { get; set; }
 
+    // BRD §3.2.2 (no-receipt returns, CR "CanAuthorizeStandardReturnWithoutReceipt"): set when this
+    // Standard return was created without an original Order — the cashier entered product/qty
+    // directly. Refund is always StoreCredit against CustomerId in that case (there is no original
+    // payment method to refund to).
+    public bool IsNoReceipt { get; set; }
+
     public ICollection<ReturnLine> Lines { get; set; } = new List<ReturnLine>();
+    // BRD §3.2.1 exchange workflow: the replacement item(s) the customer picked, priced at creation
+    // time — turned into a real Order (stock deducted, GL posted) only at Approve.
+    public ICollection<ReturnExchangeLine> ExchangeLines { get; set; } = new List<ReturnExchangeLine>();
 }
 
 public class ReturnLine
@@ -146,4 +158,24 @@ public class ReturnLine
     public decimal UnitPricePaid { get; set; }
     public decimal VatRate { get; set; }
     public decimal Amount { get; set; }
+}
+
+// BRD §3.2.1 exchange workflow: the replacement item(s) selected alongside the returned goods —
+// priced at Create time (current SellingPrice × UOM factor, ex-VAT + the product's own VatRate; no
+// contractor/loyalty/promo pricing stacking — an exchange is a straightforward like-for-like swap,
+// not a full re-run of checkout's pricing engine). Turned into real OrderLines on a new Order only
+// once the return is Approved (stock deducted, GL posted, net difference settled at that point).
+public class ReturnExchangeLine
+{
+    public int Id { get; set; }
+    public int ReturnId { get; set; }
+    public Return? Return { get; set; }
+    public int ProductId { get; set; }
+    public Product? Product { get; set; }
+    public decimal Qty { get; set; }
+    public string Uom { get; set; } = string.Empty;
+    public decimal StockQty { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal VatRate { get; set; }
+    public decimal LineTotal { get; set; }
 }

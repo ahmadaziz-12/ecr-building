@@ -39,6 +39,7 @@ import {
   ReceiptText,
   Truck,
   StickyNote,
+  PenLine,
   Play,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -130,6 +131,10 @@ type CartLine = {
   // the order-level manual discount (see discountNeedsApproval below) — doesn't stack with the
   // auto contractor/tier/quantity discount, mirrors OrdersController.Checkout's "larger of" rule.
   manualDiscountPct?: number;
+  // BRD §7 (CR-039): an absolute per-line price override — replaces `price` entirely (no discount
+  // stacks on top), gated by a DIFFERENT authorization ceiling (posCeilings.canOverrideItemPrice /
+  // an ApprovalType.PriceOverride request), distinct from a discount.
+  manualUnitPrice?: number;
 };
 type CustomFee = { label: string; amount: number };
 // Module 8 (BRD §5.2): a bundle in the cart — kept as one grouped entry (the server expands it into
@@ -152,6 +157,8 @@ export function PosCheckout() {
   const [cart, setCart] = useState<CartLine[]>([]);
   // sku of the cart line whose note input is currently expanded — null collapses all of them.
   const [notesEditingSku, setNotesEditingSku] = useState<string | null>(null);
+  // sku of the cart line whose price-override input is currently expanded — null collapses all.
+  const [priceEditingSku, setPriceEditingSku] = useState<string | null>(null);
   const [bundleCart, setBundleCart] = useState<BundleCartEntry[]>([]);
   // Module 11: optional B2B PO reference + project code, carried to the tax invoice.
   const [poReference, setPoReference] = useState("");
@@ -188,6 +195,10 @@ export function PosCheckout() {
   // Same pattern as the discount ceiling above, for BRD §4.2 B2B credit-limit enforcement.
   const [creditApprovalId, setCreditApprovalId] = useState<number | null>(null);
   const [creditApprovalDialogOpen, setCreditApprovalDialogOpen] = useState(false);
+  // BRD §7 (CR-039): same pattern again for a per-line manual price override — distinct from a
+  // discount (Role.CanOverrideItemPrice / ApprovalType.PriceOverride), gated separately.
+  const [priceOverrideApprovalId, setPriceOverrideApprovalId] = useState<number | null>(null);
+  const [priceOverrideApprovalDialogOpen, setPriceOverrideApprovalDialogOpen] = useState(false);
 
   const [feeLabel, setFeeLabel] = useState("");
   const [feeAmount, setFeeAmount] = useState("");
@@ -305,16 +316,44 @@ export function PosCheckout() {
   // branch/terminal mismatch at checkout. No terminal in this branch → checkout proceeds untilled.
   const terminal = terminals?.find((t) => t.branchId === effectiveBranchId);
 
+  // BRD §7 (CR-038): resolve the CURRENT customer's assigned price list against each product's own
+  // Contractor/Wholesale/Project override — null on the product means "not configured," fall back
+  // to sellingPrice (Retail), mirroring OrdersController.Checkout's resolution exactly so the cart
+  // total the cashier sees matches what checkout will actually charge.
+  const listPriceFor = (p: { sellingPrice: number; contractorPrice?: number | null; wholesalePrice?: number | null; projectPrice?: number | null }) => {
+    switch (customer?.priceListType) {
+      case "Contractor": return p.contractorPrice ?? p.sellingPrice;
+      case "Wholesale": return p.wholesalePrice ?? p.sellingPrice;
+      case "Project": return p.projectPrice ?? p.sellingPrice;
+      default: return p.sellingPrice;
+    }
+  };
   const products = useMemo(
     () =>
       (liveProducts ?? []).map((p) => ({
         productId: p.id, sku: p.sku, barcode: p.barcode, name: p.nameEn, cat: p.categoryName, categoryId: p.categoryId, uom: p.stockUom,
-        price: p.sellingPrice, vatRate: p.vatRate, stock: p.totalAvailable, tone: toneForStock(p.totalAvailable),
+        price: listPriceFor(p), vatRate: p.vatRate, stock: p.totalAvailable, tone: toneForStock(p.totalAvailable),
         conversions: p.uomConversions ?? [], isCutToSize: p.isCutToSize ?? false, cutToSizeUnit: p.cutToSizeUnit ?? "Area",
         weight: p.weight, imageUrl: p.imageUrl,
+        // Carried through so lineDiscountPct can tell whether THIS line actually got a distinct list
+        // price (and should suppress the legacy contractor trade % — see contractorDiscountPct below).
+        hasDistinctListPrice: listPriceFor(p) !== p.sellingPrice,
       })),
-    [liveProducts],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [liveProducts, customer?.priceListType],
   );
+
+  // A customer can be attached (or changed) AFTER items are already in the cart — re-sync existing
+  // lines' price to the newly-resolved list price so the cart total never drifts from what checkout
+  // will actually charge (which always resolves fresh from the customer on file at that moment).
+  useEffect(() => {
+    setCart((c) => c.map((l) => {
+      const prod = products.find((p) => p.sku === l.sku);
+      if (!prod || prod.price === l.basePrice) return l;
+      return { ...l, basePrice: prod.price, price: unitPriceFor(prod.price, l.factorToStock) };
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer?.priceListType]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -535,6 +574,13 @@ export function PosCheckout() {
     setCart((c) => c.map((l) => (l.sku === sku ? { ...l, manualDiscountPct: value } : l)));
   }
 
+  // BRD §7 (CR-039): an absolute per-line price override — a DIFFERENT authorization ceiling from
+  // the discount above (posCeilings.canOverrideItemPrice / an ApprovalType.PriceOverride request).
+  function setLineManualPrice(sku: string, raw: string) {
+    const value = raw === "" ? undefined : Math.max(0, Number(raw) || 0);
+    setCart((c) => c.map((l) => (l.sku === sku ? { ...l, manualUnitPrice: value } : l)));
+  }
+
   // BRD §3.5: toggling a line's delivery flag never removes it from the cart — the customer still
   // pays for it here, only the fulfillment method changes (counter pickup vs. shipped).
   function toggleDelivery(sku: string) {
@@ -740,6 +786,7 @@ export function PosCheckout() {
     return (pricingRules ?? []).filter((r) =>
       r.status === "Active"
       && (r.branchId == null || r.branchId === effectiveBranchId)
+      && (r.validFrom == null || new Date(r.validFrom).getTime() <= now)
       && (r.validUntil == null || new Date(r.validUntil).getTime() >= now));
   }, [pricingRules, effectiveBranchId]);
 
@@ -772,7 +819,25 @@ export function PosCheckout() {
       .filter((r) => (!r.sku || r.sku.toUpperCase() === l.sku.toUpperCase()) && stockQty >= r.minQuantity!)
       .reduce((max, r) => Math.max(max, r.value), 0);
   };
-  const lineDiscountPct = (l: CartLine) => Math.max(contractorDiscountPct, quantityPctFor(l), l.manualDiscountPct ?? 0);
+  // BRD §7 (CR-040): Promotional rules auto-apply within their date window — no coupon code needed.
+  const promoRules = useMemo(() => activePricingRules.filter((r) => r.type === "Promotional"), [activePricingRules]);
+  const promoPctFor = (l: CartLine) => promoRules
+    .filter((r) => !r.sku || r.sku.toUpperCase() === l.sku.toUpperCase())
+    .reduce((max, r) => Math.max(max, r.value), 0);
+  // BRD §7 (CR-038): once a line actually got a distinct Contractor/Wholesale/Project list price
+  // (see products/listPriceFor above), the legacy automatic contractor trade % would double-dip on
+  // top of an already-negotiated price — suppressed in that case, but loyalty-tier % still applies
+  // (mirrors OrdersController.Checkout's effectiveDiscountPct exactly).
+  const hasDistinctListPriceFor = (l: CartLine) => products.find((p) => p.sku === l.sku)?.hasDistinctListPrice ?? false;
+  const lineDiscountPct = (l: CartLine) => {
+    // A manual price override (BRD §7 CR-039) replaces the price entirely — no discount stacks.
+    if (l.manualUnitPrice != null) return 0;
+    const baseDiscountPct = hasDistinctListPriceFor(l) ? loyaltyTierPct : contractorDiscountPct;
+    return Math.max(Math.max(baseDiscountPct, quantityPctFor(l)), Math.max(promoPctFor(l), l.manualDiscountPct ?? 0));
+  };
+  // The actual per-unit price charged for this line — the manual override when set, else the
+  // resolved list price (see products/listPriceFor above).
+  const lineUnitPrice = (l: CartLine) => l.manualUnitPrice ?? l.price;
 
   // BRD §4.3.3: the points balance + SAR equivalent must be visible at checkout, not just inside
   // the Charge dialog — a cashier deciding whether to offer redemption needs it up front.
@@ -784,11 +849,11 @@ export function PosCheckout() {
   const bundleTaxable = bundleCart.reduce((s, b) => s + b.bundlePrice * b.qty, 0);
   const bundleSavings = bundleCart.reduce((s, b) => s + Math.max(0, b.individualTotal - b.bundlePrice) * b.qty, 0);
 
-  const subtotal = cart.reduce((s, l) => s + l.price * l.qty, 0) + bundleCart.reduce((s, b) => s + b.individualTotal * b.qty, 0);
+  const subtotal = cart.reduce((s, l) => s + lineUnitPrice(l) * l.qty, 0) + bundleCart.reduce((s, b) => s + b.individualTotal * b.qty, 0);
   // Total kg across the cart — matters for bundle/pallet items (rebar, cement) where the physical
   // load size is what the yard crew and delivery truck actually care about, not just the SAR total.
   const totalCartWeight = cart.reduce((s, l) => s + l.weight * toStockQty(l.qty, l.factorToStock), 0);
-  const lineTotalsSum = cart.reduce((s, l) => s + l.price * l.qty * (1 - lineDiscountPct(l) / 100), 0) + bundleTaxable;
+  const lineTotalsSum = cart.reduce((s, l) => s + lineUnitPrice(l) * l.qty * (1 - lineDiscountPct(l) / 100), 0) + bundleTaxable;
   const contractorDiscount = subtotal - lineTotalsSum;
   // True whenever at least one line's discount came entirely from a Quantity rule rather than the
   // customer-level contractor/tier rate — drives which label the summary below shows.
@@ -828,7 +893,22 @@ export function PosCheckout() {
     setDiscountApprovalId(null);
   }, [discountType, discountValue]);
 
-  const vat = cart.reduce((s, l) => s + l.price * l.qty * (1 - lineDiscountPct(l) / 100) * (1 - discountRatio) * (l.vatRate / 100), 0)
+  // BRD §7 (CR-039): a per-line manual price override is a DIFFERENT authorization from a discount —
+  // gated by posCeilings.canOverrideItemPrice, mirrors OrdersController.Checkout's own gate exactly.
+  const canOverrideItemPrice = user?.posCeilings.canOverrideItemPrice ?? false;
+  const hasPriceOverride = cart.some((l) => l.manualUnitPrice != null);
+  const priceOverrideNeedsApproval = hasPriceOverride && !canOverrideItemPrice;
+  const priceOverrideApprovalRequested = priceOverrideNeedsApproval && priceOverrideApprovalId !== null;
+
+  // A previously-granted approval only covers the override(s) it was requested for — clear it once
+  // any line's override value changes, same rule as the discount approval above.
+  const priceOverrideSignature = cart.map((l) => `${l.sku}:${l.manualUnitPrice ?? ""}`).join("|");
+  useEffect(() => {
+    setPriceOverrideApprovalId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceOverrideSignature]);
+
+  const vat = cart.reduce((s, l) => s + lineUnitPrice(l) * l.qty * (1 - lineDiscountPct(l) / 100) * (1 - discountRatio) * (l.vatRate / 100), 0)
     + bundleCart.reduce((s, b) => s + b.vatPerUnit * b.qty * (1 - discountRatio), 0);
   // Module 7 (BRD §4.3.2): Silver+ loyalty customers get delivery fees waived on orders over SAR 500
   // — must mirror the server's waiver exactly or the payment total won't match at checkout.
@@ -920,10 +1000,12 @@ export function PosCheckout() {
             widthM: l.cutToSizeUnit !== "Length" ? l.widthM : undefined,
             heightM: l.cutToSizeUnit === "Volume" ? l.heightM : undefined,
             requiresDelivery: l.requiresDelivery, notes: l.notes?.trim() || null, manualDiscountPct: l.manualDiscountPct ?? null,
+            manualUnitPrice: l.manualUnitPrice ?? null,
           }
         : {
             productId: l.productId, qty: l.qty, uom: l.uom, requiresDelivery: l.requiresDelivery,
             notes: l.notes?.trim() || null, manualDiscountPct: l.manualDiscountPct ?? null,
+            manualUnitPrice: l.manualUnitPrice ?? null,
           }),
       payments,
       couponCode: appliedCoupon?.code ?? null,
@@ -934,6 +1016,7 @@ export function PosCheckout() {
       projectCode: orderProjectCode.trim() || null,
       discountApprovalRequestId: discountNeedsApproval ? discountApprovalId : null,
       creditOverrideApprovalRequestId: creditNeedsApproval ? creditApprovalId : null,
+      priceOverrideApprovalRequestId: priceOverrideNeedsApproval ? priceOverrideApprovalId : null,
       // Module 10: every checkout carries an idempotency key so an offline replay (or a retry after
       // a dropped response) can never double-sell.
       clientRequestId: newClientRequestId(),
@@ -1650,6 +1733,16 @@ export function PosCheckout() {
                     <StickyNote className="h-3.5 w-3.5" />
                   </button>
                   <button
+                    onClick={() => setPriceEditingSku((cur) => (cur === l.sku ? null : l.sku))}
+                    title="Override this item's price"
+                    aria-pressed={priceEditingSku === l.sku}
+                    className={`grid h-7 w-7 place-items-center rounded-md transition ${
+                      l.manualUnitPrice != null ? "bg-brand/10 text-brand" : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
+                    }`}
+                  >
+                    <PenLine className="h-3.5 w-3.5" />
+                  </button>
+                  <button
                     onClick={() => toggleDelivery(l.sku)}
                     title="Deliver this line instead of counter pickup"
                     aria-pressed={Boolean(l.requiresDelivery)}
@@ -1679,6 +1772,22 @@ export function PosCheckout() {
                   onBlur={() => { if (!l.notes) setNotesEditingSku(null); }}
                   className="mt-1.5 w-full rounded-md border border-black/10 bg-white px-2 py-1 text-xs outline-none focus:border-brand"
                 />
+              )}
+              {/* BRD §7 (CR-039): per-line price override — an absolute price, not a discount,
+                  gated by posCeilings.canOverrideItemPrice / a PriceOverride approval. */}
+              {(priceEditingSku === l.sku || l.manualUnitPrice != null) && (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <input
+                    type="number" min="0" step="0.01" value={l.manualUnitPrice ?? ""}
+                    placeholder={`Override price (list ${money(l.price)})`} aria-label={`${l.sku} price override`}
+                    onChange={(e) => setLineManualPrice(l.sku, e.target.value)}
+                    onBlur={() => { if (l.manualUnitPrice == null) setPriceEditingSku(null); }}
+                    className="w-full rounded-md border border-black/10 bg-white px-2 py-1 text-xs outline-none focus:border-brand"
+                  />
+                  {!canOverrideItemPrice && l.manualUnitPrice != null && (
+                    <span className="shrink-0 text-[10px] font-medium text-warning">needs approval</span>
+                  )}
+                </div>
               )}
               {l.isCutToSize ? (
                 // BRD §2.3 items 5-6: cut-to-size lines take dimension entry instead of a plain qty —
@@ -1723,7 +1832,12 @@ export function PosCheckout() {
                       onChange={(e) => setLineDiscountPct(l.sku, e.target.value)}
                       className="h-7 w-12 rounded-md border border-black/10 bg-white px-1 text-center text-xs outline-none focus:border-brand"
                     />
-                    {lineDiscountPct(l) > 0 ? (
+                    {l.manualUnitPrice != null ? (
+                      <div className="text-right">
+                        <p className="font-mono text-[10px] text-muted-foreground line-through">{money(l.price * l.qty)}</p>
+                        <p className="font-mono text-sm font-semibold text-brand">{money(l.manualUnitPrice * l.qty)}</p>
+                      </div>
+                    ) : lineDiscountPct(l) > 0 ? (
                       <div className="text-right">
                         <p className="font-mono text-[10px] text-muted-foreground line-through">{money(l.price * l.qty)}</p>
                         <p className="font-mono text-sm font-semibold text-foreground">{money(l.price * l.qty * (1 - lineDiscountPct(l) / 100))}</p>
@@ -1777,7 +1891,12 @@ export function PosCheckout() {
                       className="h-7 w-12 rounded-md border border-black/10 bg-white px-1 text-center text-xs outline-none focus:border-brand"
                     />
                   </div>
-                  {lineDiscountPct(l) > 0 ? (
+                  {l.manualUnitPrice != null ? (
+                    <div className="text-right">
+                      <p className="font-mono text-[10px] text-muted-foreground line-through">{money(l.price * l.qty)}</p>
+                      <p className="font-mono text-sm font-semibold text-brand">{money(l.manualUnitPrice * l.qty)}</p>
+                    </div>
+                  ) : lineDiscountPct(l) > 0 ? (
                     <div className="text-right">
                       <p className="font-mono text-[10px] text-muted-foreground line-through">{money(l.price * l.qty)}</p>
                       <p className="font-mono text-sm font-semibold text-foreground">{money(l.price * l.qty * (1 - lineDiscountPct(l) / 100))}</p>
@@ -2001,6 +2120,24 @@ export function PosCheckout() {
             </div>
           )}
 
+          {priceOverrideNeedsApproval && (
+            <div className="flex items-center justify-between gap-2 rounded-md bg-warning/10 px-2.5 py-1.5 text-warning">
+              <span>
+                {priceOverrideApprovalRequested
+                  ? `Approval requested (#${priceOverrideApprovalId}) — ask a supervisor, then Charge again.`
+                  : "Overriding an item's price needs supervisor approval."}
+              </span>
+              {!priceOverrideApprovalRequested && (
+                <button
+                  onClick={() => setPriceOverrideApprovalDialogOpen(true)}
+                  className="shrink-0 rounded-md border border-current px-2 py-0.5 text-[11px] font-medium hover:opacity-80"
+                >
+                  Request Approval
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-1.5">
             <input
               value={feeLabel}
@@ -2122,6 +2259,15 @@ export function PosCheckout() {
         defaultAmount={total ? total.toFixed(2) : ""}
         defaultReason={customer ? `${customer.nameEn}'s order would exceed their ${money(customer.creditLimit)} credit limit` : ""}
         onCreated={(approval) => setCreditApprovalId(approval.id)}
+      />
+      <RequestApprovalDialog
+        open={priceOverrideApprovalDialogOpen}
+        onOpenChange={setPriceOverrideApprovalDialogOpen}
+        branchId={effectiveBranchId ?? null}
+        defaultType="PriceOverride"
+        defaultAmount={cart.filter((l) => l.manualUnitPrice != null).reduce((s, l) => s + (l.manualUnitPrice ?? 0) * l.qty, 0).toFixed(2)}
+        defaultReason={`Price override on ${cart.filter((l) => l.manualUnitPrice != null).map((l) => l.sku).join(", ")}`}
+        onCreated={(approval) => setPriceOverrideApprovalId(approval.id)}
       />
 
       {/* Module 15 (BRD §10.2): idle auto-lock overlay — the register stays exactly as it was; the

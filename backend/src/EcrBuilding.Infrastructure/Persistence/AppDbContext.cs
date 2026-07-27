@@ -95,6 +95,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<TaxCode> TaxCodes => Set<TaxCode>();
     public DbSet<Return> Returns => Set<Return>();
     public DbSet<ReturnLine> ReturnLines => Set<ReturnLine>();
+    public DbSet<ReturnExchangeLine> ReturnExchangeLines => Set<ReturnExchangeLine>();
     public DbSet<LoyaltyTransaction> LoyaltyTransactions => Set<LoyaltyTransaction>();
 
     public DbSet<ZatcaIdentity> ZatcaIdentities => Set<ZatcaIdentity>();

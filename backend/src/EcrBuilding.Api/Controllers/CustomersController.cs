@@ -128,7 +128,7 @@ public class CustomersController(AppDbContext db, IAuditService audit, IGlPostin
             City = request.City, District = request.District, Address = request.Address, LoyaltyEnrolled = request.LoyaltyEnrolled,
             ProjectName = request.ProjectName, CreditTermDays = request.CreditTermDays,
             AccountManagerUserId = request.AccountManagerUserId, PriorityBilling = request.PriorityBilling,
-            DateOfBirth = request.DateOfBirth,
+            DateOfBirth = request.DateOfBirth, PriceListType = Enum.Parse<PriceListType>(request.PriceListType),
         };
         db.Customers.Add(customer);
         await db.SaveChangesAsync(ct);
@@ -149,7 +149,7 @@ public class CustomersController(AppDbContext db, IAuditService audit, IGlPostin
         customer.City = request.City; customer.District = request.District; customer.Address = request.Address;
         customer.LoyaltyEnrolled = request.LoyaltyEnrolled; customer.ProjectName = request.ProjectName; customer.CreditTermDays = request.CreditTermDays;
         customer.AccountManagerUserId = request.AccountManagerUserId; customer.PriorityBilling = request.PriorityBilling;
-        customer.DateOfBirth = request.DateOfBirth;
+        customer.DateOfBirth = request.DateOfBirth; customer.PriceListType = Enum.Parse<PriceListType>(request.PriceListType);
 
         await db.SaveChangesAsync(ct);
         await audit.LogAsync("orders", "CUSTOMER_UPDATED", id.ToString(), newValue: request, cancellationToken: ct);
@@ -176,5 +176,5 @@ public class CustomersController(AppDbContext db, IAuditService audit, IGlPostin
         c.City, c.District, c.Address, c.LoyaltyEnrolled, c.LoyaltyPoints, c.LoyaltyLifetimePoints, c.LoyaltyTier.ToString(),
         c.Status.ToString(), c.LastPurchaseAt, c.ProjectName, c.CreditTermDays, c.CreatedAt,
         c.LoyaltyLifetimeSpend, c.AccountManagerUserId, c.AccountManager?.Name, c.PriorityBilling,
-        c.DateOfBirth, LoyaltyRules.PointsExpiringSoon(c.LastPurchaseAt, DateTime.UtcNow, expiryMonths));
+        c.DateOfBirth, LoyaltyRules.PointsExpiringSoon(c.LastPurchaseAt, DateTime.UtcNow, expiryMonths), c.PriceListType.ToString());
 }

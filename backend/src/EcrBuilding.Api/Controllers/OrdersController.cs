@@ -443,6 +443,26 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             }
         }
 
+        // BRD §7 (CR-039): an absolute per-line price override is a distinct authorization from a
+        // discount — gated by Role.CanOverrideItemPrice (already issued as the posCeiling:canOverrideItemPrice
+        // claim, previously unconsumed anywhere) or a PriceOverride approval, checked up front like
+        // every other "can this checkout even proceed" gate above.
+        if (request.Lines.Any(l => l.ManualUnitPrice is not null))
+        {
+            var canOverridePrice = string.Equals(User.FindFirst("posCeiling:canOverrideItemPrice")?.Value, "True", StringComparison.OrdinalIgnoreCase);
+            if (!canOverridePrice)
+            {
+                var hasPriceApproval = request.PriceOverrideApprovalRequestId is int priceApprovalId && await db.ApprovalRequests.AnyAsync(a =>
+                    a.Id == priceApprovalId && a.Type == ApprovalType.PriceOverride && a.Status == ApprovalStatus.Approved
+                    && a.BranchId == request.BranchId, ct);
+
+                if (!hasPriceApproval)
+                {
+                    return BadRequest(new { error = "Overriding an item's price requires supervisor approval. Request approval before checkout." });
+                }
+            }
+        }
+
         // BRD §5.1/§6.2: Trade Tier and Quantity pricing rules configured on the Finance > Pricing
         // page (PricingRulesController) actually drive checkout math here — not just decorative rows
         // in that grid. Branch-scoped rules win over company-wide ones of the same type; among ties,
@@ -450,6 +470,7 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         var activePricingRules = await db.PricingRules
             .Where(r => r.Status == PricingRuleStatus.Active
                 && (r.BranchId == null || r.BranchId == request.BranchId)
+                && (r.ValidFrom == null || r.ValidFrom <= DateTime.UtcNow)
                 && (r.ValidUntil == null || r.ValidUntil >= DateTime.UtcNow))
             .ToListAsync(ct);
 
@@ -469,6 +490,9 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         // BRD §6.2 Quantity Discount (Tiered): auto-applied per line once its quantity reaches the
         // rule's threshold — Sku null means the rule applies to any product.
         var quantityRules = activePricingRules.Where(r => r.Type == "Quantity" && r.MinQuantity is not null).ToList();
+        // BRD §7 (CR-040): Promotional rules auto-apply within their ValidFrom/ValidUntil window —
+        // no coupon code needed, unlike Type="Coupon". Sku null means "any product."
+        var promoRules = activePricingRules.Where(r => r.Type == "Promotional").ToList();
         var order = new Order
         {
             OrderNo = $"ORD-{DateTime.UtcNow:yyyy}-{await db.Orders.CountAsync(ct) + 1:D4}",
@@ -602,9 +626,35 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
 
             if (enteredQty <= 0) return BadRequest(new { error = $"Quantity for {product.Sku} must be positive." });
             var stockQty = UomMath.ToStockQty(enteredQty, factor);
+
+            // BRD §7 (CR-038): resolve the list price for the customer's assigned price list — a
+            // genuinely distinct price per segment, not a discount off SellingPrice. Null on Product
+            // means "no override configured for this SKU," so it falls back to SellingPrice (Retail).
+            var listPrice = product.SellingPrice;
+            var listPriceApplied = false;
+            if (customer is not null)
+            {
+                var segmentPrice = customer.PriceListType switch
+                {
+                    PriceListType.Contractor => product.ContractorPrice,
+                    PriceListType.Wholesale => product.WholesalePrice,
+                    PriceListType.Project => product.ProjectPrice,
+                    _ => null,
+                };
+                if (segmentPrice is not null)
+                {
+                    listPrice = segmentPrice.Value;
+                    listPriceApplied = true;
+                }
+            }
+
+            // BRD §7 (CR-039): an absolute manual price override (gated above) replaces the resolved
+            // list price entirely — no discount stacks on top of a price a manager already typed in.
+            if (line.ManualUnitPrice is <= 0) return BadRequest(new { error = $"Manual price override for {product.Sku} must be positive." });
+            var manualPriceOverride = line.ManualUnitPrice is not null;
             // Bundle constituents carry their proportional share of the bundle price (BRD §5.2) —
-            // never re-priced from SellingPrice, or the bundle discount would evaporate.
-            var unitPrice = priced.UnitPriceOverride ?? product.SellingPrice * factor;
+            // never re-priced from SellingPrice/list price, or the bundle discount would evaporate.
+            var unitPrice = manualPriceOverride ? line.ManualUnitPrice!.Value : priced.UnitPriceOverride ?? listPrice * factor;
 
             // Atomic conditional decrement, not check-then-write: the WHERE clause is re-evaluated
             // against whatever is currently committed at UPDATE time, not a stale value read
@@ -639,11 +689,23 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             var quantityPct = quantityRules
                 .Where(r => (r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase)) && stockQty >= r.MinQuantity)
                 .Select(r => r.Value).DefaultIfEmpty(0m).Max();
+            // BRD §7 (CR-040): Promotional rules stack into the same "larger of" group as everything
+            // else below — a time-boxed promo doesn't add on top of an already-larger discount.
+            var promoPct = promoRules
+                .Where(r => r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase))
+                .Select(r => r.Value).DefaultIfEmpty(0m).Max();
             // BRD §2.3/§6.2: a cashier-entered per-line discount doesn't stack with the auto contractor/
             // tier/quantity discount either — same "larger of" rule as those three, gated above like the
             // order-level ManualDiscount. Bundle constituents stay exempt (see comment above).
             var manualLinePct = line.ManualDiscountPct ?? 0m;
-            var lineDiscountPct = priced.BundleId is null ? Math.Max(Math.Max(discountPct, quantityPct), manualLinePct) : 0m;
+            // BRD §7 (CR-038): once a real Contractor list price was actually used for this line, the
+            // legacy automatic contractor trade % would double-dip on top of an already-negotiated
+            // price — suppressed in that case, but the customer's own loyalty-tier % still applies
+            // (that's independent of which price list the line was charged from).
+            var effectiveDiscountPct = listPriceApplied ? tierDiscountPct : discountPct;
+            var lineDiscountPct = priced.BundleId is null && !manualPriceOverride
+                ? Math.Max(Math.Max(Math.Max(effectiveDiscountPct, quantityPct), promoPct), manualLinePct)
+                : 0m;
             var lineTotal = Math.Round(enteredQty * unitPrice * (1 - lineDiscountPct / 100), 2);
             order.Lines.Add(new OrderLine
             {

@@ -195,7 +195,7 @@ public class PricingRulesController(AppDbContext db, IAuditService audit, IPermi
         var rule = new PricingRule
         {
             Name = request.Name, Type = request.Type, BranchId = request.BranchId, Scope = request.Scope, Condition = request.Condition,
-            Action = request.Action, Priority = request.Priority, ValidUntil = request.ValidUntil,
+            Action = request.Action, Priority = request.Priority, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil,
             Code = request.Code?.ToUpperInvariant(), DiscountType = Enum.Parse<RuleDiscountType>(request.DiscountType), Value = request.Value,
             MinQuantity = request.MinQuantity, Sku = request.Sku?.ToUpperInvariant(),
             // Every rule created through the UI needs a manager sign-off before it can discount a
@@ -253,7 +253,8 @@ public class PricingRulesController(AppDbContext db, IAuditService audit, IPermi
 
         var before = new { rule.Name, rule.Scope, rule.Condition, rule.Action, rule.Value, rule.Status };
         rule.Name = request.Name; rule.Type = request.Type; rule.BranchId = request.BranchId; rule.Scope = request.Scope;
-        rule.Condition = request.Condition; rule.Action = request.Action; rule.Priority = request.Priority; rule.ValidUntil = request.ValidUntil;
+        rule.Condition = request.Condition; rule.Action = request.Action; rule.Priority = request.Priority;
+        rule.ValidFrom = request.ValidFrom; rule.ValidUntil = request.ValidUntil;
         rule.Code = request.Code?.ToUpperInvariant(); rule.DiscountType = Enum.Parse<RuleDiscountType>(request.DiscountType); rule.Value = request.Value;
         rule.MinQuantity = request.MinQuantity; rule.Sku = request.Sku?.ToUpperInvariant();
         // Editing a live rule's terms (discount %, threshold, code…) re-opens the same manager
@@ -284,7 +285,7 @@ public class PricingRulesController(AppDbContext db, IAuditService audit, IPermi
 
     private static PricingRuleDto Map(PricingRule r) => new(
         r.Id, r.Name, r.Type, r.Scope, r.Condition, r.Action, r.Priority, r.ValidUntil, r.Status.ToString(), r.Code, r.DiscountType.ToString(), r.Value,
-        r.BranchId, r.Branch?.NameEn, r.MinQuantity, r.Sku);
+        r.BranchId, r.Branch?.NameEn, r.MinQuantity, r.Sku, r.ValidFrom);
 }
 
 // Separate controller (no Finance-module gate) — any authenticated POS role needs to redeem a

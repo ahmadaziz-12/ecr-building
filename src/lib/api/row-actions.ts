@@ -62,6 +62,7 @@ import {
   useTaxCodes,
   useUpdateExpenseStatus,
   useUpdateTaxCode,
+  type ReturnDto,
 } from "./finance";
 import {
   usePricingRules,
@@ -153,6 +154,10 @@ export function useRowActions(
   ) => void,
   openKioskPairing?: (terminalId: number) => void,
   openPricingRuleEditor?: (rule: PricingRuleDto) => void,
+  // BRD §3.2.1 exchange workflow: Exchange-type returns need a real payment step at approval (the
+  // net difference between the return's credit and the replacement item(s)), not the generic
+  // text-field "Approve Return" flow every other return type uses.
+  openApproveExchange?: (ret: ReturnDto) => void,
 ): (id: number | undefined, row: (string | number)[], statusText: string) => RowAction[] {
   const navigate = useNavigate();
 
@@ -371,6 +376,9 @@ export function useRowActions(
                   returnable: product.returnable ? "on" : "",
                   cost: String(product.costPrice),
                   price: String(product.sellingPrice),
+                  contractorPrice: product.contractorPrice != null ? String(product.contractorPrice) : "",
+                  wholesalePrice: product.wholesalePrice != null ? String(product.wholesalePrice) : "",
+                  projectPrice: product.projectPrice != null ? String(product.projectPrice) : "",
                   vat:
                     product.vatRate === 0
                       ? "0% (Export)"
@@ -404,6 +412,9 @@ export function useRowActions(
                       brand: values.brand || null,
                       costPrice: Number(values.cost || 0),
                       sellingPrice: Number(values.price || 0),
+                      contractorPrice: values.contractorPrice ? Number(values.contractorPrice) : null,
+                      wholesalePrice: values.wholesalePrice ? Number(values.wholesalePrice) : null,
+                      projectPrice: values.projectPrice ? Number(values.projectPrice) : null,
                       vatRate,
                       stockUom: values.stockUom || "Piece",
                       // Display-label list, derived from the same conversions the cashier can
@@ -1138,24 +1149,31 @@ export function useRowActions(
         if (!ret) return [];
         const actions: RowAction[] = [];
         if (ret.status === "PendingApproval" || ret.status === "Quarantine") {
-          actions.push({
-            label: "Approve & Refund",
-            onClick: () =>
-              openFlow("Approve Return", {}, async (values) => {
-                if (!values.branch) throw new Error("Branch is required.");
-                const branch = branches?.find(
-                  (b) => b.nameEn.toLowerCase() === values.branch.toLowerCase(),
-                );
-                if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
-                await approveReturn.mutateAsync({
-                  id: ret.id,
-                  branchId: branch.id,
-                  refundMethod: values.refundMethod || undefined,
-                  secondAuthEmail: values.secondAuthEmail || undefined,
-                  secondAuthPin: values.secondAuthPin || undefined,
-                });
-              }),
-          });
+          // BRD §3.2.1: an Exchange needs a real payment step (the net difference between the
+          // return's credit and the replacement item(s)) — a dedicated dialog, not the generic
+          // text-field flow every other return type uses.
+          if (ret.type === "Exchange" && openApproveExchange) {
+            actions.push({ label: "Complete Exchange", onClick: () => openApproveExchange(ret) });
+          } else {
+            actions.push({
+              label: "Approve & Refund",
+              onClick: () =>
+                openFlow("Approve Return", {}, async (values) => {
+                  if (!values.branch) throw new Error("Branch is required.");
+                  const branch = branches?.find(
+                    (b) => b.nameEn.toLowerCase() === values.branch.toLowerCase(),
+                  );
+                  if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
+                  await approveReturn.mutateAsync({
+                    id: ret.id,
+                    branchId: branch.id,
+                    refundMethod: values.refundMethod || undefined,
+                    secondAuthEmail: values.secondAuthEmail || undefined,
+                    secondAuthPin: values.secondAuthPin || undefined,
+                  });
+                }),
+            });
+          }
         }
         return actions;
       }

@@ -32,6 +32,8 @@ export type CustomerDto = {
   // Module 20 (BRD §4.3.4): birthday-bonus source + "points lapse next month" cashier alert.
   dateOfBirth?: string | null;
   pointsExpiringSoon?: boolean;
+  // BRD §7 (CR-038): which Product price list this customer is charged — independent of Type.
+  priceListType?: string;
 };
 export type OrderLineDto = {
   productId: number;
@@ -133,10 +135,12 @@ export type PricingRuleDto = {
   // null = applies company-wide, across every branch.
   branchId: number | null;
   branchName: string | null;
-  // Type="Quantity" only: the cart-line quantity threshold that auto-applies the discount, and the
-  // SKU it's scoped to (null = any product).
+  // Type="Quantity"/"Promotional": the cart-line quantity threshold (Quantity only) and the SKU
+  // it's scoped to (null = any product, both types).
   minQuantity: number | null;
   sku: string | null;
+  // Type="Promotional" only (BRD §7 CR-040): the rule's start date — null = active immediately.
+  validFrom: string | null;
 };
 
 export const useCustomers = (enabled = true, filters?: { type?: string; search?: string }) =>
@@ -213,6 +217,7 @@ export type UpsertPricingRuleRequest = {
   branchId: number | null;
   minQuantity?: number | null;
   sku?: string | null;
+  validFrom?: string | null;
 };
 export function useCreatePricingRule() {
   const queryClient = useQueryClient();
@@ -252,9 +257,12 @@ export function useDeletePricingRule() {
 // requiresDelivery (BRD §3.5): cashier flags this line for delivery instead of counter pickup.
 // notes (BRD §2.3): cashier's free-text note for this line. manualDiscountPct (BRD §2.3/§6.2):
 // cashier-entered per-line discount %, gated by the same authorization ceiling as ManualDiscount below.
+// manualUnitPrice (BRD §7 CR-039): an absolute price override for this line — replaces the resolved
+// list price entirely (no discount stacks on top), gated by Role.CanOverrideItemPrice or a
+// PriceOverride approval (see CheckoutRequest.priceOverrideApprovalRequestId), distinct from a discount.
 export type CartLine = {
   productId: number; qty: number; uom?: string; lengthM?: number; widthM?: number; heightM?: number; requiresDelivery?: boolean;
-  notes?: string | null; manualDiscountPct?: number | null;
+  notes?: string | null; manualDiscountPct?: number | null; manualUnitPrice?: number | null;
 };
 export type PaymentInput = { method: string; amount: number };
 export type ManualDiscountInput = { type: "Percentage" | "Fixed"; value: number };
@@ -294,6 +302,9 @@ export type CheckoutRequest = {
   creditOverrideApprovalRequestId?: number | null;
   // BRD §3.5: required when any `lines` entry has requiresDelivery=true.
   delivery?: DeliveryDetailsInput | null;
+  // Id of an Approved ApprovalRequest (Type=PriceOverride) — required when any line's manualUnitPrice
+  // needs authorization the cashier doesn't hold (BRD §7 CR-039).
+  priceOverrideApprovalRequestId?: number | null;
 };
 
 export function useCheckout() {
@@ -335,6 +346,8 @@ export type UpsertCustomerInput = {
   loyaltyEnrolled?: boolean;
   projectName?: string | null;
   creditTermDays?: number | null;
+  // BRD §7 (CR-038): which Product price list this customer is charged — independent of type.
+  priceListType?: string;
 };
 
 function toUpsertCustomerRequest(request: UpsertCustomerInput) {
@@ -352,6 +365,7 @@ function toUpsertCustomerRequest(request: UpsertCustomerInput) {
     loyaltyEnrolled: request.loyaltyEnrolled ?? false,
     projectName: request.projectName ?? null,
     creditTermDays: request.creditTermDays ?? null,
+    priceListType: request.priceListType ?? "Retail",
   };
 }
 
