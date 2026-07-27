@@ -48,6 +48,7 @@ export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; 
                     <th className="px-3 py-2 text-right">Qty</th>
                     <th className="px-3 py-2 text-right">Unit Price</th>
                     <th className="px-3 py-2 text-right">Discount</th>
+                    <th className="px-3 py-2 text-right">Weight</th>
                     <th className="px-3 py-2 text-right">Line Total</th>
                   </tr>
                 </thead>
@@ -59,6 +60,7 @@ export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; 
                       <td className="px-3 py-2 text-right">{l.qty}</td>
                       <td className="px-3 py-2 text-right">{fmtSar(l.unitPrice)}</td>
                       <td className="px-3 py-2 text-right text-muted-foreground">{l.discountPct > 0 ? `${l.discountPct}%` : "—"}</td>
+                      <td className="px-3 py-2 text-right text-muted-foreground">{l.lineWeight > 0 ? `${l.lineWeight.toFixed(1)} kg` : "—"}</td>
                       <td className="px-3 py-2 text-right font-medium">{fmtSar(l.lineTotal)}</td>
                     </tr>
                   ))}
@@ -77,6 +79,12 @@ export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; 
                 <>
                   <span className="text-muted-foreground">Fees</span>
                   <span className="text-right">{fmtSar(order.feesTotal)}</span>
+                </>
+              )}
+              {order.lines.some((l) => l.lineWeight > 0) && (
+                <>
+                  <span className="text-muted-foreground">Total Weight</span>
+                  <span className="text-right">{order.lines.reduce((s, l) => s + l.lineWeight, 0).toFixed(1)} kg</span>
                 </>
               )}
               <span className="font-semibold text-foreground">Grand Total</span>

@@ -16,12 +16,13 @@ public class AuthService(
     IPasswordHasher passwordHasher,
     IJwtTokenService jwtTokenService,
     IAuditService auditService,
+    IPermissionResolver permissionResolver,
     IConfiguration configuration) : IAuthService
 {
     public async Task<AuthResult> LoginAsync(string email, string password, string? ip, CancellationToken cancellationToken = default)
     {
         var user = await db.Users
-            .Include(u => u.Role).ThenInclude(r => r!.Permissions)
+            .Include(u => u.Role)
             .Include(u => u.Branch)
             .FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
 
@@ -49,7 +50,7 @@ public class AuthService(
     public async Task<AuthResult> PinLoginAsync(string email, string pin, string? ip, CancellationToken cancellationToken = default)
     {
         var user = await db.Users
-            .Include(u => u.Role).ThenInclude(r => r!.Permissions)
+            .Include(u => u.Role)
             .Include(u => u.Branch)
             .FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
 
@@ -75,7 +76,7 @@ public class AuthService(
     {
         var hash = Hash(refreshTokenValue);
         var existing = await db.RefreshTokens
-            .Include(t => t.User).ThenInclude(u => u!.Role).ThenInclude(r => r!.Permissions)
+            .Include(t => t.User).ThenInclude(u => u!.Role)
             .Include(t => t.User).ThenInclude(u => u!.Branch)
             .FirstOrDefaultAsync(t => t.TokenHash == hash, cancellationToken);
 
@@ -119,7 +120,7 @@ public class AuthService(
     public async Task<CurrentUserDto?> GetCurrentUserAsync(int userId, CancellationToken cancellationToken = default)
     {
         var user = await db.Users
-            .Include(u => u.Role).ThenInclude(r => r!.Permissions)
+            .Include(u => u.Role)
             .Include(u => u.Branch)
             .FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
         return user is null ? null : await MapCurrentUserAsync(user, cancellationToken);
@@ -128,7 +129,7 @@ public class AuthService(
     public async Task<CurrentUserDto?> UpdateLocaleAsync(int userId, string locale, CancellationToken cancellationToken = default)
     {
         var user = await db.Users
-            .Include(u => u.Role).ThenInclude(r => r!.Permissions)
+            .Include(u => u.Role)
             .Include(u => u.Branch)
             .FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
         if (user is null) return null;
@@ -167,8 +168,9 @@ public class AuthService(
             await db.Entry(user).Reference(u => u.Role).LoadAsync(cancellationToken);
         }
 
-        var permissions = (user.Role?.Permissions ?? [])
-            .Select(p => new ModulePermissionDto(p.Module.ToString(), p.Level.ToString()))
+        var grid = await permissionResolver.GetEffectiveGridAsync(user.Id, cancellationToken);
+        var permissions = grid
+            .Select(kv => new ModulePermissionDto(kv.Key, kv.Value.View, kv.Value.Create, kv.Value.Edit, kv.Value.Delete, kv.Value.Approve, kv.Value.Export))
             .ToList();
 
         var posCeilings = new PosCeilingsDto(

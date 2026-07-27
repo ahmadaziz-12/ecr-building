@@ -2,6 +2,7 @@ using EcrBuilding.Domain.Entities;
 using EcrBuilding.Domain.Enums;
 using EcrBuilding.Infrastructure.Auth;
 using EcrBuilding.Infrastructure.Persistence;
+using EcrBuilding.Infrastructure.Persistence.Seed;
 
 namespace EcrBuilding.Tests.Infrastructure;
 
@@ -22,27 +23,47 @@ public static class TestDataSeeder
         return branch;
     }
 
-    /// <summary>Creates a role with Full access on every module listed in <paramref name="fullAccessModules"/>.</summary>
+    /// <summary>Creates a role with Full access on every page under each section listed in
+    /// <paramref name="fullAccessModules"/> (the old ModuleArea section buckets — see
+    /// PermissionCatalog.PageDef.Section — now expanded into a full page-level grid).</summary>
     public static Role AddRole(AppDbContext db, string name, decimal approvalCap = 0, params ModuleArea[] fullAccessModules)
     {
         var role = new Role { Name = name, ApprovalCap = approvalCap, Status = EntityStatus.Active };
-        foreach (var module in fullAccessModules)
+        var sections = fullAccessModules.Select(m => m.ToString()).ToHashSet();
+        foreach (var page in PermissionCatalog.Pages.Where(p => sections.Contains(p.Section)))
         {
-            role.Permissions.Add(new RolePermission { Module = module, Level = AccessLevel.Full });
+            role.Permissions.Add(new RolePermission
+            {
+                ModuleKey = page.Key, CanView = true, CanCreate = true, CanEdit = true, CanDelete = true, CanApprove = true, CanExport = true,
+            });
         }
         db.Roles.Add(role);
         db.SaveChanges();
         return role;
     }
 
-    /// <summary>Creates a role with an explicit AccessLevel per module — use when a test needs
-    /// something other than Full (e.g. Delivery:Edit to exercise the request/approve split).</summary>
+    /// <summary>Creates a role with an explicit AccessLevel per section — use when a test needs
+    /// something other than Full (e.g. Delivery:Edit to exercise the request/approve split). Each
+    /// section expands to every page under it (see PermissionCatalog), translated to the 6-action
+    /// grid the same way DbSeeder.BuildPagePermissions does.</summary>
     public static Role AddRoleWithLevels(AppDbContext db, string name, params (ModuleArea Module, AccessLevel Level)[] permissions)
     {
         var role = new Role { Name = name, Status = EntityStatus.Active };
         foreach (var (module, level) in permissions)
         {
-            role.Permissions.Add(new RolePermission { Module = module, Level = level });
+            foreach (var page in PermissionCatalog.Pages.Where(p => p.Section == module.ToString()))
+            {
+                role.Permissions.Add(new RolePermission
+                {
+                    ModuleKey = page.Key,
+                    CanView = level is AccessLevel.View or AccessLevel.Edit or AccessLevel.Full,
+                    CanCreate = level is AccessLevel.Edit or AccessLevel.Full,
+                    CanEdit = level is AccessLevel.Edit or AccessLevel.Full,
+                    CanDelete = level == AccessLevel.Full,
+                    CanApprove = level == AccessLevel.Full,
+                    CanExport = level is AccessLevel.View or AccessLevel.Edit or AccessLevel.Full,
+                });
+            }
         }
         db.Roles.Add(role);
         db.SaveChanges();
@@ -82,7 +103,8 @@ public static class TestDataSeeder
         decimal sellingPrice = 28.50m,
         decimal vatRate = 0.15m,
         string stockUom = "Bag",
-        bool isCutToSize = false)
+        bool isCutToSize = false,
+        string cutToSizeUnit = "Area")
     {
         var product = new Product
         {
@@ -93,6 +115,7 @@ public static class TestDataSeeder
             VatRate = vatRate,
             StockUom = stockUom,
             IsCutToSize = isCutToSize,
+            CutToSizeUnit = cutToSizeUnit,
             Status = EntityStatus.Active,
         };
         db.Products.Add(product);
@@ -126,14 +149,16 @@ public static class TestDataSeeder
     }
 
     /// <summary>
-    /// Seeds the 3 GL account codes OrdersController.Checkout always posts a completed sale to
-    /// (1000 cash/AR, 4000 revenue, 2100 VAT payable) — any test that completes a real checkout needs
-    /// these, or GlPostingService throws "Unknown GL account code" and the sale never becomes Completed.
+    /// Seeds the GL account codes OrdersController.Checkout always posts a completed sale to
+    /// (1000 Cash &amp; Bank, 1100 Accounts Receivable — used for the AccountCredit portion only,
+    /// 4000 revenue, 2100 VAT payable) — any test that completes a real checkout needs these, or
+    /// GlPostingService throws "Unknown GL account code" and the sale never becomes Completed.
     /// </summary>
     public static void AddStandardGlAccounts(AppDbContext db)
     {
         db.Accounts.AddRange(
-            new Account { Code = "1000", Name = "Cash / Accounts Receivable", Type = AccountType.Asset },
+            new Account { Code = "1000", Name = "Cash & Bank", Type = AccountType.Asset },
+            new Account { Code = "1100", Name = "Accounts Receivable", Type = AccountType.Asset },
             new Account { Code = "4000", Name = "Sales Revenue", Type = AccountType.Revenue },
             new Account { Code = "2100", Name = "VAT Payable", Type = AccountType.Liability });
         db.SaveChanges();

@@ -19,6 +19,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<UserPermissionOverride> UserPermissionOverrides => Set<UserPermissionOverride>();
+    public DbSet<PermissionsEpoch> PermissionsEpochs => Set<PermissionsEpoch>();
     public DbSet<User> Users => Set<User>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
@@ -41,6 +43,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<StockLevel> StockLevels => Set<StockLevel>();
     public DbSet<BranchStockLevel> BranchStockLevels => Set<BranchStockLevel>();
     public DbSet<StockBatch> StockBatches => Set<StockBatch>();
+    public DbSet<BranchStockBatch> BranchStockBatches => Set<BranchStockBatch>();
     public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
     public DbSet<StockTransferLine> StockTransferLines => Set<StockTransferLine>();
     public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
@@ -53,10 +56,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ReturnToSupplierLine> ReturnToSupplierLines => Set<ReturnToSupplierLine>();
 
     public DbSet<Customer> Customers => Set<Customer>();
+    public DbSet<CustomerPayment> CustomerPayments => Set<CustomerPayment>();
+    public DbSet<SupplierPayment> SupplierPayments => Set<SupplierPayment>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
     public DbSet<OrderPayment> OrderPayments => Set<OrderPayment>();
     public DbSet<CashierShift> CashierShifts => Set<CashierShift>();
+    public DbSet<CashMovement> CashMovements => Set<CashMovement>();
     public DbSet<PricingRule> PricingRules => Set<PricingRule>();
     public DbSet<OrderFee> OrderFees => Set<OrderFee>();
     public DbSet<ParkedSale> ParkedSales => Set<ParkedSale>();
@@ -150,8 +156,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         modelBuilder.Entity<RolePermission>(b =>
         {
-            b.HasIndex(x => new { x.RoleId, x.Module }).IsUnique();
+            b.Property(x => x.ModuleKey).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.RoleId, x.ModuleKey }).IsUnique();
             b.HasOne(x => x.Role).WithMany(x => x.Permissions).HasForeignKey(x => x.RoleId);
+        });
+
+        modelBuilder.Entity<UserPermissionOverride>(b =>
+        {
+            b.Property(x => x.ModuleKey).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.UserId, x.ModuleKey }).IsUnique();
+            b.HasOne(x => x.User).WithMany(x => x.PermissionOverrides).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<User>(b =>

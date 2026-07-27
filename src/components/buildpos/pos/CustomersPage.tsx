@@ -344,7 +344,11 @@ export function CustomersPage() {
       </SectionCard>
 
       <CustomerFormDialog customer={formCustomer} open={formOpen} onOpenChange={setFormOpen} />
-      <CustomerStatementDialog customerId={statementId} onClose={() => setStatementId(null)} />
+      <CustomerStatementDialog
+        customerId={statementId}
+        customerType={all.find((c) => c.id === statementId)?.type}
+        onClose={() => setStatementId(null)}
+      />
     </div>
   );
 }

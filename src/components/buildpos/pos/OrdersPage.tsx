@@ -56,7 +56,7 @@ const QUOTATION_FIELDS: FilterFieldDef[] = [{ kind: "search", key: "search", pla
 
 export function OrdersPage() {
   const { user, hasAccess } = useAuth();
-  const canReturn = hasAccess("Finance");
+  const canReturn = hasAccess("/finance/returns");
   const { data: branches } = useBranches(user?.branchId == null);
   const { data: terminals } = useTerminals(true);
   const effectiveBranchId = user?.branchId ?? branches?.[0]?.id ?? null;

@@ -29,7 +29,7 @@ public record DiscountUtilizationDto(decimal TotalDiscounts, int DiscountedOrder
 [ApiController]
 [Route("api/insights/reports")]
 [Authorize]
-[RequireModule(ModuleArea.Insights, AccessLevel.View)]
+[RequireModule("/insights/reports", PermissionAction.View)]
 public class ReportsController(AppDbContext db) : ControllerBase
 {
     // Excludes voided orders everywhere — a voided sale is not revenue (BRD acceptance criterion 11:

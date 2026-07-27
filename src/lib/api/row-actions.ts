@@ -1,7 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import type { Field } from "@/lib/buildpos/flows";
-import { formatUomConversions, parseUomConversions } from "@/lib/buildpos/uom";
+import { formatUomConversions, parseUomConversions, formatCutToSizeMode, parseCutToSizeMode } from "@/lib/buildpos/uom";
+import { formatAttributes, parseAttributes } from "@/lib/buildpos/attributes";
 import {
   resolveParentCategory,
   resolveProductCategoryId,
@@ -16,13 +17,16 @@ import {
 import { useBundles, useSetBundleStatus } from "./bundles";
 import {
   useApproveTransfer,
+  useBranchStockBatches,
   useCancelTransfer,
   useCreateStockAdjustment,
   useCreateStockTransfer,
   useCreateWarehouseBin,
   useDispatchTransfer,
   usePromoBatch,
+  usePromoBranchBatch,
   useQuarantineBatch,
+  useQuarantineBranchBatch,
   useReceiveTransfer,
   useSetWarehouseStatus,
   useStockBatches,
@@ -31,6 +35,7 @@ import {
   useUpdateWarehouse,
   useWarehouses,
   useWriteOffBatch,
+  useWriteOffBranchBatch,
 } from "./inventory";
 import { usePrintLabel } from "./print";
 import {
@@ -58,19 +63,49 @@ import {
   useUpdateExpenseStatus,
   useUpdateTaxCode,
 } from "./finance";
-import { usePricingRules, useUpdatePricingRuleStatus, useDeletePricingRule, type PricingRuleDto } from "./pos";
-import { useSubmitZatcaInvoice, useZatcaInvoices } from "./zatca";
-import { useInsightsReports, useSetReportStatus, useInsightsBi, useRetryBiFeed, useUpdateKpiTarget } from "./insights";
 import {
-  useUsers, useRoles, useBranches, useTerminals, useDevices,
-  useUpdateUser, useUpdateRole, useUpdateBranch, useUpdateTerminal, useUpdateDevice,
-  useSetTerminalStatus, useSetDeviceStatus,
-  useRules, useCompliance, useMaintenance, useSettings, useCreateMaintenance,
-  useUpdateRule, useUpdateCompliance, useUpdateMaintenanceStatus, useUpsertSetting,
-  TERMINAL_TYPE_TO_BACKEND, TERMINAL_TYPE_TO_FRONTEND, CONNECTION_TO_BACKEND, CONNECTION_TO_FRONTEND,
-  RULE_DOMAIN_TO_BACKEND, RULE_DOMAIN_TO_FRONTEND, RULE_PRIORITY_TO_NUMBER, rulePriorityLabel,
-  posCeilingsFromTier, posTierFromCeilings,
-  type RoleDto,
+  usePricingRules,
+  useUpdatePricingRuleStatus,
+  useDeletePricingRule,
+  type PricingRuleDto,
+} from "./pos";
+import { useSubmitZatcaInvoice, useZatcaInvoices } from "./zatca";
+import {
+  useInsightsReports,
+  useSetReportStatus,
+  useInsightsBi,
+  useRetryBiFeed,
+  useUpdateKpiTarget,
+} from "./insights";
+import {
+  useUsers,
+  useRoles,
+  useBranches,
+  useTerminals,
+  useDevices,
+  useUpdateUser,
+  useUpdateBranch,
+  useUpdateTerminal,
+  useUpdateDevice,
+  useSetTerminalStatus,
+  useSetDeviceStatus,
+  useRules,
+  useCompliance,
+  useMaintenance,
+  useSettings,
+  useCreateMaintenance,
+  useUpdateRule,
+  useUpdateCompliance,
+  useUpdateMaintenanceStatus,
+  useUpsertSetting,
+  TERMINAL_TYPE_TO_BACKEND,
+  TERMINAL_TYPE_TO_FRONTEND,
+  CONNECTION_TO_BACKEND,
+  CONNECTION_TO_FRONTEND,
+  RULE_DOMAIN_TO_BACKEND,
+  RULE_DOMAIN_TO_FRONTEND,
+  RULE_PRIORITY_TO_NUMBER,
+  rulePriorityLabel,
 } from "./admin";
 
 function confirmed(message: string, fn: () => Promise<unknown>, okMsg: string): () => void {
@@ -81,7 +116,9 @@ function confirmed(message: string, fn: () => Promise<unknown>, okMsg: string): 
 }
 
 function downloadCsv(filename: string, rows: (string | number)[][]) {
-  const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const csv = rows
+    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -89,30 +126,6 @@ function downloadCsv(filename: string, rows: (string | number)[][]) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-export function permFieldValues(role: RoleDto): Record<string, string> {
-  const level = (m: string) => role.permissions.find((p) => p.module === m)?.level ?? "None";
-  return {
-    name: role.name,
-    description: role.description ?? "",
-    approvalCap: String(role.approvalCap),
-    posTier: posTierFromCeilings(role.posCeilings),
-    permPos: level("Pos"), permOrders: level("Orders"), permInventory: level("Inventory"), permFinance: level("Finance"),
-    permAdmin: level("Admin"), permDelivery: level("Delivery"), permHr: level("Hr"), permInsights: level("Insights"),
-    permSuppliers: level("Suppliers"), permNetwork: level("Network"),
-  };
-}
-
-export function permissionsFromValues(values: Record<string, string>): Record<string, string> {
-  const permMap: Record<string, string | undefined> = {
-    Pos: values.permPos, Orders: values.permOrders, Inventory: values.permInventory, Finance: values.permFinance,
-    Admin: values.permAdmin, Delivery: values.permDelivery, Hr: values.permHr, Insights: values.permInsights,
-    Suppliers: values.permSuppliers, Network: values.permNetwork,
-  };
-  return Object.fromEntries(
-    Object.entries(permMap).filter((entry): entry is [string, string] => Boolean(entry[1]) && entry[1] !== "None"),
-  );
 }
 
 export type RowAction = { label: string; onClick: () => void; tone?: "default" | "critical" };
@@ -144,7 +157,9 @@ export function useRowActions(
   const navigate = useNavigate();
 
   const { data: products } = useProducts(
-    pathname === "/stock/inventory" || pathname === "/stock/stocks" || pathname === "/stock/branch-stock",
+    pathname === "/stock/inventory" ||
+      pathname === "/stock/stocks" ||
+      pathname === "/stock/branch-stock",
   );
   const setProductStatus = useSetProductStatus();
   const updateProduct = useUpdateProduct();
@@ -157,7 +172,9 @@ export function useRowActions(
   const updateCategory = useUpdateCategory();
 
   const { data: warehouses } = useWarehouses(
-    pathname === "/stock/stocks" || pathname === "/stock/warehouses" || pathname === "/stock/branch-stock",
+    pathname === "/stock/stocks" ||
+      pathname === "/stock/warehouses" ||
+      pathname === "/stock/branch-stock",
   );
   const createStockAdjustment = useCreateStockAdjustment();
   const createStockTransfer = useCreateStockTransfer();
@@ -167,9 +184,13 @@ export function useRowActions(
   const createWarehouseBin = useCreateWarehouseBin();
 
   const { data: batches } = useStockBatches(pathname === "/stock/expiry");
+  const { data: branchBatches } = useBranchStockBatches(pathname === "/stock/expiry");
   const quarantineBatch = useQuarantineBatch();
   const writeOffBatch = useWriteOffBatch();
   const promoBatch = usePromoBatch();
+  const quarantineBranchBatch = useQuarantineBranchBatch();
+  const writeOffBranchBatch = useWriteOffBranchBatch();
+  const promoBranchBatch = usePromoBranchBatch();
 
   const submitTransfer = useSubmitTransfer();
   const approveTransfer = useApproveTransfer();
@@ -215,19 +236,27 @@ export function useRowActions(
   const submitZatcaInvoice = useSubmitZatcaInvoice();
 
   const { data: users } = useUsers(
-    pathname === "/admin/users" || pathname === "/admin/rules" || pathname === "/network/terminals"
-      || pathname === "/admin/overview",
+    pathname === "/admin/users" ||
+      pathname === "/admin/rules" ||
+      pathname === "/network/terminals" ||
+      pathname === "/admin/overview",
   );
-  const { data: roles } = useRoles(pathname === "/admin/users" || pathname === "/admin/roles");
+  const { data: roles } = useRoles(pathname === "/admin/users");
   const { data: branches } = useBranches(
-    pathname === "/admin/users" || pathname === "/network/branches" || pathname === "/network/terminals"
-      || pathname === "/stock/warehouses" || pathname === "/stock/stocks" || pathname === "/stock/branch-stock"
-      || pathname === "/finance/returns" || pathname === "/finance/tax-zatca",
+    pathname === "/admin/users" ||
+      pathname === "/network/branches" ||
+      pathname === "/network/terminals" ||
+      pathname === "/stock/warehouses" ||
+      pathname === "/stock/stocks" ||
+      pathname === "/stock/branch-stock" ||
+      pathname === "/finance/returns" ||
+      pathname === "/finance/tax-zatca",
   );
-  const { data: terminals } = useTerminals(pathname === "/network/terminals" || pathname === "/network/devices");
+  const { data: terminals } = useTerminals(
+    pathname === "/network/terminals" || pathname === "/network/devices",
+  );
   const { data: devices } = useDevices(pathname === "/network/devices");
   const updateUser = useUpdateUser();
-  const updateRole = useUpdateRole();
   const updateBranch = useUpdateBranch();
   const updateTerminal = useUpdateTerminal();
   const updateDevice = useUpdateDevice();
@@ -259,8 +288,7 @@ export function useRowActions(
         "Create Transfer",
         { from: fromLabel, items: JSON.stringify([{ sku, qty: "1" }]) },
         async (values) => {
-          if (!values.from || !values.to)
-            throw new Error("From and To location are required.");
+          if (!values.from || !values.to) throw new Error("From and To location are required.");
           const resolve = (value: string) => {
             if (value.toLowerCase().startsWith("warehouse:")) {
               const name = value.slice("warehouse:".length).trim();
@@ -278,17 +306,28 @@ export function useRowActions(
           };
           const from = resolve(values.from);
           const to = resolve(values.to);
-          if (from.warehouseId !== null && from.warehouseId === to.warehouseId) throw new Error("Source and destination warehouse must differ.");
-          if (from.branchId !== null && from.branchId === to.branchId) throw new Error("Source and destination branch must differ.");
+          if (from.warehouseId !== null && from.warehouseId === to.warehouseId)
+            throw new Error("Source and destination warehouse must differ.");
+          if (from.branchId !== null && from.branchId === to.branchId)
+            throw new Error("Source and destination branch must differ.");
           if (!values.items) throw new Error("At least one line item is required.");
-          const rows = JSON.parse(values.items) as { sku?: string; qty?: string; unitCost?: string; batchNo?: string; expiryDate?: string }[];
+          const rows = JSON.parse(values.items) as {
+            sku?: string;
+            qty?: string;
+            unitCost?: string;
+            batchNo?: string;
+            expiryDate?: string;
+          }[];
           const lines = rows.map((row) => {
             if (!row.sku || !row.qty) throw new Error("Every line needs an item and a quantity.");
             const p = products?.find((pr) => pr.sku.toLowerCase() === row.sku!.toLowerCase());
             if (!p) throw new Error(`Unknown SKU "${row.sku}".`);
             return {
-              productId: p.id, qty: Number(row.qty), unitCost: Number(row.unitCost || p.costPrice),
-              batchNo: row.batchNo || null, expiryDate: row.expiryDate || null,
+              productId: p.id,
+              qty: Number(row.qty),
+              unitCost: Number(row.unitCost || p.costPrice),
+              batchNo: row.batchNo || null,
+              expiryDate: row.expiryDate || null,
             };
           });
           await createStockTransfer.mutateAsync({
@@ -323,10 +362,11 @@ export function useRowActions(
                   nameAr: product.nameAr ?? "",
                   ...splitProductCategory(categories, product.categoryId),
                   brand: product.brand ?? "",
+                  imageUrl: product.imageUrl ?? "",
+                  attributes: formatAttributes(product.attributes ?? []),
                   stockUom: product.stockUom,
-                  sellUoms: product.sellUoms.join(", "),
                   uomConversions: formatUomConversions(product.uomConversions),
-                  cutToSize: product.isCutToSize ? "on" : "",
+                  cutToSizeMode: formatCutToSizeMode(product.isCutToSize, product.cutToSizeUnit),
                   weight: String(product.weight),
                   returnable: product.returnable ? "on" : "",
                   cost: String(product.costPrice),
@@ -344,10 +384,15 @@ export function useRowActions(
                   if (!values.sku || !values.nameEn)
                     throw new Error("SKU and Name (English) are required.");
                   const categoryId =
-                    resolveProductCategoryId(categories, values.category ?? "", values.subcategory) ??
-                    product.categoryId;
+                    resolveProductCategoryId(
+                      categories,
+                      values.category ?? "",
+                      values.subcategory,
+                    ) ?? product.categoryId;
                   const vatRate =
                     values.vat === "Exempt" ? 0 : values.vat?.startsWith("0%") ? 0 : 15;
+                  const conversions = parseUomConversions(values.uomConversions);
+                  const { isCutToSize, cutToSizeUnit } = parseCutToSizeMode(values.cutToSizeMode);
                   await updateProduct.mutateAsync({
                     id: product.id,
                     request: {
@@ -361,19 +406,18 @@ export function useRowActions(
                       sellingPrice: Number(values.price || 0),
                       vatRate,
                       stockUom: values.stockUom || "Piece",
-                      sellUoms: values.sellUoms
-                        ? values.sellUoms
-                            .split(",")
-                            .map((s) => s.trim())
-                            .filter(Boolean)
-                        : [],
+                      // Display-label list, derived from the same conversions the cashier can
+                      // actually sell in — no separate "Selling UOMs" input to keep in sync with it.
+                      sellUoms: conversions.map((c) => c.uom),
                       weight: Number(values.weight || 0),
                       returnable: values.returnable === "on",
                       reorderLevel: Number(values.reorder || 0),
                       reorderQty: Number(values.reorderQty || 0),
-                      imageUrl: product.imageUrl,
-                      uomConversions: parseUomConversions(values.uomConversions),
-                      isCutToSize: values.cutToSize === "on",
+                      imageUrl: values.imageUrl || null,
+                      uomConversions: conversions,
+                      isCutToSize,
+                      cutToSizeUnit,
+                      attributes: parseAttributes(values.attributes),
                     },
                   });
                 },
@@ -546,7 +590,8 @@ export function useRowActions(
           createTransferAction(`Branch: ${String(branchName)}`, String(sku)),
           {
             label: "View in Catalog",
-            onClick: () => navigate({ to: "/stock/inventory", search: { category: String(categoryName) } }),
+            onClick: () =>
+              navigate({ to: "/stock/inventory", search: { category: String(categoryName) } }),
           },
           {
             label: "Reorder",
@@ -556,22 +601,47 @@ export function useRowActions(
       }
 
       case "/stock/expiry": {
-        const batch = batches?.find((b) => b.id === id);
+        // Merged list (see mapStockBatches): a negative id is a branch batch stored with its real
+        // id negated, since BranchStockBatch and StockBatch are separate tables with overlapping
+        // id sequences — each needs its own pair of action endpoints.
+        if (id === undefined) return [];
+        const isBranch = id < 0;
+        const batch = isBranch
+          ? branchBatches?.find((b) => b.id === -id)
+          : batches?.find((b) => b.id === id);
         if (!batch) return [];
         return [
           {
             label: "Quarantine",
-            onClick: guarded(() => quarantineBatch.mutateAsync(batch.id), "Batch quarantined"),
+            onClick: guarded(
+              () =>
+                isBranch
+                  ? quarantineBranchBatch.mutateAsync(batch.id)
+                  : quarantineBatch.mutateAsync(batch.id),
+              "Batch quarantined",
+            ),
             tone: "critical",
           },
           {
             label: "Write-Off",
-            onClick: guarded(() => writeOffBatch.mutateAsync(batch.id), "Batch written off"),
+            onClick: guarded(
+              () =>
+                isBranch
+                  ? writeOffBranchBatch.mutateAsync(batch.id)
+                  : writeOffBatch.mutateAsync(batch.id),
+              "Batch written off",
+            ),
             tone: "critical",
           },
           {
             label: "Move to Promo",
-            onClick: guarded(() => promoBatch.mutateAsync(batch.id), "Batch moved to promo"),
+            onClick: guarded(
+              () =>
+                isBranch
+                  ? promoBranchBatch.mutateAsync(batch.id)
+                  : promoBatch.mutateAsync(batch.id),
+              "Batch moved to promo",
+            ),
           },
         ];
       }
@@ -582,7 +652,10 @@ export function useRowActions(
         if (statusText === "Draft") {
           actions.push({
             label: "Submit for Approval",
-            onClick: guarded(() => submitTransfer.mutateAsync(id), "Transfer submitted for approval"),
+            onClick: guarded(
+              () => submitTransfer.mutateAsync(id),
+              "Transfer submitted for approval",
+            ),
           });
           actions.push({
             label: "Cancel",
@@ -593,7 +666,10 @@ export function useRowActions(
         if (statusText === "PendingApproval") {
           actions.push({
             label: "Approve",
-            onClick: guarded(() => approveTransfer.mutateAsync({ id, approverUserId: null }), "Transfer approved"),
+            onClick: guarded(
+              () => approveTransfer.mutateAsync({ id, approverUserId: null }),
+              "Transfer approved",
+            ),
           });
           actions.push({
             label: "Cancel",
@@ -621,7 +697,10 @@ export function useRowActions(
                 "Receive Transfer",
                 {
                   lines: JSON.stringify(
-                    (transfer?.lines ?? []).map((l) => ({ line: String(l.id), qty: String(l.qty) })),
+                    (transfer?.lines ?? []).map((l) => ({
+                      line: String(l.id),
+                      qty: String(l.qty),
+                    })),
                   ),
                 },
                 async (values) => {
@@ -653,7 +732,10 @@ export function useRowActions(
           });
           actions.push({
             label: "Cancel (Recall)",
-            onClick: guarded(() => cancelTransfer.mutateAsync(id), "Transfer cancelled — stock restored"),
+            onClick: guarded(
+              () => cancelTransfer.mutateAsync(id),
+              "Transfer cancelled — stock restored",
+            ),
             tone: "critical",
           });
         }
@@ -669,16 +751,29 @@ export function useRowActions(
             onClick: () =>
               openFlow(
                 "Add Warehouse",
-                { code: warehouse.code, name: warehouse.name, branch: warehouse.branchName, type: warehouse.type },
+                {
+                  code: warehouse.code,
+                  name: warehouse.name,
+                  branch: warehouse.branchName,
+                  type: warehouse.type,
+                },
                 async (values) => {
                   if (!values.code || !values.name) throw new Error("Code and Name are required.");
                   if (!values.branch) throw new Error("Branch is required.");
-                  const branch = branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase());
+                  const branch = branches?.find(
+                    (b) => b.nameEn.toLowerCase() === values.branch.toLowerCase(),
+                  );
                   if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
                   if (!values.type) throw new Error("Type is required.");
                   await updateWarehouse.mutateAsync({
                     id: warehouse.id,
-                    request: { code: values.code, name: values.name, branchId: branch.id, type: values.type, status: warehouse.status },
+                    request: {
+                      code: values.code,
+                      name: values.name,
+                      branchId: branch.id,
+                      type: values.type,
+                      status: warehouse.status,
+                    },
                   });
                 },
               ),
@@ -686,17 +781,18 @@ export function useRowActions(
           {
             label: "Add Bin",
             onClick: () =>
-              openFlow(
-                "Bin Setup",
-                { warehouse: warehouse.name },
-                async (values) => {
-                  if (!values.binCode || !values.label) throw new Error("Bin Code and Label are required.");
-                  await createWarehouseBin.mutateAsync({
-                    warehouseId: warehouse.id,
-                    request: { binCode: values.binCode, label: values.label, capacityTons: Number(values.capacity || 0) },
-                  });
-                },
-              ),
+              openFlow("Bin Setup", { warehouse: warehouse.name }, async (values) => {
+                if (!values.binCode || !values.label)
+                  throw new Error("Bin Code and Label are required.");
+                await createWarehouseBin.mutateAsync({
+                  warehouseId: warehouse.id,
+                  request: {
+                    binCode: values.binCode,
+                    label: values.label,
+                    capacityTons: Number(values.capacity || 0),
+                  },
+                });
+              }),
           },
           warehouse.status === "Active"
             ? {
@@ -765,7 +861,8 @@ export function useRowActions(
                   iban: supplier.iban ?? "",
                 },
                 async (values) => {
-                  if (!values.code || !values.nameEn) throw new Error("Supplier code and legal name are required.");
+                  if (!values.code || !values.nameEn)
+                    throw new Error("Supplier code and legal name are required.");
                   await updateSupplier.mutateAsync({
                     id: supplier.id,
                     request: {
@@ -776,7 +873,12 @@ export function useRowActions(
                       vatNo: values.vat || null,
                       phone: values.phone || null,
                       email: values.email || null,
-                      categories: values.categories ? values.categories.split(",").map((s) => s.trim()).filter(Boolean) : [],
+                      categories: values.categories
+                        ? values.categories
+                            .split(",")
+                            .map((s) => s.trim())
+                            .filter(Boolean)
+                        : [],
                       terms: values.terms || supplier.terms,
                       currency: values.currency || supplier.currency,
                       leadTimeDays: Number(values.leadTime || supplier.leadTimeDays),
@@ -855,18 +957,32 @@ export function useRowActions(
                 "Receive PO",
                 {
                   lines: JSON.stringify(
-                    outstanding.map((l) => ({ line: String(l.id), qty: String(l.qty - l.receivedQty) })),
+                    outstanding.map((l) => ({
+                      line: String(l.id),
+                      qty: String(l.qty - l.receivedQty),
+                    })),
                   ),
                 },
                 async (values) => {
                   if (!values.lines) throw new Error("At least one line to receive is required.");
-                  const rows = JSON.parse(values.lines) as { line?: string; qty?: string; batchNo?: string; expiryDate?: string }[];
+                  const rows = JSON.parse(values.lines) as {
+                    line?: string;
+                    qty?: string;
+                    batchNo?: string;
+                    expiryDate?: string;
+                  }[];
                   const lines = rows
                     .filter((r) => r.line && r.qty)
                     .map((r) => {
                       const lineId = Number(r.line);
-                      if (!outstanding.some((l) => l.id === lineId)) throw new Error("Pick a PO line for every row.");
-                      return { lineId, qty: Number(r.qty), batchNo: r.batchNo || null, expiryDate: r.expiryDate || null };
+                      if (!outstanding.some((l) => l.id === lineId))
+                        throw new Error("Pick a PO line for every row.");
+                      return {
+                        lineId,
+                        qty: Number(r.qty),
+                        batchNo: r.batchNo || null,
+                        expiryDate: r.expiryDate || null,
+                      };
                     });
                   if (!lines.length) throw new Error("At least one line to receive is required.");
                   await receivePo.mutateAsync({ id: po.id, lines });
@@ -924,7 +1040,10 @@ export function useRowActions(
           });
           actions.push({
             label: "Reject",
-            onClick: guarded(() => rejectRts.mutateAsync(rts.id), "Return rejected — stock restored"),
+            onClick: guarded(
+              () => rejectRts.mutateAsync(rts.id),
+              "Return rejected — stock restored",
+            ),
             tone: "critical",
           });
         }
@@ -1029,7 +1148,8 @@ export function useRowActions(
                 );
                 if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
                 await approveReturn.mutateAsync({
-                  id: ret.id, branchId: branch.id,
+                  id: ret.id,
+                  branchId: branch.id,
                   refundMethod: values.refundMethod || undefined,
                   secondAuthEmail: values.secondAuthEmail || undefined,
                   secondAuthPin: values.secondAuthPin || undefined,
@@ -1064,7 +1184,9 @@ export function useRowActions(
                     throw new Error("Code, name, rate and applies-to are required.");
                   const branch =
                     values.branch && values.branch !== "All Branches"
-                      ? branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase())
+                      ? branches?.find(
+                          (b) => b.nameEn.toLowerCase() === values.branch.toLowerCase(),
+                        )
                       : undefined;
                   await updateTaxCode.mutateAsync({
                     id: taxCode.id,
@@ -1135,11 +1257,15 @@ export function useRowActions(
                 },
                 async (values) => {
                   if (!values.name) throw new Error("Name is required.");
-                  const role = roles?.find((r) => r.name.toLowerCase() === (values.role ?? "").toLowerCase());
+                  const role = roles?.find(
+                    (r) => r.name.toLowerCase() === (values.role ?? "").toLowerCase(),
+                  );
                   if (!role) throw new Error(`Unknown role "${values.role}".`);
                   const branch =
                     values.branch && values.branch !== "All Branches"
-                      ? branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase())
+                      ? branches?.find(
+                          (b) => b.nameEn.toLowerCase() === values.branch.toLowerCase(),
+                        )
                       : undefined;
                   await updateUser.mutateAsync({
                     id: user.id,
@@ -1157,7 +1283,16 @@ export function useRowActions(
             ? {
                 label: "Suspend",
                 onClick: guarded(
-                  () => updateUser.mutateAsync({ id: user.id, request: { name: user.name, roleId: user.roleId, branchId: user.branchId, status: "Suspended" } }),
+                  () =>
+                    updateUser.mutateAsync({
+                      id: user.id,
+                      request: {
+                        name: user.name,
+                        roleId: user.roleId,
+                        branchId: user.branchId,
+                        status: "Suspended",
+                      },
+                    }),
                   "User suspended",
                 ),
                 tone: "critical",
@@ -1165,34 +1300,19 @@ export function useRowActions(
             : {
                 label: "Reactivate",
                 onClick: guarded(
-                  () => updateUser.mutateAsync({ id: user.id, request: { name: user.name, roleId: user.roleId, branchId: user.branchId, status: "Active" } }),
+                  () =>
+                    updateUser.mutateAsync({
+                      id: user.id,
+                      request: {
+                        name: user.name,
+                        roleId: user.roleId,
+                        branchId: user.branchId,
+                        status: "Active",
+                      },
+                    }),
                   "User reactivated",
                 ),
               },
-        ];
-      }
-
-      case "/admin/roles": {
-        const role = roles?.find((r) => r.id === id);
-        if (!role) return [];
-        return [
-          {
-            label: "Edit",
-            onClick: () =>
-              openFlow("Edit Role", permFieldValues(role), async (values) => {
-                if (!values.name) throw new Error("Role name is required.");
-                await updateRole.mutateAsync({
-                  id: role.id,
-                  request: {
-                    name: values.name,
-                    description: values.description || null,
-                    approvalCap: Number(values.approvalCap || 0),
-                    permissions: permissionsFromValues(values),
-                    posCeilings: posCeilingsFromTier(values.posTier),
-                  },
-                });
-              }),
-          },
         ];
       }
 
@@ -1217,7 +1337,8 @@ export function useRowActions(
                   zatca: branch.vatRegistrationNumber ?? "",
                 },
                 async (values) => {
-                  if (!values.code || !values.nameEn) throw new Error("Branch code and name are required.");
+                  if (!values.code || !values.nameEn)
+                    throw new Error("Branch code and name are required.");
                   await updateBranch.mutateAsync({
                     id: branch.id,
                     request: {
@@ -1245,9 +1366,16 @@ export function useRowActions(
                     updateBranch.mutateAsync({
                       id: branch.id,
                       request: {
-                        code: branch.code, nameEn: branch.nameEn, nameAr: branch.nameAr, city: branch.city,
-                        address: branch.address, businessHours: branch.businessHours, vatRegistrationNumber: branch.vatRegistrationNumber,
-                        managerName: branch.managerName, warehouse: branch.warehouse, status: "Inactive",
+                        code: branch.code,
+                        nameEn: branch.nameEn,
+                        nameAr: branch.nameAr,
+                        city: branch.city,
+                        address: branch.address,
+                        businessHours: branch.businessHours,
+                        vatRegistrationNumber: branch.vatRegistrationNumber,
+                        managerName: branch.managerName,
+                        warehouse: branch.warehouse,
+                        status: "Inactive",
                       },
                     }),
                   "Branch deactivated",
@@ -1261,9 +1389,16 @@ export function useRowActions(
                     updateBranch.mutateAsync({
                       id: branch.id,
                       request: {
-                        code: branch.code, nameEn: branch.nameEn, nameAr: branch.nameAr, city: branch.city,
-                        address: branch.address, businessHours: branch.businessHours, vatRegistrationNumber: branch.vatRegistrationNumber,
-                        managerName: branch.managerName, warehouse: branch.warehouse, status: "Active",
+                        code: branch.code,
+                        nameEn: branch.nameEn,
+                        nameAr: branch.nameAr,
+                        city: branch.city,
+                        address: branch.address,
+                        businessHours: branch.businessHours,
+                        vatRegistrationNumber: branch.vatRegistrationNumber,
+                        managerName: branch.managerName,
+                        warehouse: branch.warehouse,
+                        status: "Active",
                       },
                     }),
                   "Branch activated",
@@ -1290,16 +1425,24 @@ export function useRowActions(
                   offline: terminal.offlineModeEnabled ? "on" : "",
                 },
                 async (values) => {
-                  if (!values.id || !values.branch) throw new Error("Terminal ID and branch are required.");
-                  const branch = branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase());
+                  if (!values.id || !values.branch)
+                    throw new Error("Terminal ID and branch are required.");
+                  const branch = branches?.find(
+                    (b) => b.nameEn.toLowerCase() === values.branch.toLowerCase(),
+                  );
                   if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
                   // "Unassigned" (or empty) explicitly clears the cashier; an unknown name is an
                   // error rather than silently keeping the previous assignment.
                   const operatorName = (values.operator ?? "").trim();
                   let assignedCashierId: number | null = null;
                   if (operatorName && operatorName !== "Unassigned") {
-                    const assignedCashier = users?.find((u) => u.name.toLowerCase() === operatorName.toLowerCase());
-                    if (!assignedCashier) throw new Error(`Unknown cashier "${operatorName}" — pick a user that exists.`);
+                    const assignedCashier = users?.find(
+                      (u) => u.name.toLowerCase() === operatorName.toLowerCase(),
+                    );
+                    if (!assignedCashier)
+                      throw new Error(
+                        `Unknown cashier "${operatorName}" — pick a user that exists.`,
+                      );
                     assignedCashierId = assignedCashier.id;
                   }
                   await updateTerminal.mutateAsync({
@@ -1372,8 +1515,25 @@ export function useRowActions(
               ),
           },
           ...(device.status !== "Healthy"
-            ? [{ label: "Mark Healthy", onClick: guarded(() => setDeviceStatus.mutateAsync({ id: device.id, status: "Healthy" }), "Device marked healthy") }]
-            : [{ label: "Mark Faulty", onClick: guarded(() => setDeviceStatus.mutateAsync({ id: device.id, status: "Faulty" }), "Device flagged faulty"), tone: "critical" as const }]),
+            ? [
+                {
+                  label: "Mark Healthy",
+                  onClick: guarded(
+                    () => setDeviceStatus.mutateAsync({ id: device.id, status: "Healthy" }),
+                    "Device marked healthy",
+                  ),
+                },
+              ]
+            : [
+                {
+                  label: "Mark Faulty",
+                  onClick: guarded(
+                    () => setDeviceStatus.mutateAsync({ id: device.id, status: "Faulty" }),
+                    "Device flagged faulty",
+                  ),
+                  tone: "critical" as const,
+                },
+              ]),
           device.status !== "Disconnected"
             ? {
                 label: "Disconnect",
@@ -1396,11 +1556,20 @@ export function useRowActions(
       case "/admin/rules": {
         const rule = rules?.find((r) => r.id === id);
         if (!rule) return [];
-        const resolveApprover = (name: string) => (name ? users?.find((u) => u.name.toLowerCase() === name.toLowerCase())?.id ?? null : null);
+        const resolveApprover = (name: string) =>
+          name
+            ? (users?.find((u) => u.name.toLowerCase() === name.toLowerCase())?.id ?? null)
+            : null;
         const requestFor = (overrides: Partial<{ active: boolean }>) => ({
-          name: rule.name, domain: rule.domain, priority: rule.priority, whenTrigger: rule.whenTrigger,
-          condition: rule.condition, action: rule.action, approverUserId: resolveApprover(rule.approverName ?? ""),
-          active: overrides.active ?? rule.active, notes: rule.notes,
+          name: rule.name,
+          domain: rule.domain,
+          priority: rule.priority,
+          whenTrigger: rule.whenTrigger,
+          condition: rule.condition,
+          action: rule.action,
+          approverUserId: resolveApprover(rule.approverName ?? ""),
+          active: overrides.active ?? rule.active,
+          notes: rule.notes,
         });
         return [
           {
@@ -1441,12 +1610,20 @@ export function useRowActions(
           rule.active
             ? {
                 label: "Deactivate",
-                onClick: guarded(() => updateRule.mutateAsync({ id: rule.id, request: requestFor({ active: false }) }), "Rule deactivated"),
+                onClick: guarded(
+                  () =>
+                    updateRule.mutateAsync({ id: rule.id, request: requestFor({ active: false }) }),
+                  "Rule deactivated",
+                ),
                 tone: "critical",
               }
             : {
                 label: "Activate",
-                onClick: guarded(() => updateRule.mutateAsync({ id: rule.id, request: requestFor({ active: true }) }), "Rule activated"),
+                onClick: guarded(
+                  () =>
+                    updateRule.mutateAsync({ id: rule.id, request: requestFor({ active: true }) }),
+                  "Rule activated",
+                ),
               },
         ];
       }
@@ -1499,19 +1676,28 @@ export function useRowActions(
         if (ticket.status === "Open") {
           actions.push({
             label: "Start Progress",
-            onClick: guarded(() => updateMaintenanceStatus.mutateAsync({ id: ticket.id, status: "InProgress" }), "Ticket in progress"),
+            onClick: guarded(
+              () => updateMaintenanceStatus.mutateAsync({ id: ticket.id, status: "InProgress" }),
+              "Ticket in progress",
+            ),
           });
         }
         if (ticket.status === "InProgress") {
           actions.push({
             label: "Resolve",
-            onClick: guarded(() => updateMaintenanceStatus.mutateAsync({ id: ticket.id, status: "Resolved" }), "Ticket resolved"),
+            onClick: guarded(
+              () => updateMaintenanceStatus.mutateAsync({ id: ticket.id, status: "Resolved" }),
+              "Ticket resolved",
+            ),
           });
         }
         if (ticket.status === "Resolved") {
           actions.push({
             label: "Close",
-            onClick: guarded(() => updateMaintenanceStatus.mutateAsync({ id: ticket.id, status: "Closed" }), "Ticket closed"),
+            onClick: guarded(
+              () => updateMaintenanceStatus.mutateAsync({ id: ticket.id, status: "Closed" }),
+              "Ticket closed",
+            ),
           });
         }
         return actions;
@@ -1549,7 +1735,10 @@ export function useRowActions(
             label: "Edit Target",
             onClick: () => {
               const currentTarget = row[3];
-              const next = window.prompt(`New target for "${row[0]}" (current: ${currentTarget}):`, String(currentTarget));
+              const next = window.prompt(
+                `New target for "${row[0]}" (current: ${currentTarget}):`,
+                String(currentTarget),
+              );
               if (next === null) return;
               const target = Number(next);
               if (Number.isNaN(target)) {
@@ -1571,13 +1760,25 @@ export function useRowActions(
             onClick: () =>
               downloadCsv(`report-${report.code}.csv`, [
                 ["Code", "Name", "Category", "Owner", "Frequency", "Format", "Status"],
-                [report.code, report.name, report.category, report.owner, report.frequency, report.format, report.status],
+                [
+                  report.code,
+                  report.name,
+                  report.category,
+                  report.owner,
+                  report.frequency,
+                  report.format,
+                  report.status,
+                ],
               ]),
           },
           {
             label: report.status === "Active" ? "Pause Schedule" : "Resume Schedule",
             onClick: guarded(
-              () => setReportStatus.mutateAsync({ id: report.id, status: report.status === "Active" ? "Inactive" : "Active" }),
+              () =>
+                setReportStatus.mutateAsync({
+                  id: report.id,
+                  status: report.status === "Active" ? "Inactive" : "Active",
+                }),
               report.status === "Active" ? "Report schedule paused" : "Report schedule resumed",
             ),
           },
@@ -1620,7 +1821,11 @@ export function useRowActions(
         const area = String(row[0] ?? "");
         if (!area) return [];
         const routeFor = (name: string): string =>
-          /zatca/i.test(name) ? "/admin/zatca-invoices" : /compliance/i.test(name) ? "/admin/compliance" : "/admin/audit-logs";
+          /zatca/i.test(name)
+            ? "/admin/zatca-invoices"
+            : /compliance/i.test(name)
+              ? "/admin/compliance"
+              : "/admin/audit-logs";
         return [
           {
             label: "Investigate",
@@ -1636,7 +1841,14 @@ export function useRowActions(
                 return;
               }
               guarded(
-                () => createMaintenance.mutateAsync({ deviceOrModule: area, branchId: null, severity: "Warning", owner: owner.trim(), slaHours: 24 }),
+                () =>
+                  createMaintenance.mutateAsync({
+                    deviceOrModule: area,
+                    branchId: null,
+                    severity: "Warning",
+                    owner: owner.trim(),
+                    slaHours: 24,
+                  }),
                 "Ticket created and assigned",
               )();
             },
@@ -1644,7 +1856,14 @@ export function useRowActions(
           {
             label: "Escalate",
             onClick: guarded(
-              () => createMaintenance.mutateAsync({ deviceOrModule: area, branchId: null, severity: "Critical", owner: "IT Support", slaHours: 4 }),
+              () =>
+                createMaintenance.mutateAsync({
+                  deviceOrModule: area,
+                  branchId: null,
+                  severity: "Critical",
+                  owner: "IT Support",
+                  slaHours: 4,
+                }),
               "Critical maintenance ticket created",
             ),
             tone: "critical",

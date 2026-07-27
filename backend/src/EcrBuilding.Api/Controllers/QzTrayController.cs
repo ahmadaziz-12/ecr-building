@@ -19,7 +19,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/printer")]
 [Authorize]
-[RequireModule(ModuleArea.Network, AccessLevel.View)]
+[RequireModule("/network/devices", PermissionAction.View)]
 public class QzTrayController(AppDbContext db) : ControllerBase
 {
     [HttpGet("qz-certificate")]

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  areaOf, factorToStock, formatUomConversions, parseUomConversions, sellableUoms, toStockQty, unitPriceFor,
+  areaOf, factorToStock, formatCutToSizeMode, formatUomConversions, lengthOf, parseCutToSizeMode,
+  parseUomConversions, sellableUoms, toStockQty, unitPriceFor, volumeOf,
 } from "./uom";
 
 // Module 5 (docs/BRD-GAP-IMPLEMENTATION-PLAN.md) — client-side mirror of the backend's UomMath.cs.
@@ -33,6 +34,30 @@ describe("UOM conversion math", () => {
     expect(areaOf(2.5, 1.2)).toBe(3);
     expect(areaOf(0.5, 4)).toBe(2);
     expect(areaOf(0.75, 0.75)).toBe(0.563); // 0.5625 rounds away from zero, matching the backend
+  });
+
+  it("computes cut-to-size length and volume the same way as the backend", () => {
+    expect(lengthOf(4.5)).toBe(4.5);
+    expect(lengthOf(0.5625)).toBe(0.563);
+    expect(volumeOf(2, 1.5, 2)).toBe(6);
+    expect(volumeOf(0.75, 0.75, 1)).toBe(0.563);
+  });
+});
+
+describe("cut-to-size mode select", () => {
+  it("maps each option to the flag + unit the backend expects", () => {
+    expect(parseCutToSizeMode("Not cut-to-size")).toEqual({ isCutToSize: false, cutToSizeUnit: "Area" });
+    expect(parseCutToSizeMode(undefined)).toEqual({ isCutToSize: false, cutToSizeUnit: "Area" });
+    expect(parseCutToSizeMode("Length (linear m)")).toEqual({ isCutToSize: true, cutToSizeUnit: "Length" });
+    expect(parseCutToSizeMode("Area (m²)")).toEqual({ isCutToSize: true, cutToSizeUnit: "Area" });
+    expect(parseCutToSizeMode("Volume (m³)")).toEqual({ isCutToSize: true, cutToSizeUnit: "Volume" });
+  });
+
+  it("round-trips through formatCutToSizeMode for the edit-form prefill", () => {
+    expect(formatCutToSizeMode(false, "Area")).toBe("Not cut-to-size");
+    expect(formatCutToSizeMode(true, "Length")).toBe("Length (linear m)");
+    expect(formatCutToSizeMode(true, "Area")).toBe("Area (m²)");
+    expect(formatCutToSizeMode(true, "Volume")).toBe("Volume (m³)");
   });
 });
 

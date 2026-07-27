@@ -14,7 +14,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/pos/approvals")]
 [Authorize]
-[RequireModule(ModuleArea.Pos, AccessLevel.View)]
+[RequireModule("/operate/pos-checkout", PermissionAction.View)]
 public class ApprovalsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -30,7 +30,7 @@ public class ApprovalsController(AppDbContext db, IAuditService audit) : Control
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/pos-checkout", PermissionAction.Create)]
     public async Task<ActionResult<ApprovalRequestDto>> Create(CreateApprovalRequestInput request, CancellationToken ct)
     {
         var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -48,11 +48,11 @@ public class ApprovalsController(AppDbContext db, IAuditService audit) : Control
     }
 
     [HttpPut("{id:int}/approve")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/pos-checkout", PermissionAction.Approve)]
     public Task<ActionResult<ApprovalRequestDto>> Approve(int id, CancellationToken ct) => Resolve(id, ApprovalStatus.Approved, "APPROVAL_GRANTED", ct);
 
     [HttpPut("{id:int}/reject")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/pos-checkout", PermissionAction.Approve)]
     public Task<ActionResult<ApprovalRequestDto>> Reject(int id, CancellationToken ct) => Resolve(id, ApprovalStatus.Rejected, "APPROVAL_REJECTED", ct);
 
     private async Task<ActionResult<ApprovalRequestDto>> Resolve(int id, ApprovalStatus to, string auditEvent, CancellationToken ct)

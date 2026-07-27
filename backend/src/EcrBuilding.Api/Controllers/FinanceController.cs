@@ -14,7 +14,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/finance/expenses")]
 [Authorize]
-[RequireModule(ModuleArea.Finance, AccessLevel.View)]
+[RequireModule("/finance/expenses", PermissionAction.View)]
 public class ExpensesController(AppDbContext db, IAuditService audit, IGlPostingService gl) : ControllerBase
 {
     [HttpGet]
@@ -25,7 +25,7 @@ public class ExpensesController(AppDbContext db, IAuditService audit, IGlPosting
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/expenses", PermissionAction.Create)]
     public async Task<ActionResult<ExpenseDto>> Create(CreateExpenseRequest request, CancellationToken ct)
     {
         var expense = new Expense
@@ -42,7 +42,7 @@ public class ExpensesController(AppDbContext db, IAuditService audit, IGlPosting
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/expenses", PermissionAction.Approve)]
     public async Task<ActionResult<ExpenseDto>> UpdateStatus(int id, UpdateExpenseStatusRequest request, CancellationToken ct)
     {
         var expense = await db.Expenses.Include(e => e.Branch).FirstOrDefaultAsync(e => e.Id == id, ct);
@@ -62,7 +62,7 @@ public class ExpensesController(AppDbContext db, IAuditService audit, IGlPosting
     }
 
     [HttpPut("{id:int}/reconcile")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/expenses", PermissionAction.Edit)]
     public async Task<ActionResult<ExpenseDto>> Reconcile(int id, CancellationToken ct)
     {
         var expense = await db.Expenses.Include(e => e.Branch).FirstOrDefaultAsync(e => e.Id == id, ct);
@@ -86,7 +86,7 @@ public class ExpensesController(AppDbContext db, IAuditService audit, IGlPosting
 [ApiController]
 [Route("api/finance/tax-codes")]
 [Authorize]
-[RequireModule(ModuleArea.Finance, AccessLevel.View)]
+[RequireModule("/finance/tax-zatca", PermissionAction.View)]
 public class TaxCodesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -97,7 +97,7 @@ public class TaxCodesController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/tax-zatca", PermissionAction.Create)]
     public async Task<ActionResult<TaxCodeDto>> Create(UpsertTaxCodeRequest request, CancellationToken ct)
     {
         if (request.BranchId is not null && !await db.Branches.AnyAsync(b => b.Id == request.BranchId, ct))
@@ -119,7 +119,7 @@ public class TaxCodesController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/tax-zatca", PermissionAction.Edit)]
     public async Task<ActionResult<TaxCodeDto>> Update(int id, UpsertTaxCodeRequest request, CancellationToken ct)
     {
         var taxCode = await db.TaxCodes.FindAsync([id], ct);
@@ -142,7 +142,7 @@ public class TaxCodesController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/tax-zatca", PermissionAction.Delete)]
     public async Task<ActionResult<TaxCodeDto>> UpdateStatus(int id, EcrBuilding.Application.Catalog.SetStatusRequest request, CancellationToken ct)
     {
         var taxCode = await db.TaxCodes.Include(t => t.GlAccount).Include(t => t.Branch).FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -160,7 +160,7 @@ public class TaxCodesController(AppDbContext db, IAuditService audit) : Controll
 [ApiController]
 [Route("api/finance/returns")]
 [Authorize]
-[RequireModule(ModuleArea.Finance, AccessLevel.View)]
+[RequireModule("/finance/returns", PermissionAction.View)]
 public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements, IGlPostingService gl, IPaymentGateway paymentGateway, IPasswordHasher passwordHasher) : ControllerBase
 {
     // BRD defaults, overridable per store via the Settings table (SettingsController) without a deploy.
@@ -190,7 +190,7 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
     }
 
     [HttpPut("policy-config")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/returns", PermissionAction.Edit)]
     public async Task<ActionResult<ReturnPolicyConfigDto>> UpdatePolicyConfig(ReturnPolicyConfigDto request, CancellationToken ct)
     {
         if (request.DualAuthCashThreshold < 0) return BadRequest(new { error = "The dual-authorization threshold can't be negative." });
@@ -271,7 +271,7 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/returns", PermissionAction.Create)]
     public async Task<ActionResult<ReturnDto>> Create(CreateReturnRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Reason))
@@ -353,7 +353,7 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
     }
 
     [HttpPut("{id:int}/approve")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/returns", PermissionAction.Approve)]
     public async Task<ActionResult<ReturnDto>> Approve(int id, ApproveReturnRequest request, CancellationToken ct)
     {
         var ret = await db.Returns.Include(r => r.Customer)
@@ -462,10 +462,15 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
                 ret.Order.Payments.Select(p => (p.Method.ToString(), p.Amount)).ToList(), effectiveCashback);
             ret.RefundSplitJson = System.Text.Json.JsonSerializer.Serialize(split.Select(s => new { method = s.Method, amount = s.Amount }));
         }
-        if (refundMethod is "StoreCredit" or "AccountCredit" && ret.Customer is not null)
+        // BRD §3.2.2: B2B return credit posts to the account and reduces the outstanding balance.
+        // Restricted to B2B/Contractor — same restriction checkout's AccountCredit tender already
+        // enforces — because Outstanding is an AR field with no matching debit path for a Retail/
+        // Walk-in customer (they can never pay via AccountCredit to bring it back to zero), so
+        // letting a non-B2B StoreCredit refund touch it would drive an unrecoverable negative balance.
+        var isAccountLedgerCustomer = ret.Customer?.Type is CustomerType.B2B or CustomerType.Contractor;
+        if (refundMethod is "StoreCredit" or "AccountCredit" && isAccountLedgerCustomer)
         {
-            // BRD §3.2.2: B2B return credit posts to the account and reduces the outstanding balance.
-            ret.Customer.Outstanding -= effectiveCashback;
+            ret.Customer!.Outstanding -= effectiveCashback;
         }
 
         ret.Status = ReturnStatus.Completed;
@@ -491,7 +496,11 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
             // standard rate the way the old code did, so their GL posting still balances.
             var vatPortion = ret.VatReversal > 0 || ret.GrossRefund > 0 ? ret.VatReversal : Math.Round(totalAmount - totalAmount / 1.15m, 2);
             var revenuePortion = ret.GrossRefund > 0 ? ret.GrossRefund : totalAmount - vatPortion;
-            var lines = new List<GlLine> { new("4000", revenuePortion, 0), new("2100", vatPortion, 0), new("1000", 0, totalAmount) };
+            // AccountCredit/StoreCredit refunds to a B2B/Contractor account never pay cash out — they
+            // reduce what the customer owes, so the credit side lands on Accounts Receivable (1100),
+            // not Cash & Bank (1000). Every other refund is a real payout, still 1000.
+            var creditAccount = refundMethod is "StoreCredit" or "AccountCredit" && isAccountLedgerCustomer ? "1100" : "1000";
+            var lines = new List<GlLine> { new("4000", revenuePortion, 0), new("2100", vatPortion, 0), new(creditAccount, 0, totalAmount) };
             if (ret.RestockingFeeAmount > 0)
             {
                 // The fee stays with the store: cash out = revenue + VAT − fee, so credit it back to revenue.
@@ -593,7 +602,7 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
     }
 
     [HttpPut("{id:int}/quarantine")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/returns", PermissionAction.Edit)]
     public async Task<ActionResult<ReturnDto>> Quarantine(int id, CancellationToken ct)
     {
         var ret = await WithIncludes().FirstOrDefaultAsync(r => r.Id == id, ct);
@@ -762,7 +771,7 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
 [ApiController]
 [Route("api/finance/accounts")]
 [Authorize]
-[RequireModule(ModuleArea.Finance, AccessLevel.View)]
+[RequireModule("/finance/general-ledger", PermissionAction.View)]
 public class AccountsController(AppDbContext db) : ControllerBase
 {
     [HttpGet]
@@ -783,7 +792,7 @@ public class AccountsController(AppDbContext db) : ControllerBase
 [ApiController]
 [Route("api/finance/journal")]
 [Authorize]
-[RequireModule(ModuleArea.Finance, AccessLevel.View)]
+[RequireModule("/finance/general-ledger", PermissionAction.View)]
 public class JournalController(AppDbContext db) : ControllerBase
 {
     [HttpGet]

@@ -67,9 +67,11 @@ public class OrderLine
     public decimal Qty { get; set; }
     public string Uom { get; set; } = string.Empty;
     public decimal StockQty { get; set; }
-    // Cut-to-size audit trail: the dimensions the cashier entered, from which Qty (area) was computed.
+    // Cut-to-size audit trail: the dimensions the cashier entered, from which Qty (length/area/volume,
+    // per the product's CutToSizeUnit) was computed. WidthM/HeightM stay null for Length-mode lines.
     public decimal? LengthM { get; set; }
     public decimal? WidthM { get; set; }
+    public decimal? HeightM { get; set; }
     // BRD §5.2: set when this line was auto-populated from a bundle — groups the constituents on the
     // receipt and feeds the Bundle Sales Report. UnitPrice on a bundle line is the constituent's
     // proportional share of the bundle price, so VAT stays per-item at each line's own rate.
@@ -79,6 +81,10 @@ public class OrderLine
     public decimal DiscountPct { get; set; }
     public decimal VatRate { get; set; }
     public decimal LineTotal { get; set; }
+    // BRD §2.3: a free-text note the cashier attaches to this specific cart line (e.g. "customer
+    // wants the damaged-box unit", "leave at loading dock") — distinct from Order.Notes, which is
+    // ticket-wide.
+    public string? Notes { get; set; }
 }
 
 public class OrderPayment

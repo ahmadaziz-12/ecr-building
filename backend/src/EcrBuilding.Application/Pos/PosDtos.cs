@@ -9,6 +9,11 @@ public record UpsertCustomerRequest(string NameEn, string? NameAr, string Type, 
     int? AccountManagerUserId = null, bool PriorityBilling = false, DateTime? DateOfBirth = null);
 public record CustomerStatementDto(int CustomerId, string CustomerName, decimal CreditLimit, decimal Outstanding, IReadOnlyList<OrderDto> Orders);
 
+// Mirrors EcrBuilding.Application.Procurement.SupplierLedgerLineDto's shape — same GL-reconstruction
+// pattern, filtered to the Accounts Receivable (1100) lines that actually explain Outstanding.
+public record CustomerLedgerLineDto(DateTime Date, string Reference, string Description, decimal Debit, decimal Credit);
+public record RecordCustomerPaymentRequest(decimal Amount, string Method, string? ReferenceNo, string? Notes);
+
 // Uom/StockQty/LengthM/WidthM: BRD §2.3 audit trail — Qty/UnitPrice are in the selling UOM the
 // cashier chose; StockQty is what was deducted from inventory in stock UOM. Legacy lines predating
 // the UOM engine surface Uom="" and StockQty=0 (readers fall back to Qty).
@@ -16,7 +21,15 @@ public record OrderLineDto(int ProductId, string Sku, string ProductName, decima
     // The OrderLine's own id — Module 6 return creation references original lines by this.
     int Id = 0,
     // BRD §5.2: bundle grouping — set when the line was auto-populated from a bundle.
-    int? BundleId = null, string? BundleName = null);
+    int? BundleId = null, string? BundleName = null,
+    // Product.Weight (per stock UOM, e.g. per Bundle/Bag) × this line's stock quantity — total kg for
+    // the line, so a delivery-heavy sale (rebar bundles, cement pallets) shows real load weight
+    // without the cart/receipt having to re-fetch the product catalog to multiply it out itself.
+    decimal LineWeight = 0,
+    // Cut-to-size volume mode's third dimension — null for Length/Area-mode lines.
+    decimal? HeightM = null,
+    // BRD §2.3: cashier's free-text note for this specific line.
+    string? Notes = null);
 public record OrderPaymentDto(string Method, decimal Amount, string? ReferenceNumber, string Status, DateTime CreatedAt);
 public record OrderFeeDto(string Label, decimal Amount);
 public record OrderDto(
@@ -32,13 +45,17 @@ public record OrderDto(
     // status without a trip to the separate Delivery module.
     int? DeliveryOrderId = null, string? DeliveryOrderNo = null, string? DeliveryStage = null);
 
-// Uom: selling UOM for this line (null/empty = the product's stock UOM). LengthM/WidthM: cut-to-size
-// dimension entry (BRD §2.3 item 5) — when both are set on an IsCutToSize product, Qty is ignored and
-// the computed area (length × width) becomes the quantity, priced per stock-UOM m².
+// Uom: selling UOM for this line (null/empty = the product's stock UOM). LengthM/WidthM/HeightM:
+// cut-to-size dimension entry (BRD §2.3 items 5-6) — when LengthM is set on an IsCutToSize product,
+// Qty is ignored and the computed length/area/volume (per the product's CutToSizeUnit) becomes the
+// quantity: Length uses LengthM alone, Area uses LengthM×WidthM, Volume uses LengthM×WidthM×HeightM.
 // RequiresDelivery (BRD §3.5): cashier flags this specific line for delivery instead of counter
 // pickup — a sale can mix flagged and unflagged lines (partial delivery), and only flagged lines are
 // carried into the auto-created DeliveryOrder.
-public record CartLineInput(int ProductId, decimal Qty, string? Uom = null, decimal? LengthM = null, decimal? WidthM = null, bool RequiresDelivery = false);
+// ManualDiscountPct (BRD §2.3/§6.2): a cashier-entered per-line discount %, separate from the
+// automatic contractor/loyalty-tier/quantity discount already applied to the line — subject to the
+// same discount-authorization ceiling as the order-level ManualDiscount below (OrdersController.Checkout).
+public record CartLineInput(int ProductId, decimal Qty, string? Uom = null, decimal? LengthM = null, decimal? WidthM = null, bool RequiresDelivery = false, decimal? HeightM = null, string? Notes = null, decimal? ManualDiscountPct = null);
 
 // BRD §3.5: captured once per checkout (not per line) — every delivery-flagged line in the cart ships
 // to this single address/date. ZoneId (optional): when set, the delivery fee auto-calculates from the
@@ -75,6 +92,7 @@ public record CashierShiftDto(int Id, int TerminalId, string TerminalName, strin
 public record OpenShiftRequest(int TerminalId, decimal OpeningFloat);
 public record CloseShiftRequest(decimal CountedCash);
 public record CashMovementRequest(decimal Amount, string Reason);
+public record CashMovementDto(int Id, string Direction, decimal Amount, string Reason, DateTime CreatedAt, string? CreatedByName);
 // BRD §3.6: voids carry a REASON CODE (not free text) and, above the cashier's own authorization,
 // a distinct authorizing manager who confirms with their PIN — captured separately from the voiding
 // user in the audit trail. ReasonCode: CustomerChangedMind | PricingError | DuplicateEntry |

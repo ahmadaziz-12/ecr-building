@@ -11,9 +11,11 @@ public record ProductUomConversionDto(string Uom, decimal FactorToStock);
 public record ProductAttributeDto(string Name, string Value);
 
 public record ProductDto(int Id, string Sku, string? Barcode, string NameEn, string? NameAr, int CategoryId, string CategoryName, string? Brand, decimal CostPrice, decimal SellingPrice, decimal VatRate, string StockUom, string[] SellUoms, decimal Weight, bool Returnable, int ReorderLevel, int ReorderQty, string? ImageUrl, string Status, decimal TotalOnHand, decimal TotalAvailable, IReadOnlyList<ProductUomConversionDto> UomConversions, bool IsCutToSize,
-    IReadOnlyList<ProductAttributeDto>? Attributes = null, int? SupplierId = null, string? SupplierName = null, string? BinLocation = null);
+    IReadOnlyList<ProductAttributeDto>? Attributes = null, int? SupplierId = null, string? SupplierName = null, string? BinLocation = null,
+    // BRD §2.3 items 5-6: which dimensions the POS asks for on a cut-to-size line — "Length" | "Area" | "Volume".
+    string CutToSizeUnit = "Area");
 public record UpsertProductRequest(string Sku, string? Barcode, string NameEn, string? NameAr, int CategoryId, string? Brand, decimal CostPrice, decimal SellingPrice, decimal VatRate, string StockUom, string[] SellUoms, decimal Weight, bool Returnable, int ReorderLevel, int ReorderQty, string? ImageUrl, List<ProductUomConversionDto>? UomConversions = null, bool IsCutToSize = false,
-    List<ProductAttributeDto>? Attributes = null, int? SupplierId = null, string? BinLocation = null);
+    List<ProductAttributeDto>? Attributes = null, int? SupplierId = null, string? BinLocation = null, string CutToSizeUnit = "Area");
 
 public record SetStatusRequest(string Status);
 

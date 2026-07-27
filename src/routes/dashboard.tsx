@@ -36,7 +36,13 @@ import { useFilters } from "@/lib/buildpos/filter-context";
 import { formatSAR, type Severity } from "@/lib/buildpos/format";
 import { useAuth } from "@/lib/api/auth";
 import { useOrders, useCashierShifts, useParkedSales } from "@/lib/api/pos";
-import { useStockLevels, useStockBatches, useStockTransfers, useWarehouses } from "@/lib/api/inventory";
+import {
+  useStockLevels,
+  useStockBatches,
+  useBranchStockBatches,
+  useStockTransfers,
+  useWarehouses,
+} from "@/lib/api/inventory";
 import { useProducts } from "@/lib/api/catalog";
 import { useDeliveryOrdersApi } from "@/lib/api/delivery";
 import { useZatcaInvoices } from "@/lib/api/zatca";
@@ -112,35 +118,42 @@ function OverviewPage() {
   const navigate = useNavigate();
   const { hasAccess } = useAuth();
 
-  const { data: orders } = useOrders(hasAccess("Orders"));
-  const { data: products } = useProducts(hasAccess("Inventory"));
-  const { data: stockLevels } = useStockLevels(hasAccess("Inventory"));
-  const { data: warehouses } = useWarehouses(hasAccess("Inventory"));
-  const { data: stockBatches } = useStockBatches(hasAccess("Inventory"));
-  const { data: stockTransfers } = useStockTransfers(hasAccess("Inventory"));
-  const { data: deliveryOrders } = useDeliveryOrdersApi(hasAccess("Delivery"));
-  const { data: cashierShifts } = useCashierShifts(hasAccess("Pos"));
-  const { data: zatcaInvoices } = useZatcaInvoices(undefined, hasAccess("Finance"));
-  const { data: returnsData } = useReturns(hasAccess("Finance"));
-  const { data: branches } = useBranches(hasAccess("Network"));
-  const { data: terminals } = useTerminals(hasAccess("Network"));
-  const { data: devices } = useDevices(hasAccess("Network"));
+  const { data: orders } = useOrders(hasAccess("/operate/orders"));
+  const { data: products } = useProducts(hasAccess("/stock/inventory"));
+  const { data: stockLevels } = useStockLevels(hasAccess("/stock/stocks"));
+  const { data: warehouses } = useWarehouses(hasAccess("/stock/warehouses"));
+  const { data: stockBatches } = useStockBatches(hasAccess("/stock/expiry"));
+  const { data: branchStockBatches } = useBranchStockBatches(hasAccess("/stock/expiry"));
+  const { data: stockTransfers } = useStockTransfers(hasAccess("/stock/transfers"));
+  const { data: deliveryOrders } = useDeliveryOrdersApi(hasAccess("/delivery/orders"));
+  const { data: cashierShifts } = useCashierShifts(hasAccess("/operate/cashier-shift"));
+  const { data: zatcaInvoices } = useZatcaInvoices(undefined, hasAccess("/admin/zatca-invoices"));
+  const { data: returnsData } = useReturns(hasAccess("/finance/returns"));
+  const { data: branches } = useBranches(hasAccess("/network/branches"));
+  const { data: terminals } = useTerminals(hasAccess("/network/terminals"));
+  const { data: devices } = useDevices(hasAccess("/network/devices"));
   const { data: notifications } = useNotifications();
   // Only 2 branches exist in this deployment — ParkedSalesController requires a branchId per
   // call, so summing the two known branches is the only way to get a cross-branch total (a
   // third call per new branch would be needed if the network grows).
-  const { data: parkedBranch1 } = useParkedSales(1, hasAccess("Pos"));
-  const { data: parkedBranch2 } = useParkedSales(2, hasAccess("Pos"));
+  const { data: parkedBranch1 } = useParkedSales(1, hasAccess("/operate/pos-checkout"));
+  const { data: parkedBranch2 } = useParkedSales(2, hasAccess("/operate/pos-checkout"));
 
   // The FilterBar's Branch filter (options come from the live branches list) narrows every
   // order-derived KPI, chart and table by filtering at the source; non-order datasets
   // (stock, shifts, deliveries) stay global.
   const selectedBranchId = (branches ?? []).find((b) => b.nameEn === filterValues.Branch)?.id;
   const orderList = useMemo(
-    () => (selectedBranchId === undefined ? orders ?? [] : (orders ?? []).filter((o) => o.branchId === selectedBranchId)),
+    () =>
+      selectedBranchId === undefined
+        ? (orders ?? [])
+        : (orders ?? []).filter((o) => o.branchId === selectedBranchId),
     [orders, selectedBranchId],
   );
-  const completedOrders = useMemo(() => orderList.filter((o) => o.status === "Completed"), [orderList]);
+  const completedOrders = useMemo(
+    () => orderList.filter((o) => o.status === "Completed"),
+    [orderList],
+  );
   const productMap = useMemo(() => new Map((products ?? []).map((p) => [p.id, p])), [products]);
   const stockLevelsList = stockLevels ?? [];
   const deliveryList = deliveryOrders ?? [];
@@ -162,34 +175,84 @@ function OverviewPage() {
   const availableUnits = stockLevelsList.reduce((s, x) => s + x.available, 0);
   const reservedUnits = stockLevelsList.reduce((s, x) => s + x.reserved, 0);
   const stockValue = stockLevelsList.reduce((s, x) => s + x.value, 0);
-  const quarantineBatches = (stockBatches ?? []).filter((b) => b.status === "Quarantine");
+  // Batches sitting at a branch (post-transfer/receive) expire just as much as warehouse-backroom
+  // ones — omitting them here would undercount exactly the stock closest to actually being sold.
+  const allBatches = [...(stockBatches ?? []), ...(branchStockBatches ?? [])];
+  const quarantineBatches = allBatches.filter((b) => b.status === "Quarantine");
   const quarantineQty = quarantineBatches.reduce((s, b) => s + b.qty, 0);
-  const expiringBatches = (stockBatches ?? []).filter((b) => b.daysLeft >= 0 && b.daysLeft <= 30);
-  const pendingTransfers = (stockTransfers ?? []).filter((t) => t.status !== "Received" && t.status !== "Cancelled");
+  const expiringBatches = allBatches.filter((b) => b.daysLeft >= 0 && b.daysLeft <= 30);
+  const pendingTransfers = (stockTransfers ?? []).filter(
+    (t) => t.status !== "Received" && t.status !== "Cancelled",
+  );
 
-  const activeDeliveries = deliveryList.filter((d) => !["Delivered", "Failed", "Cancelled", "ReturnedToBranch"].includes(d.stage));
+  const activeDeliveries = deliveryList.filter(
+    (d) => !["Delivered", "Failed", "Cancelled", "ReturnedToBranch"].includes(d.stage),
+  );
   const overdueDeliveries = deliveryList.filter((d) => d.overdue);
 
   const openShiftsList = (cashierShifts ?? []).filter((s) => s.status === "Open");
-  const shiftsNeedingReview = (cashierShifts ?? []).filter((s) => s.variance != null && Math.abs(s.variance) > 0);
-  const worstVarianceShift = [...(cashierShifts ?? [])].sort((a, b) => Math.abs(b.variance ?? 0) - Math.abs(a.variance ?? 0))[0];
+  const shiftsNeedingReview = (cashierShifts ?? []).filter(
+    (s) => s.variance != null && Math.abs(s.variance) > 0,
+  );
+  const worstVarianceShift = [...(cashierShifts ?? [])].sort(
+    (a, b) => Math.abs(b.variance ?? 0) - Math.abs(a.variance ?? 0),
+  )[0];
   const offlineTerminalsList = terminalsList.filter((t) => t.status !== "Online");
 
   const overviewKpisReal = [
-    { key: "sales", title: "Total Material Sales", value: formatSAR(grandTotalSum), sub: `${txCount} transactions`, tone: "success" as Severity, icon: "trending" },
-    { key: "net", title: "Net Sales", value: formatSAR(netSales), sub: "After discounts", tone: "info" as Severity, icon: "receipt" },
-    { key: "tx", title: "Transactions", value: String(txCount), sub: `Avg basket ${formatSAR(avgBasket)}`, tone: "info" as Severity, icon: "cart" },
     {
-      key: "low", title: "Low Stock Materials", value: `${lowStockCount + criticalStockCount} SKUs`, sub: `${criticalStockCount} out of stock`,
-      tone: (criticalStockCount > 0 ? "critical" : lowStockCount > 0 ? "warning" : "success") as Severity, icon: "package",
+      key: "sales",
+      title: "Total Material Sales",
+      value: formatSAR(grandTotalSum),
+      sub: `${txCount} transactions`,
+      tone: "success" as Severity,
+      icon: "trending",
     },
     {
-      key: "del", title: "Active Deliveries", value: String(activeDeliveries.length), sub: `${overdueDeliveries.length} overdue`,
-      tone: (overdueDeliveries.length > 0 ? "critical" : "info") as Severity, icon: "truck",
+      key: "net",
+      title: "Net Sales",
+      value: formatSAR(netSales),
+      sub: "After discounts",
+      tone: "info" as Severity,
+      icon: "receipt",
     },
     {
-      key: "shift", title: "Open Shifts", value: String(openShiftsList.length), sub: shiftsNeedingReview.length ? `${shiftsNeedingReview.length} need review` : "All reconciled",
-      tone: (shiftsNeedingReview.length ? "warning" : "info") as Severity, icon: "users",
+      key: "tx",
+      title: "Transactions",
+      value: String(txCount),
+      sub: `Avg basket ${formatSAR(avgBasket)}`,
+      tone: "info" as Severity,
+      icon: "cart",
+    },
+    {
+      key: "low",
+      title: "Low Stock Materials",
+      value: `${lowStockCount + criticalStockCount} SKUs`,
+      sub: `${criticalStockCount} out of stock`,
+      tone: (criticalStockCount > 0
+        ? "critical"
+        : lowStockCount > 0
+          ? "warning"
+          : "success") as Severity,
+      icon: "package",
+    },
+    {
+      key: "del",
+      title: "Active Deliveries",
+      value: String(activeDeliveries.length),
+      sub: `${overdueDeliveries.length} overdue`,
+      tone: (overdueDeliveries.length > 0 ? "critical" : "info") as Severity,
+      icon: "truck",
+    },
+    {
+      key: "shift",
+      title: "Open Shifts",
+      value: String(openShiftsList.length),
+      sub: shiftsNeedingReview.length
+        ? `${shiftsNeedingReview.length} need review`
+        : "All reconciled",
+      tone: (shiftsNeedingReview.length ? "warning" : "info") as Severity,
+      icon: "users",
     },
   ];
 
@@ -203,42 +266,84 @@ function OverviewPage() {
       cur.vat += o.vatTotal;
       buckets.set(label, cur);
     }
-    return [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([time, v]) => ({ time, ...v }));
+    return [...buckets.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([time, v]) => ({ time, ...v }));
   }, [completedOrders]);
 
   const dispatchPipelineReal = useMemo(() => {
-    const toneFor: Record<string, Severity> = { Pending: "warning", Assigned: "info", Loading: "info", Dispatched: "info", Delivered: "success", "Failed / Returned": "critical" };
-    return ["Pending", "Assigned", "Loading", "Dispatched", "Delivered", "Failed / Returned"].map((key) => ({
-      key, count: deliveryList.filter((d) => stageBucket(d.stage) === key).length, tone: toneFor[key],
-    }));
+    const toneFor: Record<string, Severity> = {
+      Pending: "warning",
+      Assigned: "info",
+      Loading: "info",
+      Dispatched: "info",
+      Delivered: "success",
+      "Failed / Returned": "critical",
+    };
+    return ["Pending", "Assigned", "Loading", "Dispatched", "Delivered", "Failed / Returned"].map(
+      (key) => ({
+        key,
+        count: deliveryList.filter((d) => stageBucket(d.stage) === key).length,
+        tone: toneFor[key],
+      }),
+    );
   }, [deliveryList]);
 
   const deliveryDetailReal = useMemo(
     () =>
       deliveryList.map((d) => ({
-        no: d.deliveryNo, order: d.orderId ? `ORD-${d.orderId}` : "—", customer: d.customerName,
+        no: d.deliveryNo,
+        order: d.orderId ? `ORD-${d.orderId}` : "—",
+        customer: d.customerName,
         materials: d.lines.map((l) => l.productName).join(", ") || "—",
         qty: `${d.lines.reduce((s, l) => s + l.deliveryQty, 0)} units`,
-        weight: `${d.weightTons} t`, area: d.area,
+        weight: `${d.weightTons} t`,
+        area: d.area,
         promised: `${new Date(d.promisedDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}, ${d.promisedTime}`,
-        driver: d.driverName ?? "Unassigned", vehicle: d.vehicleRegistration ?? "Unassigned",
-        status: stageBucket(d.stage), amount: formatSAR(d.amount), priority: d.priority,
+        driver: d.driverName ?? "Unassigned",
+        vehicle: d.vehicleRegistration ?? "Unassigned",
+        status: stageBucket(d.stage),
+        amount: formatSAR(d.amount),
+        priority: d.priority,
       })),
     [deliveryList],
   );
 
   const cashierTilesReal: { l: string; v: string; tone: Severity }[] = [
-    { l: "Active terminals", v: `${terminalsList.length - offlineTerminalsList.length} of ${terminalsList.length}`, tone: offlineTerminalsList.length ? "warning" : "success" },
+    {
+      l: "Active terminals",
+      v: `${terminalsList.length - offlineTerminalsList.length} of ${terminalsList.length}`,
+      tone: offlineTerminalsList.length ? "warning" : "success",
+    },
     { l: "Open shifts", v: String(openShiftsList.length), tone: "info" },
-    { l: "Parked sales", v: String(parkedSalesAll.length), tone: parkedSalesAll.length ? "warning" : "success" },
-    { l: "Needs review", v: String(shiftsNeedingReview.length), tone: shiftsNeedingReview.length ? "warning" : "success" },
-    { l: "Offline terminals", v: offlineTerminalsList.length ? offlineTerminalsList.map((t) => t.code).join(", ") : "None", tone: offlineTerminalsList.length ? "critical" : "success" },
-    { l: "Cash variance", v: worstVarianceShift?.variance ? formatSAR(worstVarianceShift.variance) : "SAR 0", tone: worstVarianceShift?.variance ? "critical" : "success" },
+    {
+      l: "Parked sales",
+      v: String(parkedSalesAll.length),
+      tone: parkedSalesAll.length ? "warning" : "success",
+    },
+    {
+      l: "Needs review",
+      v: String(shiftsNeedingReview.length),
+      tone: shiftsNeedingReview.length ? "warning" : "success",
+    },
+    {
+      l: "Offline terminals",
+      v: offlineTerminalsList.length ? offlineTerminalsList.map((t) => t.code).join(", ") : "None",
+      tone: offlineTerminalsList.length ? "critical" : "success",
+    },
+    {
+      l: "Cash variance",
+      v: worstVarianceShift?.variance ? formatSAR(worstVarianceShift.variance) : "SAR 0",
+      tone: worstVarianceShift?.variance ? "critical" : "success",
+    },
   ];
   const cashierQuickActions = [
     { label: "Start Sale", onClick: () => navigate({ to: "/operate/pos-checkout" }) },
     { label: "Stock Check", onClick: () => navigate({ to: "/stock/stocks" }) },
-    { label: "Open Cashier Workspace", onClick: () => navigate({ to: "/operate/cashier-workspace" }) },
+    {
+      label: "Open Cashier Workspace",
+      onClick: () => navigate({ to: "/operate/cashier-workspace" }),
+    },
     { label: "Cashier Shifts", onClick: () => navigate({ to: "/operate/cashier-shift" }) },
   ];
 
@@ -264,8 +369,15 @@ function OverviewPage() {
     }
     return [...map.entries()]
       .map(([name, v]) => ({
-        name, sales: v.sales, units: `${v.units} ${v.uom}`, ret: "—",
-        health: (catHealth.get(name) === "Critical" ? "Critical" : catHealth.get(name) === "Low" ? "Low" : "Healthy") as "Healthy" | "Low" | "Critical",
+        name,
+        sales: v.sales,
+        units: `${v.units} ${v.uom}`,
+        ret: "—",
+        health: (catHealth.get(name) === "Critical"
+          ? "Critical"
+          : catHealth.get(name) === "Low"
+            ? "Low"
+            : "Healthy") as "Healthy" | "Low" | "Critical",
         icon: categoryIconFor(name),
       }))
       .sort((a, b) => b.sales - a.sales);
@@ -278,7 +390,8 @@ function OverviewPage() {
         const p = productMap.get(l.productId);
         const cat = p?.categoryName ?? "Uncategorized";
         const cur = map.get(cat);
-        if (!cur || l.lineTotal > cur.total) map.set(cat, { name: l.productName, total: l.lineTotal });
+        if (!cur || l.lineTotal > cur.total)
+          map.set(cat, { name: l.productName, total: l.lineTotal });
       }
     }
     return Object.fromEntries([...map.entries()].map(([k, v]) => [k, v.name]));
@@ -286,16 +399,60 @@ function OverviewPage() {
 
   const contractorOrdersList = completedOrders.filter((o) => o.type === "Contractor");
   const contractorSalesTotal = contractorOrdersList.reduce((s, o) => s + o.grandTotal, 0);
-  const contractorPct = grandTotalSum ? Math.round((contractorSalesTotal / grandTotalSum) * 100) : 0;
+  const contractorPct = grandTotalSum
+    ? Math.round((contractorSalesTotal / grandTotalSum) * 100)
+    : 0;
   const returnsTotal = returnsList.reduce((s, r) => s + r.totalAmount, 0);
 
   const salesPerfKpisReal = [
-    { key: "gross", title: "Gross Sales", value: formatSAR(grossSales), sub: "All completed orders", tone: "success" as Severity, icon: "trending" },
-    { key: "net", title: "Net Sales", value: formatSAR(netSales), sub: "After discounts", tone: "info" as Severity, icon: "receipt" },
-    { key: "discounts", title: "Discounts", value: formatSAR(discountsTotal), sub: grossSales ? `${((discountsTotal / grossSales) * 100).toFixed(1)}% of gross` : "—", tone: "info" as Severity, icon: "chart" },
-    { key: "returns", title: "Completed Returns", value: formatSAR(returnsTotal), sub: `${returnsList.length} items`, tone: (returnsTotal > 0 ? "warning" : "success") as Severity, icon: "history" },
-    { key: "basket", title: "Average Basket", value: formatSAR(avgBasket), sub: "Retail + contractor", tone: "info" as Severity, icon: "cart" },
-    { key: "contractor", title: "Contractor Sales", value: formatSAR(contractorSalesTotal), sub: `${contractorPct}% of gross`, tone: "success" as Severity, icon: "users" },
+    {
+      key: "gross",
+      title: "Gross Sales",
+      value: formatSAR(grossSales),
+      sub: "All completed orders",
+      tone: "success" as Severity,
+      icon: "trending",
+    },
+    {
+      key: "net",
+      title: "Net Sales",
+      value: formatSAR(netSales),
+      sub: "After discounts",
+      tone: "info" as Severity,
+      icon: "receipt",
+    },
+    {
+      key: "discounts",
+      title: "Discounts",
+      value: formatSAR(discountsTotal),
+      sub: grossSales ? `${((discountsTotal / grossSales) * 100).toFixed(1)}% of gross` : "—",
+      tone: "info" as Severity,
+      icon: "chart",
+    },
+    {
+      key: "returns",
+      title: "Completed Returns",
+      value: formatSAR(returnsTotal),
+      sub: `${returnsList.length} items`,
+      tone: (returnsTotal > 0 ? "warning" : "success") as Severity,
+      icon: "history",
+    },
+    {
+      key: "basket",
+      title: "Average Basket",
+      value: formatSAR(avgBasket),
+      sub: "Retail + contractor",
+      tone: "info" as Severity,
+      icon: "cart",
+    },
+    {
+      key: "contractor",
+      title: "Contractor Sales",
+      value: formatSAR(contractorSalesTotal),
+      sub: `${contractorPct}% of gross`,
+      tone: "success" as Severity,
+      icon: "users",
+    },
   ];
 
   const recentOrdersReal = useMemo(
@@ -304,7 +461,11 @@ function OverviewPage() {
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 5)
         .map((o) => ({
-          id: o.orderNo, customer: o.customerName, type: o.type, value: formatSAR(o.grandTotal), status: o.status,
+          id: o.orderNo,
+          customer: o.customerName,
+          type: o.type,
+          value: formatSAR(o.grandTotal),
+          status: o.status,
           payment: o.payments.map((p) => p.method).join(" + ") || "—",
           invoice: zatcaByOrderId.get(o.id)?.type ?? "Pending",
         })),
@@ -313,7 +474,8 @@ function OverviewPage() {
 
   const branchPerformanceReal = useMemo(() => {
     const ordersByBranch = new Map<number, typeof completedOrders>();
-    for (const o of completedOrders) ordersByBranch.set(o.branchId, [...(ordersByBranch.get(o.branchId) ?? []), o]);
+    for (const o of completedOrders)
+      ordersByBranch.set(o.branchId, [...(ordersByBranch.get(o.branchId) ?? []), o]);
     const shiftsByTerminal = new Map(terminalsList.map((t) => [t.id, t.branchId]));
     const warehouseBranchMap = new Map((warehouses ?? []).map((w) => [w.id, w.branchId]));
     return (branches ?? []).map((b) => {
@@ -321,19 +483,75 @@ function OverviewPage() {
       const sales = bOrders.reduce((s, o) => s + o.grandTotal, 0);
       const tx = bOrders.length;
       const basket = tx ? Math.round(sales / tx) : 0;
-      const low = stockLevelsList.filter((s) => warehouseBranchMap.get(s.warehouseId) === b.id && (s.status === "Low" || s.status === "Critical")).length;
-      const branchOpenShifts = (cashierShifts ?? []).filter((s) => shiftsByTerminal.get(s.terminalId) === b.id && s.status === "Open").length;
-      return { branch: b.nameEn, sales: formatSAR(sales), tx, returns: "—", basket: formatSAR(basket), low, shifts: branchOpenShifts };
+      const low = stockLevelsList.filter(
+        (s) =>
+          warehouseBranchMap.get(s.warehouseId) === b.id &&
+          (s.status === "Low" || s.status === "Critical"),
+      ).length;
+      const branchOpenShifts = (cashierShifts ?? []).filter(
+        (s) => shiftsByTerminal.get(s.terminalId) === b.id && s.status === "Open",
+      ).length;
+      return {
+        branch: b.nameEn,
+        sales: formatSAR(sales),
+        tx,
+        returns: "—",
+        basket: formatSAR(basket),
+        low,
+        shifts: branchOpenShifts,
+      };
     });
   }, [branches, completedOrders, terminalsList, cashierShifts, stockLevelsList, warehouses]);
 
   const inventoryKpisReal = [
-    { key: "avail", title: "Available Stock", value: availableUnits.toLocaleString(), sub: "units on hand", tone: "success" as Severity, icon: "package" },
-    { key: "res", title: "Reserved Stock", value: reservedUnits.toLocaleString(), sub: "units held", tone: "info" as Severity, icon: "layers" },
-    { key: "low", title: "Low Stock", value: String(lowStockCount), sub: "SKUs below reorder", tone: (lowStockCount ? "warning" : "success") as Severity, icon: "alert" },
-    { key: "oos", title: "Out of Stock", value: String(criticalStockCount), sub: "SKUs unavailable", tone: (criticalStockCount ? "critical" : "success") as Severity, icon: "alert" },
-    { key: "quar", title: "Quarantine", value: quarantineQty.toLocaleString(), sub: "units on hold", tone: (quarantineQty ? "warning" : "success") as Severity, icon: "shield" },
-    { key: "trf", title: "Pending Transfers", value: String(pendingTransfers.length), sub: "between warehouses", tone: "info" as Severity, icon: "truck" },
+    {
+      key: "avail",
+      title: "Available Stock",
+      value: availableUnits.toLocaleString(),
+      sub: "units on hand",
+      tone: "success" as Severity,
+      icon: "package",
+    },
+    {
+      key: "res",
+      title: "Reserved Stock",
+      value: reservedUnits.toLocaleString(),
+      sub: "units held",
+      tone: "info" as Severity,
+      icon: "layers",
+    },
+    {
+      key: "low",
+      title: "Low Stock",
+      value: String(lowStockCount),
+      sub: "SKUs below reorder",
+      tone: (lowStockCount ? "warning" : "success") as Severity,
+      icon: "alert",
+    },
+    {
+      key: "oos",
+      title: "Out of Stock",
+      value: String(criticalStockCount),
+      sub: "SKUs unavailable",
+      tone: (criticalStockCount ? "critical" : "success") as Severity,
+      icon: "alert",
+    },
+    {
+      key: "quar",
+      title: "Quarantine",
+      value: quarantineQty.toLocaleString(),
+      sub: "units on hold",
+      tone: (quarantineQty ? "warning" : "success") as Severity,
+      icon: "shield",
+    },
+    {
+      key: "trf",
+      title: "Pending Transfers",
+      value: String(pendingTransfers.length),
+      sub: "between warehouses",
+      tone: "info" as Severity,
+      icon: "truck",
+    },
   ];
 
   const inventoryRowsReal = useMemo(
@@ -341,8 +559,14 @@ function OverviewPage() {
       stockLevelsList
         .filter((s) => s.status !== "Healthy")
         .map((s) => ({
-          sku: s.sku, name: s.productName, cat: s.categoryName, branch: s.warehouseName,
-          qty: `${s.available} units`, reorder: `${s.reorderLevel} units`, supplier: "—", status: s.status as Severity,
+          sku: s.sku,
+          name: s.productName,
+          cat: s.categoryName,
+          branch: s.warehouseName,
+          qty: `${s.available} units`,
+          reorder: `${s.reorderLevel} units`,
+          supplier: "—",
+          status: s.status as Severity,
         })),
     [stockLevelsList],
   );
@@ -359,12 +583,54 @@ function OverviewPage() {
   ];
 
   const cashierKpisReal = [
-    { key: "act", title: "Active Terminals", value: String(terminalsList.length - offlineTerminalsList.length), sub: `of ${terminalsList.length} total`, tone: "success" as Severity, icon: "monitor" },
-    { key: "off", title: "Offline Terminals", value: String(offlineTerminalsList.length), sub: offlineTerminalsList.map((t) => t.code).join(", ") || "None", tone: (offlineTerminalsList.length ? "critical" : "success") as Severity, icon: "alert" },
-    { key: "op", title: "Open Shifts", value: String(openShiftsList.length), sub: "in progress", tone: "info" as Severity, icon: "users" },
-    { key: "park", title: "Parked Sales", value: String(parkedSalesAll.length), sub: "awaiting resume", tone: (parkedSalesAll.length ? "warning" : "success") as Severity, icon: "history" },
-    { key: "apr", title: "Needs Review", value: String(shiftsNeedingReview.length), sub: "cash variance", tone: (shiftsNeedingReview.length ? "warning" : "success") as Severity, icon: "shield" },
-    { key: "var", title: "Cash Variance", value: worstVarianceShift?.variance ? formatSAR(worstVarianceShift.variance) : "SAR 0", sub: worstVarianceShift ? `SH-${worstVarianceShift.id}` : "—", tone: (worstVarianceShift?.variance ? "critical" : "success") as Severity, icon: "receipt" },
+    {
+      key: "act",
+      title: "Active Terminals",
+      value: String(terminalsList.length - offlineTerminalsList.length),
+      sub: `of ${terminalsList.length} total`,
+      tone: "success" as Severity,
+      icon: "monitor",
+    },
+    {
+      key: "off",
+      title: "Offline Terminals",
+      value: String(offlineTerminalsList.length),
+      sub: offlineTerminalsList.map((t) => t.code).join(", ") || "None",
+      tone: (offlineTerminalsList.length ? "critical" : "success") as Severity,
+      icon: "alert",
+    },
+    {
+      key: "op",
+      title: "Open Shifts",
+      value: String(openShiftsList.length),
+      sub: "in progress",
+      tone: "info" as Severity,
+      icon: "users",
+    },
+    {
+      key: "park",
+      title: "Parked Sales",
+      value: String(parkedSalesAll.length),
+      sub: "awaiting resume",
+      tone: (parkedSalesAll.length ? "warning" : "success") as Severity,
+      icon: "history",
+    },
+    {
+      key: "apr",
+      title: "Needs Review",
+      value: String(shiftsNeedingReview.length),
+      sub: "cash variance",
+      tone: (shiftsNeedingReview.length ? "warning" : "success") as Severity,
+      icon: "shield",
+    },
+    {
+      key: "var",
+      title: "Cash Variance",
+      value: worstVarianceShift?.variance ? formatSAR(worstVarianceShift.variance) : "SAR 0",
+      sub: worstVarianceShift ? `SH-${worstVarianceShift.id}` : "—",
+      tone: (worstVarianceShift?.variance ? "critical" : "success") as Severity,
+      icon: "receipt",
+    },
   ];
 
   const terminalDetailReal = useMemo(
@@ -372,17 +638,37 @@ function OverviewPage() {
       (cashierShifts ?? []).map((s) => {
         const term = terminalsList.find((t) => t.id === s.terminalId);
         const ordersForShift = orderList.filter(
-          (o) => o.terminalId === s.terminalId && new Date(o.createdAt) >= new Date(s.openedAt) && (!s.closedAt || new Date(o.createdAt) <= new Date(s.closedAt)),
+          (o) =>
+            o.terminalId === s.terminalId &&
+            new Date(o.createdAt) >= new Date(s.openedAt) &&
+            (!s.closedAt || new Date(o.createdAt) <= new Date(s.closedAt)),
         );
-        const printer = (devices ?? []).find((d) => d.terminalId === s.terminalId && d.type === "ReceiptPrinter");
-        const card = (devices ?? []).find((d) => d.terminalId === s.terminalId && d.type === "CardReader");
+        const printer = (devices ?? []).find(
+          (d) => d.terminalId === s.terminalId && d.type === "ReceiptPrinter",
+        );
+        const card = (devices ?? []).find(
+          (d) => d.terminalId === s.terminalId && d.type === "CardReader",
+        );
         return {
-          term: term?.code ?? s.terminalName, cashier: s.cashierName, shift: `SH-${s.id}`,
-          started: new Date(s.openedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-          tx: ordersForShift.length, sales: formatSAR(s.cashSales), expected: formatSAR(s.expectedCash),
+          term: term?.code ?? s.terminalName,
+          cashier: s.cashierName,
+          shift: `SH-${s.id}`,
+          started: new Date(s.openedAt).toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          tx: ordersForShift.length,
+          sales: formatSAR(s.cashSales),
+          expected: formatSAR(s.expectedCash),
           sync: term?.lastSyncAt ? "Recently" : "—",
-          printer: printer?.status ?? "—", card: card?.status ?? "—",
-          status: s.status !== "Open" ? s.status : s.variance && Math.abs(s.variance) > 0 ? "Review Required" : "Active",
+          printer: printer?.status ?? "—",
+          card: card?.status ?? "—",
+          status:
+            s.status !== "Open"
+              ? s.status
+              : s.variance && Math.abs(s.variance) > 0
+                ? "Review Required"
+                : "Active",
         };
       }),
     [cashierShifts, terminalsList, orderList, devices],
@@ -399,7 +685,13 @@ function OverviewPage() {
       }
     }
     return [...map.entries()]
-      .map(([method, v]) => ({ method, amount: formatSAR(v.amount), tx: v.tx, tone: PAYMENT_META[method]?.tone ?? "info", icon: PAYMENT_META[method]?.icon ?? "receipt" }))
+      .map(([method, v]) => ({
+        method,
+        amount: formatSAR(v.amount),
+        tx: v.tx,
+        tone: PAYMENT_META[method]?.tone ?? "info",
+        icon: PAYMENT_META[method]?.icon ?? "receipt",
+      }))
       .sort((a, b) => b.tx - a.tx);
   }, [completedOrders]);
 
@@ -411,7 +703,10 @@ function OverviewPage() {
     const pending = returnsList.filter((r) => r.status === "PendingApproval");
     const quarantineReturns = returnsList.filter((r) => r.status === "Quarantine");
     return [
-      { label: "Standard Returns", value: formatSAR(standard.reduce((s, r) => s + r.totalAmount, 0)) },
+      {
+        label: "Standard Returns",
+        value: formatSAR(standard.reduce((s, r) => s + r.totalAmount, 0)),
+      },
       { label: "Damaged Claims", value: `${damaged.length} items` },
       { label: "Surplus / Excess", value: `${surplus.length} items` },
       { label: "Exchanges", value: String(exchange.length) },
@@ -423,8 +718,16 @@ function OverviewPage() {
   const alertsReal = useMemo(
     () =>
       (notifications ?? []).map((n) => ({
-        severity: (n.severity === "Critical" ? "critical" : n.severity === "Warning" ? "warning" : "info") as Severity,
-        module: n.type, msg: n.message, age: timeAgo(n.asOf), action: "View", link: n.link,
+        severity: (n.severity === "Critical"
+          ? "critical"
+          : n.severity === "Warning"
+            ? "warning"
+            : "info") as Severity,
+        module: n.type,
+        msg: n.message,
+        age: timeAgo(n.asOf),
+        action: "View",
+        link: n.link,
       })),
     [notifications],
   );
@@ -476,7 +779,11 @@ function OverviewPage() {
             topProductByCategory={topProductByCategoryReal}
             onViewAll={() => setActiveTab("sales")}
           />
-          <DispatchPipelinePreview stages={dispatchPipelineReal} previewCards={deliveryDetailReal.slice(0, 3)} onViewAll={() => setActiveTab("delivery")} />
+          <DispatchPipelinePreview
+            stages={dispatchPipelineReal}
+            previewCards={deliveryDetailReal.slice(0, 3)}
+            onViewAll={() => setActiveTab("delivery")}
+          />
           <CashierWorkspaceSummary tiles={cashierTilesReal} quickActions={cashierQuickActions} />
         </TabsContent>
 
@@ -484,9 +791,16 @@ function OverviewPage() {
         <TabsContent value="sales" className="bp-fade space-y-4">
           <SalesPerfKpis items={salesPerfKpisReal} />
           <SalesPerformance data={hourlyReal} />
-          <TopCategoriesCompact categories={categoryAggReal} topProductByCategory={topProductByCategoryReal} onViewAll={() => navigate({ to: "/insights/sales" })} />
+          <TopCategoriesCompact
+            categories={categoryAggReal}
+            topProductByCategory={topProductByCategoryReal}
+            onViewAll={() => navigate({ to: "/insights/sales" })}
+          />
           <BranchPerformance rows={branchPerformanceReal} />
-          <RecentOrdersTable orders={recentOrdersReal} onOpenAnalytics={() => navigate({ to: "/insights/bi" })} />
+          <RecentOrdersTable
+            orders={recentOrdersReal}
+            onOpenAnalytics={() => navigate({ to: "/insights/bi" })}
+          />
         </TabsContent>
 
         {/* 3. Inventory Health */}
@@ -514,7 +828,12 @@ function OverviewPage() {
 
         {/* 7. Compliance & Alerts */}
         <TabsContent value="compliance" className="bp-fade space-y-4">
-          <AlertsByGroup alerts={alertsReal} onAction={(a) => (a.link ? navigate({ to: a.link }) : toast.info(a.action, { description: a.msg }))} />
+          <AlertsByGroup
+            alerts={alertsReal}
+            onAction={(a) =>
+              a.link ? navigate({ to: a.link }) : toast.info(a.action, { description: a.msg })
+            }
+          />
         </TabsContent>
       </Tabs>
     </div>

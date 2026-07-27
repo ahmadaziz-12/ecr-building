@@ -14,7 +14,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/pos/parked-sales")]
 [Authorize]
-[RequireModule(ModuleArea.Pos, AccessLevel.View)]
+[RequireModule("/operate/pos-checkout", PermissionAction.View)]
 public class ParkedSalesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -27,7 +27,7 @@ public class ParkedSalesController(AppDbContext db, IAuditService audit) : Contr
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/pos-checkout", PermissionAction.Create)]
     public async Task<ActionResult<ParkedSaleDto>> Create(CreateParkedSaleRequest request, CancellationToken ct)
     {
         if (request.Lines.Count == 0) return BadRequest(new { error = "Cannot hold an empty cart." });
@@ -54,7 +54,7 @@ public class ParkedSalesController(AppDbContext db, IAuditService audit) : Contr
     }
 
     [HttpDelete("{id:int}")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/pos-checkout", PermissionAction.Delete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var parked = await db.ParkedSales.FindAsync([id], ct);

@@ -226,8 +226,8 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
   // The static blueprint option names ("Cement & Binders", "Riyadh Main Branch") don't match the
   // live category/branch names, so wired consumers would filter everything to nothing — swap in
   // the real names once loaded.
-  const { data: liveCategories } = useCategories(hasAccess("Inventory"));
-  const { data: liveBranches } = useBranches(hasAccess("Network"));
+  const { data: liveCategories } = useCategories(hasAccess("/admin/categories"));
+  const { data: liveBranches } = useBranches(hasAccess("/network/branches"));
   const liveOptions = (g: { label: string; options: string[] }): string[] => {
     if (g.label === "Category" && liveCategories?.length) return ["All Categories", ...liveCategories.map((c) => c.nameEn)];
     if (g.label === "Branch" && liveBranches?.length) return ["All Permitted Branches", ...liveBranches.map((b) => b.nameEn)];

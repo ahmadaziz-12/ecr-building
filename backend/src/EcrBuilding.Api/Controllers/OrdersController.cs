@@ -15,7 +15,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/pos/orders")]
 [Authorize]
-[RequireModule(ModuleArea.Orders, AccessLevel.View)]
+[RequireModule("/operate/orders", PermissionAction.View)]
 public class OrdersController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements, IPaymentGateway paymentGateway, IGlPostingService gl, IZatcaService zatca, ILogger<OrdersController> logger, IPasswordHasher passwordHasher) : ControllerBase
 {
     // Cashier's own contractor-discount rule, ported from the previous client-only PosCheckout.tsx.
@@ -119,7 +119,7 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
     // only runs for carts. Loyalty/AccountCredit tenders are checkout-only concerns (points math and
     // credit-limit overrides are validated against the cart there), so this accepts real rails only.
     [HttpPut("{id:int}/pay")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/pos-checkout", PermissionAction.Edit)]
     public async Task<ActionResult<OrderDto>> Pay(int id, PayOrderRequest request, CancellationToken ct)
     {
         var order = await Query().FirstOrDefaultAsync(o => o.Id == id, ct);
@@ -255,7 +255,7 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
     }
 
     [HttpPut("{id:int}/void")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/pos-checkout", PermissionAction.Delete)]
     public async Task<ActionResult<OrderDto>> Void(int id, VoidOrderRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Reason)) return BadRequest(new { error = "A reason is required to void an order." });
@@ -304,7 +304,7 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
     // removing one constituent would silently break the bundle deal's pricing (void the whole order,
     // or process a return, instead).
     [HttpPut("{id:int}/void-line")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/pos-checkout", PermissionAction.Delete)]
     public async Task<ActionResult<OrderDto>> VoidLine(int id, VoidLineRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Reason)) return BadRequest(new { error = "A reason is required to void a line." });
@@ -362,7 +362,7 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
     private sealed record PricedLine(CartLineInput Input, int? BundleId = null, decimal? UnitPriceOverride = null);
 
     [HttpPost]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/pos-checkout", PermissionAction.Create)]
     public async Task<ActionResult<OrderDto>> Checkout(CreateOrderRequest request, CancellationToken ct)
     {
         if (request.Lines.Count == 0 && (request.Bundles is null || request.Bundles.Count == 0))
@@ -521,13 +521,26 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         // below never has to re-resolve the UOM conversion.
         var deliveryCandidateLines = new List<(int ProductId, string StockUom, decimal Weight, decimal StockQty, decimal LineTotal)>();
 
+        // Batch-fetch every product referenced by the cart in one round trip instead of one
+        // SELECT per line — matters once an invoice reaches the hundreds of line items (BRD "200+
+        // line items"); the per-line atomic stock UPDATE below still runs per line since each one
+        // needs its own live conditional check against concurrently-committed stock.
+        var productIds = pricedLines.Select(p => p.Input.ProductId).Distinct().ToList();
+        var productsById = await db.Products.Include(p => p.UomConversions)
+            .Where(p => productIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, ct);
+
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         foreach (var priced in pricedLines)
         {
             var line = priced.Input;
-            var product = await db.Products.Include(p => p.UomConversions)
-                .FirstOrDefaultAsync(p => p.Id == line.ProductId, ct);
-            if (product is null) return BadRequest(new { error = $"Unknown product {line.ProductId}." });
+            if (line.ManualDiscountPct is < 0 or > 100)
+            {
+                return BadRequest(new { error = $"Per-line discount for product {line.ProductId} must be between 0 and 100%." });
+            }
+            if (!productsById.TryGetValue(line.ProductId, out var product))
+            {
+                return BadRequest(new { error = $"Unknown product {line.ProductId}." });
+            }
 
             // BRD §2.3 UOM engine: resolve the selling UOM the cashier chose into (entered qty,
             // selling-UOM unit price, stock-UOM deduction qty). Three cases:
@@ -539,19 +552,42 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             decimal enteredQty = line.Qty;
             var sellUom = string.IsNullOrWhiteSpace(line.Uom) ? product.StockUom : line.Uom!;
             decimal factor;
-            decimal? lengthM = null, widthM = null;
+            decimal? lengthM = null, widthM = null, heightM = null;
 
-            if (product.IsCutToSize && line.LengthM is not null && line.WidthM is not null)
+            // BRD §2.3 items 5-6: which dimensions a cut-to-size line needs depends on the product's
+            // configured CutToSizeUnit — Length (cable/pipe, no width), Area (glass, length × width,
+            // the original/default behavior), or Volume (sand/timber, length × width × height).
+            if (product.IsCutToSize && line.LengthM is not null)
             {
-                if (line.LengthM <= 0 || line.WidthM <= 0)
+                if (line.LengthM <= 0)
                 {
-                    return BadRequest(new { error = $"Cut-to-size dimensions for {product.Sku} must be positive (got {line.LengthM} × {line.WidthM})." });
+                    return BadRequest(new { error = $"Cut-to-size length for {product.Sku} must be positive (got {line.LengthM})." });
                 }
-                enteredQty = UomMath.AreaOf(line.LengthM.Value, line.WidthM.Value);
+                if (product.CutToSizeUnit == "Length")
+                {
+                    enteredQty = UomMath.LengthOf(line.LengthM.Value);
+                    lengthM = line.LengthM;
+                }
+                else if (product.CutToSizeUnit == "Volume")
+                {
+                    if (line.WidthM is null || line.HeightM is null || line.WidthM <= 0 || line.HeightM <= 0)
+                    {
+                        return BadRequest(new { error = $"Cut-to-size dimensions for {product.Sku} must be positive (got {line.LengthM} × {line.WidthM} × {line.HeightM})." });
+                    }
+                    enteredQty = UomMath.VolumeOf(line.LengthM.Value, line.WidthM.Value, line.HeightM.Value);
+                    lengthM = line.LengthM; widthM = line.WidthM; heightM = line.HeightM;
+                }
+                else // "Area" — the original behavior, unchanged.
+                {
+                    if (line.WidthM is null || line.WidthM <= 0)
+                    {
+                        return BadRequest(new { error = $"Cut-to-size dimensions for {product.Sku} must be positive (got {line.LengthM} × {line.WidthM})." });
+                    }
+                    enteredQty = UomMath.AreaOf(line.LengthM.Value, line.WidthM.Value);
+                    lengthM = line.LengthM; widthM = line.WidthM;
+                }
                 sellUom = product.StockUom;
                 factor = 1m;
-                lengthM = line.LengthM;
-                widthM = line.WidthM;
             }
             else
             {
@@ -603,13 +639,17 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             var quantityPct = quantityRules
                 .Where(r => (r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase)) && stockQty >= r.MinQuantity)
                 .Select(r => r.Value).DefaultIfEmpty(0m).Max();
-            var lineDiscountPct = priced.BundleId is null ? Math.Max(discountPct, quantityPct) : 0m;
+            // BRD §2.3/§6.2: a cashier-entered per-line discount doesn't stack with the auto contractor/
+            // tier/quantity discount either — same "larger of" rule as those three, gated above like the
+            // order-level ManualDiscount. Bundle constituents stay exempt (see comment above).
+            var manualLinePct = line.ManualDiscountPct ?? 0m;
+            var lineDiscountPct = priced.BundleId is null ? Math.Max(Math.Max(discountPct, quantityPct), manualLinePct) : 0m;
             var lineTotal = Math.Round(enteredQty * unitPrice * (1 - lineDiscountPct / 100), 2);
             order.Lines.Add(new OrderLine
             {
                 ProductId = product.Id, Qty = enteredQty, Uom = sellUom, StockQty = stockQty,
-                LengthM = lengthM, WidthM = widthM, UnitPrice = unitPrice, BundleId = priced.BundleId,
-                DiscountPct = lineDiscountPct, VatRate = product.VatRate, LineTotal = lineTotal,
+                LengthM = lengthM, WidthM = widthM, HeightM = heightM, UnitPrice = unitPrice, BundleId = priced.BundleId,
+                DiscountPct = lineDiscountPct, VatRate = product.VatRate, LineTotal = lineTotal, Notes = line.Notes,
             });
             lineCategoryTotals.Add((product.CategoryId, lineTotal));
             if (line.RequiresDelivery)
@@ -643,13 +683,20 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         // BRD §6.2 discount authorization tiers: Cashier ≤5%, Supervisor 5–15%, Manager >15% for
         // percentage discounts; Fixed Amount discounts always require Supervisor-tier (or above)
         // approval regardless of size. Coupon and trade-account (contractor) discounts are exempt —
-        // those are pre-validated/auto-applied per BRD and never gated here.
-        if (request.ManualDiscount is not null && request.ManualDiscount.Value > 0)
+        // those are pre-validated/auto-applied per BRD and never gated here. A cashier-entered
+        // per-line discount (BRD §2.3) is gated the same way as the order-level one — the highest
+        // percentage requested anywhere in the cart decides whether approval is needed, and a single
+        // DiscountApprovalRequestId covers the whole checkout either way.
+        var maxLineManualPct = request.Lines.Where(l => l.ManualDiscountPct is not null)
+            .Select(l => l.ManualDiscountPct!.Value).DefaultIfEmpty(0m).Max();
+        if ((request.ManualDiscount is not null && request.ManualDiscount.Value > 0) || maxLineManualPct > 0)
         {
-            var isFixed = request.ManualDiscount.Type.Equals("Fixed", StringComparison.OrdinalIgnoreCase);
-            var impliedPct = isFixed
-                ? (lineTotalsSum == 0 ? 0 : request.ManualDiscount.Value / lineTotalsSum * 100)
-                : request.ManualDiscount.Value;
+            var isFixed = request.ManualDiscount?.Type.Equals("Fixed", StringComparison.OrdinalIgnoreCase) ?? false;
+            var orderImpliedPct = request.ManualDiscount is null ? 0m
+                : isFixed
+                    ? (lineTotalsSum == 0 ? 0 : request.ManualDiscount.Value / lineTotalsSum * 100)
+                    : request.ManualDiscount.Value;
+            var impliedPct = Math.Max(orderImpliedPct, maxLineManualPct);
 
             var discountCeilingClaim = User.FindFirst("posCeiling:discountPercent")?.Value;
             // Claim absent = "no cap" (Store Manager/System Admin tier) — see AuthService.IssueTokensAsync.
@@ -878,12 +925,15 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         if (allSucceeded)
         {
             var revenue = taxableTotal + feesTotal;
-            await gl.PostAsync(order.OrderNo, $"POS sale to {(customer?.NameEn ?? "Walk-in Customer")}",
-                [
-                    new GlLine("1000", order.GrandTotal, 0),
-                    new GlLine("4000", 0, revenue),
-                    new GlLine("2100", 0, order.VatTotal),
-                ], ct);
+            // AccountCredit tenders never touch Cash & Bank — that portion is money the customer
+            // still owes, so it debits Accounts Receivable (1100) instead, keeping 1000 an accurate
+            // cash/card figure and making the customer's Outstanding balance traceable in the GL
+            // (CustomersController.Ledger reads exactly this account for exactly this reason).
+            var cashPortion = order.GrandTotal - accountCreditAmount;
+            var saleLines = new List<GlLine> { new("4000", 0, revenue), new("2100", 0, order.VatTotal) };
+            if (cashPortion > 0) saleLines.Add(new GlLine("1000", cashPortion, 0));
+            if (accountCreditAmount > 0) saleLines.Add(new GlLine("1100", accountCreditAmount, 0));
+            await gl.PostAsync(order.OrderNo, $"POS sale to {(customer?.NameEn ?? "Walk-in Customer")}", saleLines, ct);
 
             // ZATCA failures must never fail the sale — left "Pending" for retry via /api/zatca/invoices/{orderId}/submit.
             try
@@ -922,7 +972,10 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         o.Id, o.OrderNo, o.BranchId, o.Branch?.NameEn ?? "", o.TerminalId, o.Cashier?.Name ?? "", o.CustomerId,
         o.Customer?.NameEn ?? "Walk-in Customer", o.Type.ToString(), o.Status.ToString(), o.PaymentStatus.ToString(),
         o.SubTotal, o.DiscountTotal, o.VatTotal, o.Fees.Sum(f => f.Amount), o.GrandTotal, o.CreatedAt,
-        o.Lines.Select(l => new OrderLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.UnitPrice, l.DiscountPct, l.VatRate, l.LineTotal, l.Uom, l.StockQty, l.LengthM, l.WidthM, l.Id, l.BundleId, l.Bundle?.NameEn)).ToList(),
+        // Legacy lines predating the UOM engine have StockQty=0 — fall back to Qty, same rule the
+        // Uom/StockQty doc comment on OrderLineDto already applies to every other stock-UOM reader.
+        o.Lines.Select(l => new OrderLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.UnitPrice, l.DiscountPct, l.VatRate, l.LineTotal, l.Uom, l.StockQty, l.LengthM, l.WidthM, l.Id, l.BundleId, l.Bundle?.NameEn,
+            (l.Product?.Weight ?? 0) * (l.StockQty > 0 ? l.StockQty : l.Qty), l.HeightM, l.Notes)).ToList(),
         o.Payments.Select(p => new OrderPaymentDto(p.Method.ToString(), p.Amount, p.ReferenceNumber, p.Status.ToString(), p.CreatedAt)).ToList(),
         o.Fees.Select(f => new OrderFeeDto(f.Label, f.Amount)).ToList(),
         loyaltyPointsEarned, loyaltyPointsBalance, loyaltyNextTierThreshold, loyaltyPointsRedeemed,

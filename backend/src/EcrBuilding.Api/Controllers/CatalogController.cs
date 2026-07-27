@@ -15,7 +15,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/catalog/categories")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/admin/categories", PermissionAction.View)]
 public class CategoriesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -26,7 +26,7 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/admin/categories", PermissionAction.Create)]
     public async Task<ActionResult<CategoryDto>> Create(UpsertCategoryRequest request, CancellationToken ct)
     {
         var category = new Category
@@ -45,7 +45,7 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/admin/categories", PermissionAction.Edit)]
     public async Task<ActionResult<CategoryDto>> Update(int id, UpsertCategoryRequest request, CancellationToken ct)
     {
         var category = await db.Categories.Include(c => c.Parent).Include(c => c.Products).FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -64,7 +64,7 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/admin/categories", PermissionAction.Delete)]
     public async Task<ActionResult<CategoryDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
     {
         var category = await db.Categories.Include(c => c.Parent).Include(c => c.Products).FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -86,7 +86,7 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
 [ApiController]
 [Route("api/catalog/products")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/stock/inventory", PermissionAction.View)]
 public class ProductsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -109,7 +109,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/inventory", PermissionAction.Create)]
     public async Task<ActionResult<ProductDto>> Create(UpsertProductRequest request, CancellationToken ct)
     {
         if (await db.Products.AnyAsync(p => p.Sku == request.Sku, ct))
@@ -129,7 +129,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             SellingPrice = request.SellingPrice, VatRate = request.VatRate, StockUom = request.StockUom,
             SellUomsJson = JsonSerializer.Serialize(request.SellUoms), Weight = request.Weight,
             Returnable = request.Returnable, ReorderLevel = request.ReorderLevel, ReorderQty = request.ReorderQty,
-            ImageUrl = request.ImageUrl, IsCutToSize = request.IsCutToSize,
+            ImageUrl = request.ImageUrl, IsCutToSize = request.IsCutToSize, CutToSizeUnit = request.CutToSizeUnit,
             SupplierId = request.SupplierId, BinLocation = request.BinLocation,
         };
         product.UomConversions = BuildUomConversions(request.UomConversions, request.StockUom);
@@ -143,7 +143,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/inventory", PermissionAction.Edit)]
     public async Task<ActionResult<ProductDto>> Update(int id, UpsertProductRequest request, CancellationToken ct)
     {
         var product = await db.Products.Include(p => p.Category).Include(p => p.StockLevels).Include(p => p.UomConversions)
@@ -166,7 +166,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         product.SellingPrice = request.SellingPrice; product.VatRate = request.VatRate; product.StockUom = request.StockUom;
         product.SellUomsJson = JsonSerializer.Serialize(request.SellUoms); product.Weight = request.Weight;
         product.Returnable = request.Returnable; product.ReorderLevel = request.ReorderLevel; product.ReorderQty = request.ReorderQty;
-        product.ImageUrl = request.ImageUrl; product.IsCutToSize = request.IsCutToSize;
+        product.ImageUrl = request.ImageUrl; product.IsCutToSize = request.IsCutToSize; product.CutToSizeUnit = request.CutToSizeUnit;
         product.SupplierId = request.SupplierId; product.BinLocation = request.BinLocation;
         // Replace-all, same pattern as RolePermissions in RolesController.Update — the request's list
         // is the complete intended state, not a delta.
@@ -182,7 +182,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/inventory", PermissionAction.Delete)]
     public async Task<ActionResult<ProductDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
     {
         var product = await db.Products.Include(p => p.Category).Include(p => p.StockLevels).FirstOrDefaultAsync(p => p.Id == id, ct);
@@ -228,7 +228,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
                 p.SellingPrice, p.VatRate, p.StockUom, JsonSerializer.Deserialize<string[]>(p.SellUomsJson) ?? [], p.Weight,
                 p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
                 branchLevels.Sum(s => s.OnHand), branchLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
-                attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation);
+                attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit);
         }
 
         return new(
@@ -236,14 +236,14 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             p.SellingPrice, p.VatRate, p.StockUom, JsonSerializer.Deserialize<string[]>(p.SellUomsJson) ?? [], p.Weight,
             p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
             p.StockLevels.Sum(s => s.OnHand), p.StockLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
-            attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation);
+            attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit);
     }
 }
 
 [ApiController]
 [Route("api/catalog/bundles")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/stock/bundles", PermissionAction.View)]
 public class BundlesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -255,7 +255,7 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/bundles", PermissionAction.Create)]
     public async Task<ActionResult<BundleDto>> Create(UpsertBundleRequest request, CancellationToken ct)
     {
         if (await db.ProductBundles.AnyAsync(b => b.Code == request.Code, ct))
@@ -279,7 +279,7 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/bundles", PermissionAction.Edit)]
     public async Task<ActionResult<BundleDto>> Update(int id, UpsertBundleRequest request, CancellationToken ct)
     {
         var bundle = await db.ProductBundles.Include(b => b.Lines).FirstOrDefaultAsync(b => b.Id == id, ct);
@@ -301,7 +301,7 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/bundles", PermissionAction.Delete)]
     public async Task<ActionResult<BundleDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
     {
         var bundle = await db.ProductBundles.Include(b => b.Lines).ThenInclude(l => l.Product).FirstOrDefaultAsync(b => b.Id == id, ct);

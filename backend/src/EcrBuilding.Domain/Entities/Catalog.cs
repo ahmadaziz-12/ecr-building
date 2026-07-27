@@ -46,10 +46,14 @@ public class Product : BaseEntity
     public int ReorderLevel { get; set; }
     public int ReorderQty { get; set; }
     public string? ImageUrl { get; set; }
-    // BRD §2.3 items 5-6: cut-to-size products (glass, timber, cable) take length × width dimension
-    // entry at the POS instead of a plain quantity; the line quantity becomes the computed area
-    // (stock UOM m²) or linear length, priced at SellingPrice per stock UOM.
+    // BRD §2.3 items 5-6: cut-to-size products (glass, timber, cable) take dimension entry at the
+    // POS instead of a plain quantity, priced at SellingPrice per stock UOM. CutToSizeUnit picks
+    // which dimensions the POS asks for and how the billed qty is derived: "Length" (linear m, e.g.
+    // cable cut to length), "Area" (length × width m², e.g. glass), "Volume" (length × width ×
+    // height m³, e.g. sand/timber). Meaningless when IsCutToSize is false; defaults to "Area" since
+    // that was this flag's only behavior before Volume/Length existed.
     public bool IsCutToSize { get; set; }
+    public string CutToSizeUnit { get; set; } = "Area";
     // BRD §2.2: supplier link and physical bin/aisle reference, surfaced at the POS.
     public int? SupplierId { get; set; }
     public Supplier? Supplier { get; set; }

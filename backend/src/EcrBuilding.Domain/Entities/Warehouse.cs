@@ -86,6 +86,28 @@ public class StockBatch : BaseEntity
     public bool OnPromo { get; set; }
 }
 
+// The branch-side counterpart to StockBatch — batch/expiry tracking for goods that have already
+// reached a branch's own shop-floor stock (BranchStockLevel), rather than sitting in a warehouse's
+// backroom. Previously this business only batch-tracked warehouse stock at all (see the "branches
+// don't batch-track" comment this type replaces in StockTransfersController) — meaning a shelf-
+// life-sensitive product (paint, sealants, cement additives) became invisible to expiry management
+// the moment it reached the till, which is exactly the stock that's about to be sold. Populated by
+// PO Receive (when the branch line carries a batch/expiry) and by a Stock Transfer landing at a
+// branch destination.
+public class BranchStockBatch : BaseEntity
+{
+    public int ProductId { get; set; }
+    public Product? Product { get; set; }
+    public int BranchId { get; set; }
+    public Branch? Branch { get; set; }
+    public string BatchNo { get; set; } = string.Empty;
+    public DateTime ReceivedDate { get; set; }
+    public DateTime ExpiryDate { get; set; }
+    public decimal Qty { get; set; }
+    public StockBatchStatus? ManualStatus { get; set; }
+    public bool OnPromo { get; set; }
+}
+
 // Numeric values are load-bearing (stored as ints in the DB) — append new members, never renumber.
 // Discrepancy is no longer produced (see StockTransfersController.Dispatch/Receive) but is left
 // defined so any historical rows still deserialize.

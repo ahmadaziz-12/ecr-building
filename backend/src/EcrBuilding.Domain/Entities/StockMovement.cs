@@ -15,20 +15,27 @@ public enum StockMovementType
     TransferOut = 7,
     TransferIn = 8,
     Adjustment = 9,
+    WriteOff = 10,
 }
 
-// A structured ledger of every event that changed a branch's sellable (BranchStockLevel) stock —
-// unlike AuditLog (free-text JSON blob), this carries ProductId/BranchId/Qty as real columns so a
-// per-branch "how much went to damage vs sale vs return" report can just query/aggregate it.
-// Written alongside the existing AuditLog call at each mutation site, never in place of it.
+// A structured ledger of every event that changed a branch's sellable (BranchStockLevel) stock, or
+// (WarehouseId set) a warehouse's own backroom stock (StockLevel/StockBatch) — unlike AuditLog
+// (free-text JSON blob), this carries ProductId/BranchId/Qty as real columns so a per-branch "how
+// much went to damage vs sale vs return" report can just query/aggregate it. Written alongside the
+// existing AuditLog call at each mutation site, never in place of it.
 public class StockMovement : BaseEntity
 {
     public int ProductId { get; set; }
     public Product? Product { get; set; }
     public int BranchId { get; set; }
     public Branch? Branch { get; set; }
+    // Set only for a movement that hit warehouse-side stock (StockLevel/StockBatch) rather than —
+    // or in addition to — the branch's own BranchStockLevel. BranchId is still populated (the
+    // warehouse's own owning branch) so branch-level reports keep working unchanged.
+    public int? WarehouseId { get; set; }
+    public Warehouse? Warehouse { get; set; }
     public StockMovementType Type { get; set; }
-    // Signed: positive = stock added to the branch, negative = stock removed.
+    // Signed: positive = stock added, negative = stock removed.
     public decimal Qty { get; set; }
     public string? RefTable { get; set; }
     public string? RefId { get; set; }

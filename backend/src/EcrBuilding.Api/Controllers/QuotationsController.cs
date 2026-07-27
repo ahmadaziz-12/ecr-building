@@ -14,7 +14,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/pos/quotations")]
 [Authorize]
-[RequireModule(ModuleArea.Orders, AccessLevel.View)]
+[RequireModule("/operate/orders", PermissionAction.View)]
 public class QuotationsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     private const decimal ContractorDiscountPct = 5m;
@@ -42,7 +42,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Create)]
     public async Task<ActionResult<QuotationDto>> Create(CreateQuotationRequest request, CancellationToken ct)
     {
         if (request.Lines.Count == 0) return BadRequest(new { error = "A quotation needs at least one line." });
@@ -81,7 +81,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Edit)]
     public async Task<ActionResult<QuotationDto>> Update(int id, UpdateQuotationRequest request, CancellationToken ct)
     {
         var quotation = await Query().FirstOrDefaultAsync(q => q.Id == id, ct);
@@ -123,7 +123,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpDelete("{id:int}")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Delete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var quotation = await db.Quotations.FirstOrDefaultAsync(q => q.Id == id, ct);
@@ -145,19 +145,19 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}/send")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Edit)]
     public Task<ActionResult<QuotationDto>> Send(int id, CancellationToken ct) => Transition(id, QuotationStatus.Draft, QuotationStatus.Sent, "QUOTATION_SENT", ct);
 
     [HttpPut("{id:int}/accept")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Edit)]
     public Task<ActionResult<QuotationDto>> Accept(int id, CancellationToken ct) => Transition(id, QuotationStatus.Sent, QuotationStatus.Accepted, "QUOTATION_ACCEPTED", ct);
 
     [HttpPut("{id:int}/reject")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Edit)]
     public Task<ActionResult<QuotationDto>> Reject(int id, CancellationToken ct) => Transition(id, QuotationStatus.Sent, QuotationStatus.Rejected, "QUOTATION_REJECTED", ct);
 
     [HttpPost("{id:int}/convert")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Create)]
     public async Task<ActionResult<OrderDto>> Convert(int id, CancellationToken ct)
     {
         var quotation = await Query().FirstOrDefaultAsync(q => q.Id == id, ct);

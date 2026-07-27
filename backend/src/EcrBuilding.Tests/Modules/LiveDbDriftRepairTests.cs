@@ -12,9 +12,11 @@ namespace EcrBuilding.Tests.Modules;
 /// <summary>
 /// Repairs for the live-DB drift class found 2026-07-25: DbSeeder only seeds EMPTY tables, so
 /// databases created before Phases 1-4 never received the BRD §10.1 ladder roles/ceilings (void was
-/// impossible for everyone, discounts ungated). EnsureBrdRolesAsync runs every startup and must
-/// repair exactly that state without clobbering admin-customized roles. Also covers the new
-/// pay-pending-order endpoint (the missing back half of quotation conversion).
+/// impossible for everyone, discounts ungated). EnsureExactlyFiveBrdRolesAsync runs every startup and
+/// must repair exactly that state — and, per the later role-consolidation work, collapse any
+/// non-canonical role (the old 10-role roster or an ad-hoc one) into the nearest of the BRD's 5 —
+/// without clobbering admin-customized roles. Also covers the new pay-pending-order endpoint (the
+/// missing back half of quotation conversion).
 /// </summary>
 public class LiveDbDriftRepairTests : IAsyncLifetime
 {
@@ -29,27 +31,29 @@ public class LiveDbDriftRepairTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Ensure_repairs_drifted_roles_and_inserts_missing_ladder_roles()
+    public async Task Ensure_repairs_drifted_roles_and_consolidates_legacy_roles_into_the_five()
     {
         using var db = _factory.CreateDbContext();
-        // Simulate a pre-Phase-1 database: the original 8 roles exist but every ceiling column
-        // carries the migration backfill defaults (NULL / false), and the two ladder roles added
-        // by Phase 1 are absent entirely.
+        // Simulate a pre-consolidation database: the old 10-role roster exists, every ceiling column
+        // carries the migration backfill defaults (NULL / false), and none of the BRD's 5 canonical
+        // roles exist yet.
         foreach (var name in new[] { "Owner", "Admin", "Branch Manager", "Cashier", "Warehouse Staff" })
         {
             db.Roles.Add(new Role { Name = name, IsSystem = true, ApprovalCap = 100m });
         }
         db.SaveChanges();
 
-        await DbSeeder.EnsureBrdRolesAsync(db, new PasswordHasher());
+        await DbSeeder.EnsureExactlyFiveBrdRolesAsync(db, new PasswordHasher());
 
         var roles = db.Roles.ToDictionary(r => r.Name);
-        // Drifted roles got their BRD preset ceilings back.
+        // Exactly the 5 canonical roles remain — legacy ones were consolidated away, not left dangling.
+        Assert.Equal(5, db.Roles.Count());
+        Assert.False(db.Roles.Any(r => r.Name == "Owner" || r.Name == "Admin" || r.Name == "Branch Manager" || r.Name == "Warehouse Staff"));
+        // Drifted/newly-created roles got their BRD preset ceilings.
         Assert.Equal(5m, roles["Cashier"].DiscountCeilingPercent);
         Assert.Equal(500m, roles["Cashier"].SurplusReturnCeilingAmount);
-        Assert.True(roles["Branch Manager"].CanVoidTransactions);
-        Assert.True(roles["Admin"].CanManageSystemConfiguration);
-        // Missing ladder roles were inserted whole.
+        Assert.True(roles["Store Manager"].CanVoidTransactions);
+        Assert.True(roles["System Admin"].CanManageSystemConfiguration);
         Assert.Equal(10m, roles["Senior Cashier"].DiscountCeilingPercent);
         Assert.True(roles["Supervisor"].CanVoidTransactions);
         Assert.Equal(15m, roles["Supervisor"].DiscountCeilingPercent);
@@ -63,8 +67,8 @@ public class LiveDbDriftRepairTests : IAsyncLifetime
         db.Roles.Add(new Role { Name = "Cashier", IsSystem = true, DiscountCeilingPercent = 2m });
         db.SaveChanges();
 
-        await DbSeeder.EnsureBrdRolesAsync(db, new PasswordHasher());
-        await DbSeeder.EnsureBrdRolesAsync(db, new PasswordHasher());
+        await DbSeeder.EnsureExactlyFiveBrdRolesAsync(db, new PasswordHasher());
+        await DbSeeder.EnsureExactlyFiveBrdRolesAsync(db, new PasswordHasher());
 
         var roles = db.Roles.ToDictionary(r => r.Name);
         Assert.Equal(2m, roles["Cashier"].DiscountCeilingPercent);
@@ -79,12 +83,12 @@ public class LiveDbDriftRepairTests : IAsyncLifetime
         var role = TestDataSeeder.AddRole(db, "Cashier");
         TestDataSeeder.AddUser(db, role, "someone@a-real-tenant.example");
 
-        await DbSeeder.EnsureBrdRolesAsync(db, new PasswordHasher());
+        await DbSeeder.EnsureExactlyFiveBrdRolesAsync(db, new PasswordHasher());
         Assert.False(db.Users.Any(u => u.Email == "supervisor.ruh@ecr-building.local"));
 
         // Now mark it as the demo dataset and re-run.
         TestDataSeeder.AddUser(db, role, "admin@ecr-building.local");
-        await DbSeeder.EnsureBrdRolesAsync(db, new PasswordHasher());
+        await DbSeeder.EnsureExactlyFiveBrdRolesAsync(db, new PasswordHasher());
         Assert.True(db.Users.Any(u => u.Email == "supervisor.ruh@ecr-building.local"));
         Assert.True(db.Users.Any(u => u.Email == "senior-cashier.ruh@ecr-building.local"));
     }

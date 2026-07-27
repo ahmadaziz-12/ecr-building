@@ -15,7 +15,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/loyalty")]
 [Authorize]
-[RequireModule(ModuleArea.Finance, AccessLevel.View)]
+[RequireModule("/finance/loyalty", PermissionAction.View)]
 public class LoyaltyController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     // BRD §4.3.1-§4.3.4: earn/redeem economics AND the tier ladder (thresholds, multipliers,
@@ -31,7 +31,7 @@ public class LoyaltyController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPut("config")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/loyalty", PermissionAction.Edit)]
     public async Task<ActionResult<LoyaltyProgramConfigDto>> UpdateConfig(LoyaltyProgramConfigDto request, CancellationToken ct)
     {
         if (request.PointsPerSarEarned <= 0) return BadRequest(new { error = "Points earned per SAR must be greater than zero." });
@@ -126,7 +126,7 @@ public class LoyaltyController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPost("redeem")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/loyalty", PermissionAction.Edit)]
     public async Task<ActionResult<CustomerLoyaltyDto>> Redeem(RedeemPointsRequest request, CancellationToken ct)
     {
         if (request.Points <= 0) return BadRequest(new { error = "Points to redeem must be greater than zero." });
@@ -158,7 +158,7 @@ public class LoyaltyController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPost("adjust")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/loyalty", PermissionAction.Edit)]
     public async Task<ActionResult<CustomerLoyaltyDto>> Adjust(AdjustPointsRequest request, CancellationToken ct)
     {
         if (request.Points == 0) return BadRequest(new { error = "Adjustment must be non-zero." });

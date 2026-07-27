@@ -81,13 +81,22 @@ export function ReceiptDialog({ order, terminalId, onClose }: { order: OrderDto 
 
           <div className="mt-2 space-y-1 border-b border-dashed border-black/20 pb-2">
             {order.lines.map((l) => (
-              <div key={l.productId} className="flex justify-between gap-2">
-                <span className="truncate">
-                  {l.productName} x{l.qty}{l.uom ? ` ${l.uom}` : ""}
-                  {l.lengthM != null && l.widthM != null ? ` (${l.lengthM}×${l.widthM}m)` : ""}
-                  {l.discountPct > 0 && <span className="text-warning"> (-{l.discountPct}%)</span>}
-                </span>
-                <span className="flex-none">{money(l.lineTotal)}</span>
+              <div key={l.productId}>
+                <div className="flex justify-between gap-2">
+                  <span className="truncate">
+                    {l.productName} x{l.qty}{l.uom ? ` ${l.uom}` : ""}
+                    {l.lengthM != null && (
+                      l.heightM != null && l.widthM != null ? ` (${l.lengthM}×${l.widthM}×${l.heightM}m)`
+                      : l.widthM != null ? ` (${l.lengthM}×${l.widthM}m)`
+                      : ` (${l.lengthM}m)`
+                    )}
+                    {l.discountPct > 0 && <span className="text-warning"> (-{l.discountPct}%)</span>}
+                  </span>
+                  <span className="flex-none">{money(l.lineTotal)}</span>
+                </div>
+                {/* Total kg for the line — matters for bundle/pallet items (rebar, cement) where the
+                    physical load size is what the yard crew and delivery truck actually care about. */}
+                {l.lineWeight > 0 && <p className="text-muted-foreground">  {l.lineWeight.toFixed(1)} kg</p>}
               </div>
             ))}
           </div>
@@ -95,6 +104,11 @@ export function ReceiptDialog({ order, terminalId, onClose }: { order: OrderDto 
           <div className="mt-2 space-y-0.5 border-b border-dashed border-black/20 pb-2">
             <div className="flex justify-between"><span>Subtotal</span><span>{money(order.subTotal)}</span></div>
             {order.discountTotal > 0 && <div className="flex justify-between"><span>Discount</span><span>-{money(order.discountTotal)}</span></div>}
+            {order.lines.some((l) => l.lineWeight > 0) && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>Total Weight</span><span>{order.lines.reduce((s, l) => s + l.lineWeight, 0).toFixed(1)} kg</span>
+              </div>
+            )}
             {order.fees.map((f) => (
               <div key={f.label} className="flex justify-between"><span>{f.label}</span><span>{money(f.amount)}</span></div>
             ))}

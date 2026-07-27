@@ -1,6 +1,8 @@
 namespace EcrBuilding.Domain.Enums;
 
-// One entry per sidebar section — drives RolePermission rows and the admin.roles matrix.
+// Broad business-domain categorization used ONLY by RuleDefinition.Domain (the Rules Engine's own
+// dropdown). RBAC page permissions (RolePermission/UserPermissionOverride) key off a page's route
+// string directly instead — see PermissionCatalog — so this enum no longer drives the roles matrix.
 public enum ModuleArea
 {
     Pos = 0,

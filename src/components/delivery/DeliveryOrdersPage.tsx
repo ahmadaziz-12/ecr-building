@@ -14,7 +14,7 @@ function PendingApprovalsPanel() {
   const approveMove = useDeliveryStore((s) => s.approveMove);
   const rejectMove = useDeliveryStore((s) => s.rejectMove);
   const { hasAccess } = useAuth();
-  const canApprove = hasAccess("Delivery", "Full");
+  const canApprove = hasAccess("/delivery/orders", "Approve");
   const [busyId, setBusyId] = useState<number | null>(null);
 
   if (pendingApprovals.length === 0) return null;

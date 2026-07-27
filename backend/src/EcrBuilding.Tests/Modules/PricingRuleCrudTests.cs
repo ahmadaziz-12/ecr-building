@@ -97,7 +97,10 @@ public class PricingRuleCrudTests : IAsyncLifetime
         };
         db.PricingRules.Add(rule);
         db.SaveChanges();
-        var client = ClientWithFinanceLevel(db, AccessLevel.Edit, "editor3@test.local");
+        // Delete is its own page-level action now (PermissionAction.Delete), granted only at Full —
+        // Edit alone (Create/Edit/Export) is deliberately not enough, unlike the old ordinal model
+        // where any Edit-or-above level could hit every mutating endpoint on the controller.
+        var client = ClientWithFinanceLevel(db, AccessLevel.Full, "editor3@test.local");
 
         var deleteResponse = await client.DeleteAsync($"/api/finance/pricing-rules/{rule.Id}");
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Barcode, Check, ChevronLeft, ChevronRight, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Barcode, Check, ChevronLeft, ChevronRight, ImageOff, Loader2, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { useCategories, useProducts } from "@/lib/api/catalog";
 import { useBranches, useTerminals, useUsers, useRoles } from "@/lib/api/admin";
 import { useStockLevels, useBranchStockLevels } from "@/lib/api/inventory";
 import { sellableUoms, unitPriceFor, factorToStock } from "@/lib/buildpos/uom";
+import { fileToCompressedDataUrl } from "@/lib/buildpos/image";
 
 type LineItemRow = Record<string, string>;
 
@@ -246,6 +247,51 @@ function LineItemsField({
   );
 }
 
+// Product photo picker: compresses the chosen file client-side into a base64 JPEG data URL (see
+// lib/buildpos/image.ts — there's no file-upload/blob-storage backend, Product.ImageUrl stores the
+// data URL directly) and previews it as a thumbnail. "Remove" clears the field back to no photo.
+function ImagePickerField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleFile(file: File | undefined) {
+    if (!file) return;
+    setLoading(true);
+    try {
+      onChange(await fileToCompressedDataUrl(file));
+    } catch {
+      toast.error("Could not read that image — try a different file.");
+    } finally {
+      setLoading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-lg border border-black/10 bg-canvas">
+        {value ? (
+          <img src={value} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <ImageOff className="h-5 w-5 text-muted-foreground" />
+        )}
+      </div>
+      <div className="flex gap-2">
+        <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => inputRef.current?.click()}>
+          {loading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+          {value ? "Change photo" : "Upload photo"}
+        </Button>
+        {value && (
+          <Button type="button" size="sm" variant="ghost" className="text-critical hover:text-critical" onClick={() => onChange("")}>
+            Remove
+          </Button>
+        )}
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+    </div>
+  );
+}
+
 function FieldControl({ field, value, onChange }: { field: Field; value: string; onChange: (v: string) => void }) {
   const base =
     "h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15";
@@ -313,6 +359,9 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
         onChange={(e) => onChange(e.target.value)}
       />
     );
+  }
+  if (field.type === "image") {
+    return <ImagePickerField value={value} onChange={onChange} />;
   }
   return (
     <input
@@ -454,7 +503,9 @@ export function FlowDialog({
         .map((rawF) => {
           const f = resolveField(rawF);
           const raw = values[f.name];
-          const val = f.type === "lineItems" ? summarizeLineItems(f, raw ?? "") : raw;
+          // An image field's value is a giant base64 data URL — never worth dumping into the
+          // review step as text.
+          const val = f.type === "lineItems" ? summarizeLineItems(f, raw ?? "") : f.type === "image" ? (raw ? "Photo attached" : "") : raw;
           return { label: f.label, val };
         })
         .filter((x) => x.val && x.val.trim().length > 0),

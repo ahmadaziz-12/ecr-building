@@ -61,6 +61,19 @@ export const useSupplierLedger = (id: number | undefined) =>
     queryFn: () => apiGet<SupplierLedgerLineDto[]>(`/api/procurement/suppliers/${id}/ledger`),
     enabled: id !== undefined,
   });
+
+export type RecordSupplierPaymentInput = { amount: number; method: string; referenceNo?: string | null; notes?: string | null };
+export function useRecordSupplierPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ supplierId, ...request }: RecordSupplierPaymentInput & { supplierId: number }) =>
+      apiPost<SupplierDto>(`/api/procurement/suppliers/${supplierId}/payments`, request),
+    onSuccess: (_, { supplierId }) => {
+      queryClient.invalidateQueries({ queryKey: ["procurement", "suppliers"] });
+      queryClient.invalidateQueries({ queryKey: ["procurement", "supplier-ledger", supplierId] });
+    },
+  });
+}
 export const usePurchaseOrderHistory = (id: number | undefined) =>
   useQuery({
     queryKey: ["procurement", "po-history", id],
