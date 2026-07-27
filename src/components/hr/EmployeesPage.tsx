@@ -1,8 +1,11 @@
 import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/buildpos/PageHeader";
 import { Pill, SectionCard } from "@/components/buildpos/sections";
-import { useHrStore, employeeName, type Employee } from "@/lib/hr/store";
+import { MultiSelectFilter } from "@/components/buildpos/FilterControls";
+import { useHrStore, employeeName } from "@/lib/hr/store";
 import { AddEmployeeDialog } from "./AddEmployeeDialog";
+
+const STATUSES = ["Active", "Probation", "On Leave", "Suspended", "Resigned", "Terminated", "Inactive"];
 
 export function EmployeesPage() {
   const employees = useHrStore((s) => s.employees);
@@ -10,14 +13,14 @@ export function EmployeesPage() {
   const contracts = useHrStore((s) => s.contracts);
   const deactivate = useHrStore((s) => s.deactivateEmployee);
   const [q, setQ] = useState("");
-  const [dept, setDept] = useState("All");
-  const [status, setStatus] = useState<Employee["status"] | "All">("All");
+  const [dept, setDept] = useState<string[]>([]);
+  const [status, setStatus] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const today = new Date().toISOString().slice(0, 10);
 
   const rows = useMemo(() => employees.filter((e) => {
-    if (dept !== "All" && e.department !== dept) return false;
-    if (status !== "All" && e.status !== status) return false;
+    if (dept.length && !dept.includes(e.department)) return false;
+    if (status.length && !status.includes(e.status)) return false;
     if (q) {
       const t = q.toLowerCase();
       return e.id.toLowerCase().includes(t) || employeeName(e).toLowerCase().includes(t) || e.mobile.includes(q);
@@ -32,13 +35,8 @@ export function EmployeesPage() {
       <PageHeader group="HRMS" title="Employees" desc="Add, view and edit employees. Attendance today is shown per row. Deactivation is soft — the record stays in history." primary="Add Employee" onPrimary={() => setOpen(true)} onExport={() => alert("Exported CSV (mock)")} />
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 bg-white p-2">
         <input placeholder="Search name / ID / mobile…" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 w-64 rounded-lg border border-black/10 bg-canvas px-3 text-sm" />
-        <select value={dept} onChange={(e) => setDept(e.target.value)} className="h-9 rounded-lg border border-black/10 bg-canvas px-2 text-sm">
-          <option value="All">All departments</option>
-          {depts.map((d) => <option key={d} value={d}>{d}</option>)}
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value as never)} className="h-9 rounded-lg border border-black/10 bg-canvas px-2 text-sm">
-          {["All", "Active", "Probation", "On Leave", "Suspended", "Resigned", "Terminated", "Inactive"].map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <MultiSelectFilter label="Department" allLabel="All Departments" options={depts} selected={dept} onChange={setDept} />
+        <MultiSelectFilter label="Status" allLabel="All Statuses" options={STATUSES} selected={status} onChange={setStatus} />
         <span className="ml-auto text-xs text-muted-foreground">{rows.length} of {employees.length}</span>
       </div>
       <SectionCard title="Employee Directory" desc={`${rows.length} records`}>

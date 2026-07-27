@@ -54,17 +54,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { MultiSelectFilter, DateRangeFilter } from "@/components/buildpos/FilterControls";
 import {
   Table,
   TableBody,
@@ -107,15 +101,16 @@ import {
   zatcaInvoices,
 } from "@/lib/buildpos/data";
 import {
+  allLabels,
   categoryToFilter,
-  filterDefaults,
   moreFilterGroups,
   primaryFilterGroups,
   useFilters,
 } from "@/lib/buildpos/filter-context";
 import { useAuth } from "@/lib/api/auth";
 import { useCategories } from "@/lib/api/catalog";
-import { useBranches } from "@/lib/api/admin";
+import { useBranches, useTerminals } from "@/lib/api/admin";
+import { useOrders } from "@/lib/api/pos";
 import cementImg from "@/assets/cat-cement.jpg";
 import steelImg from "@/assets/cat-steel.jpg";
 import tilesImg from "@/assets/cat-tiles.jpg";
@@ -215,29 +210,39 @@ const iconMap: Record<string, ComponentType<{ className?: string }>> = {
 /* ---------------- Filter Bar ---------------- */
 
 // Filters actually consumed by live dashboard data (Category → InventoryHealth,
-// Branch → order-derived KPIs in dashboard.tsx). Everything else is display-only.
-const LIVE_FILTER_LABELS = ["Branch", "Category"];
+// Branch/Terminal/Cashier/Status/Date Range → order-derived KPIs in dashboard.tsx). Everything
+// else (the "More Filters" panel) is display-only — those don't map onto any single dataset the
+// dashboard renders.
+const LIVE_FILTER_LABELS = ["Branch", "Category", "Terminal", "Cashier", "Status", "Date Range"];
 
 export function FilterBar({ compact = false }: { compact?: boolean }) {
-  const { values, setValue, reset } = useFilters();
+  const { values, setValue, dateRange, setDateRange, reset } = useFilters();
   const queryClient = useQueryClient();
   const { hasAccess } = useAuth();
   const [moreOpen, setMoreOpen] = useState(false);
   // The static blueprint option names ("Cement & Binders", "Riyadh Main Branch") don't match the
-  // live category/branch names, so wired consumers would filter everything to nothing — swap in
-  // the real names once loaded.
+  // live category/branch/terminal/cashier names, so wired consumers would filter everything to
+  // nothing — swap in the real names once loaded.
   const { data: liveCategories } = useCategories(hasAccess("Inventory"));
   const { data: liveBranches } = useBranches(hasAccess("Network"));
+  const { data: liveTerminals } = useTerminals(hasAccess("Network"));
+  const { data: liveOrders } = useOrders(hasAccess("Orders"));
+  const liveCashiers = [...new Set((liveOrders ?? []).map((o) => o.cashierName).filter(Boolean))].sort();
   const liveOptions = (g: { label: string; options: string[] }): string[] => {
-    if (g.label === "Category" && liveCategories?.length) return ["All Categories", ...liveCategories.map((c) => c.nameEn)];
-    if (g.label === "Branch" && liveBranches?.length) return ["All Permitted Branches", ...liveBranches.map((b) => b.nameEn)];
+    if (g.label === "Category" && liveCategories?.length) return liveCategories.map((c) => c.nameEn);
+    if (g.label === "Branch" && liveBranches?.length) return liveBranches.map((b) => b.nameEn);
+    if (g.label === "Terminal" && liveTerminals?.length) return liveTerminals.map((t) => t.code);
+    if (g.label === "Cashier" && liveCashiers.length) return liveCashiers;
     return g.options;
   };
   const shown = compact ? primaryFilterGroups.slice(0, 4) : primaryFilterGroups;
   const allGroups = [...primaryFilterGroups, ...moreFilterGroups];
-  const activeChips = allGroups
-    .filter((g) => values[g.label] && values[g.label] !== filterDefaults[g.label])
-    .map((g) => ({ label: g.label, value: values[g.label] }));
+  const activeChips: { label: string; value: string }[] = [
+    ...(dateRange.preset ? [{ label: "Date Range", value: dateRange.preset === "Custom Range" && dateRange.from && dateRange.to ? `${dateRange.from} – ${dateRange.to}` : dateRange.preset }] : []),
+    ...allGroups
+      .filter((g) => (values[g.label] ?? []).length > 0)
+      .map((g) => ({ label: g.label, value: values[g.label].length === 1 ? values[g.label][0] : `${values[g.label].length} selected` })),
+  ];
 
   return (
     <div className="rounded-2xl border border-brand/15 bg-gradient-to-r from-brand/5 via-white to-teal/5 p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
@@ -247,7 +252,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             <Filter className="h-3.5 w-3.5" />
           </span>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/80">Filters</h3>
-          <span className="hidden text-[11px] text-muted-foreground sm:inline">Branch & Category filter the live data · other filters are demo-only</span>
+          <span className="hidden text-[11px] text-muted-foreground sm:inline">Branch, Category, Terminal, Cashier, Status & Date Range filter the live data · advanced filters are demo-only</span>
           {activeChips.length > 0 && (
             <span className="ml-1 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-semibold text-[oklch(0.4_0.13_70)]">
               {activeChips.length} active
@@ -305,7 +310,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
                 toast.warning(`Not wired to live data yet: ${unwired.map((c) => c.label).join(", ")}`, {
                   description: wired.length
                     ? `Applied — ${wired.map((c) => `${c.label}: ${c.value}`).join(" · ")}`
-                    : "Only Branch & Category filter the live data.",
+                    : "Only Branch, Category, Terminal, Cashier, Status & Date Range filter the live data.",
                 });
               } else {
                 toast.success(wired.length ? "Filters applied" : "Default view", {
@@ -325,18 +330,19 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
         {shown.map((g) => (
           <div key={g.label} className="flex flex-col gap-1">
             <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{g.label}</label>
-            <Select value={values[g.label]} onValueChange={(v) => setValue(g.label, v)}>
-              <SelectTrigger className="h-8 w-auto min-w-[150px] border-black/10 bg-white text-xs transition hover:border-brand/40">
-                <SelectValue placeholder={g.label} />
-              </SelectTrigger>
-              <SelectContent>
-                {liveOptions(g).map((o) => (
-                  <SelectItem key={o} value={o}>{o}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MultiSelectFilter
+              label={g.label}
+              allLabel={allLabels[g.label] ?? `All ${g.label}`}
+              options={liveOptions(g)}
+              selected={values[g.label] ?? []}
+              onChange={(next) => setValue(g.label, next)}
+            />
           </div>
         ))}
+        <div className="flex flex-col gap-1">
+          <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Date Range</label>
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
+        </div>
         <Popover open={moreOpen} onOpenChange={setMoreOpen}>
           <PopoverTrigger asChild>
             <Button variant="outline" size="sm" className="h-8 gap-1 border-dashed text-xs">
@@ -350,16 +356,14 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
               {moreFilterGroups.map((g) => (
                 <div key={g.label} className="flex items-center justify-between gap-2">
                   <label className="text-[11px] font-medium text-foreground/80">{g.label}</label>
-                  <Select value={values[g.label]} onValueChange={(v) => setValue(g.label, v)}>
-                    <SelectTrigger className="h-8 w-40 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {g.options.map((o) => (
-                        <SelectItem key={o} value={o}>{o}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <MultiSelectFilter
+                    label={g.label}
+                    allLabel={allLabels[g.label] ?? `All ${g.label}`}
+                    options={g.options}
+                    selected={values[g.label] ?? []}
+                    onChange={(next) => setValue(g.label, next)}
+                    triggerClassName="w-40"
+                  />
                 </div>
               ))}
             </div>
@@ -373,7 +377,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             <button
               key={c.label}
               type="button"
-              onClick={() => setValue(c.label, filterDefaults[c.label])}
+              onClick={() => (c.label === "Date Range" ? setDateRange({ preset: "" }) : setValue(c.label, []))}
               className="bp-fade group inline-flex items-center gap-1 rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[11px] font-medium text-brand transition hover:bg-brand/15"
             >
               <span className="text-brand/70">{c.label}:</span> {c.value}
@@ -536,23 +540,23 @@ export function PaymentCollection() {
 
 export function TopCategories() {
   const { values, setValue, setActiveTab } = useFilters();
-  const active = values.Category;
+  const active = values.Category ?? [];
   return (
     <SectionCard
       title="Top Material Categories"
       desc="Click a category to filter inventory, stock alerts & tables."
       action={
-        active !== "All Categories" ? (
+        active.length > 0 ? (
           <Button
             size="sm"
             variant="ghost"
             className="h-7 text-xs text-brand hover:bg-brand/5 hover:text-brand"
             onClick={() => {
-              setValue("Category", "All Categories");
+              setValue("Category", []);
               toast.info("Category filter cleared");
             }}
           >
-            Clear · {active}
+            Clear · {active.join(", ")}
           </Button>
         ) : undefined
       }
@@ -563,15 +567,15 @@ export function TopCategories() {
           const tone = toneForStatus(c.health);
           const img = categoryImage[c.name];
           const catValue = categoryToFilter(c.name);
-          const isActive = active === catValue;
+          const isActive = !!catValue && active.includes(catValue);
           return (
             <button
               type="button"
               key={c.name}
               onClick={() => {
-                setValue("Category", catValue);
+                setValue("Category", catValue ? [catValue] : []);
                 setActiveTab("inventory");
-                toast.success(`Filtered by ${catValue}`, {
+                toast.success(catValue ? `Filtered by ${catValue}` : "Showing all categories", {
                   description: "Inventory & stock alerts updated.",
                 });
               }}
@@ -639,20 +643,20 @@ export function InventoryHealth({
 }) {
   const { values, setValue } = useFilters();
   const navigate = useNavigate();
-  const cat = values.Category;
-  const rows = cat === "All Categories" ? allRows : allRows.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
+  const cat = values.Category ?? [];
+  const rows = cat.length === 0 ? allRows : allRows.filter((r) => cat.some((c) => r.cat.toLowerCase() === c.toLowerCase()));
   return (
     <SectionCard
       title="Stock Health & Availability"
-      desc={cat === "All Categories" ? "Availability across branches and warehouses." : `Filtered by category · ${cat} (${rows.length} SKUs)`}
+      desc={cat.length === 0 ? "Availability across branches and warehouses." : `Filtered by category · ${cat.join(", ")} (${rows.length} SKUs)`}
       action={
         <div className="flex items-center gap-2">
-          {cat !== "All Categories" && (
+          {cat.length > 0 && (
             <Button
               variant="ghost"
               size="sm"
               className="h-7 text-xs text-muted-foreground hover:text-brand"
-              onClick={() => setValue("Category", "All Categories")}
+              onClick={() => setValue("Category", [])}
             >
               Clear filter
             </Button>

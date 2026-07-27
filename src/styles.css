@@ -181,6 +181,13 @@
     border-color: var(--color-border);
   }
 
+  /* Every Tailwind text-* / spacing / sizing utility is rem-based, so bumping the root size here
+     scales body copy, labels, buttons and inputs together (proportionally, no clipping) instead
+     of overriding each text-xs/text-sm usage individually across the app. */
+  html {
+    font-size: 18px;
+  }
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);

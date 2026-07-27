@@ -33,6 +33,7 @@ import {
   BranchPerformance,
 } from "@/components/buildpos/sections";
 import { useFilters } from "@/lib/buildpos/filter-context";
+import { resolveDateRangeBounds } from "@/components/buildpos/FilterControls";
 import { formatSAR, type Severity } from "@/lib/buildpos/format";
 import { useAuth } from "@/lib/api/auth";
 import { useOrders, useCashierShifts, useParkedSales } from "@/lib/api/pos";
@@ -108,7 +109,7 @@ const PAYMENT_META: Record<string, { tone: Severity; icon: string }> = {
 };
 
 function OverviewPage() {
-  const { activeTab, setActiveTab, values: filterValues } = useFilters();
+  const { activeTab, setActiveTab, values: filterValues, dateRange } = useFilters();
   const navigate = useNavigate();
   const { hasAccess } = useAuth();
 
@@ -132,29 +133,65 @@ function OverviewPage() {
   const { data: parkedBranch1 } = useParkedSales(1, hasAccess("Pos"));
   const { data: parkedBranch2 } = useParkedSales(2, hasAccess("Pos"));
 
-  // The FilterBar's Branch filter (options come from the live branches list) narrows every
-  // order-derived KPI, chart and table by filtering at the source; non-order datasets
-  // (stock, shifts, deliveries) stay global.
-  const selectedBranchId = (branches ?? []).find((b) => b.nameEn === filterValues.Branch)?.id;
+  // The FilterBar's Branch/Terminal/Cashier/Status/Date Range filters (options come from live
+  // data, every group is multi-select — an empty selection means "no filter") narrow every
+  // order-derived KPI, chart and table by filtering at the source; non-order datasets (stock,
+  // shifts, deliveries) stay global.
+  const selectedBranchIds = (filterValues.Branch ?? []).length
+    ? new Set((branches ?? []).filter((b) => filterValues.Branch.includes(b.nameEn)).map((b) => b.id))
+    : null;
+  const selectedTerminalIds = (filterValues.Terminal ?? []).length
+    ? new Set((terminals ?? []).filter((t) => filterValues.Terminal.includes(t.code)).map((t) => t.id))
+    : null;
+  const selectedCashiers = (filterValues.Cashier ?? []).length ? new Set(filterValues.Cashier) : null;
+  const selectedStatuses = (filterValues.Status ?? []).length ? new Set(filterValues.Status) : null;
+  const dateBounds = useMemo(() => resolveDateRangeBounds(dateRange), [dateRange]);
   const orderList = useMemo(
-    () => (selectedBranchId === undefined ? orders ?? [] : (orders ?? []).filter((o) => o.branchId === selectedBranchId)),
-    [orders, selectedBranchId],
+    () =>
+      (orders ?? [])
+        .filter((o) => !selectedBranchIds || selectedBranchIds.has(o.branchId))
+        .filter((o) => !selectedTerminalIds || (o.terminalId !== null && selectedTerminalIds.has(o.terminalId)))
+        .filter((o) => !selectedCashiers || selectedCashiers.has(o.cashierName))
+        .filter((o) => !selectedStatuses || selectedStatuses.has(o.status))
+        .filter((o) => {
+          if (!dateBounds) return true;
+          const createdAt = new Date(o.createdAt).getTime();
+          return createdAt >= dateBounds.from.getTime() && createdAt <= dateBounds.to.getTime();
+        }),
+    [orders, selectedBranchIds, selectedTerminalIds, selectedCashiers, selectedStatuses, dateBounds],
   );
-  const completedOrders = useMemo(() => orderList.filter((o) => o.status === "Completed"), [orderList]);
+  // Revenue = every order that wasn't voided — the same rule the Reports console applies
+  // (ReportsController.CompletedOrders). Filtering on status === "Completed" instead silently
+  // dropped Dispatched/Delivered/Returned orders, so the dashboard and the Sales Summary report
+  // disagreed on gross sales the moment a sale moved past the register.
+  const revenueOrders = useMemo(() => orderList.filter((o) => o.status !== "Voided"), [orderList]);
   const productMap = useMemo(() => new Map((products ?? []).map((p) => [p.id, p])), [products]);
   const stockLevelsList = stockLevels ?? [];
   const deliveryList = deliveryOrders ?? [];
   const zatcaList = zatcaInvoices ?? [];
   const zatcaByOrderId = useMemo(() => new Map(zatcaList.map((i) => [i.orderId, i])), [zatcaList]);
-  const returnsList = returnsData ?? [];
+  // Returns must honour the same branch/date filters as the order-derived KPIs — left global, the
+  // refund tile stayed frozen while every sales figure next to it moved with the filter bar, and
+  // it could never reconcile against the Customer Returns report for the same period.
+  const returnsList = useMemo(
+    () =>
+      (returnsData ?? [])
+        .filter((r) => !selectedBranchIds || (r.branchId !== null && selectedBranchIds.has(r.branchId)))
+        .filter((r) => !selectedCashiers || (r.cashierName !== null && selectedCashiers.has(r.cashierName)))
+        .filter((r) => {
+          if (!dateBounds) return true;
+          const createdAt = new Date(r.createdAt).getTime();
+          return createdAt >= dateBounds.from.getTime() && createdAt <= dateBounds.to.getTime();
+        }),
+    [returnsData, selectedBranchIds, selectedCashiers, dateBounds],
+  );
   const terminalsList = terminals ?? [];
   const parkedSalesAll = [...(parkedBranch1 ?? []), ...(parkedBranch2 ?? [])];
 
-  const grossSales = completedOrders.reduce((s, o) => s + o.subTotal, 0);
-  const discountsTotal = completedOrders.reduce((s, o) => s + o.discountTotal, 0);
-  const netSales = grossSales - discountsTotal;
-  const grandTotalSum = completedOrders.reduce((s, o) => s + o.grandTotal, 0);
-  const txCount = completedOrders.length;
+  const grossSales = revenueOrders.reduce((s, o) => s + o.subTotal, 0);
+  const discountsTotal = revenueOrders.reduce((s, o) => s + o.discountTotal, 0);
+  const grandTotalSum = revenueOrders.reduce((s, o) => s + o.grandTotal, 0);
+  const txCount = revenueOrders.length;
   const avgBasket = txCount ? Math.round(grandTotalSum / txCount) : 0;
 
   const lowStockCount = stockLevelsList.filter((s) => s.status === "Low").length;
@@ -175,12 +212,17 @@ function OverviewPage() {
   const worstVarianceShift = [...(cashierShifts ?? [])].sort((a, b) => Math.abs(b.variance ?? 0) - Math.abs(a.variance ?? 0))[0];
   const offlineTerminalsList = terminalsList.filter((t) => t.status !== "Online");
 
+  // KPI wording is deliberately the same vocabulary the Reports console uses, because these are
+  // the same measures: "Net Takings" here is Sales Summary's Net Takings (Σ GrandTotal), and
+  // "Gross Sales" is its Gross Sales (Σ SubTotal, ex-VAT, before discounts). Previously the tile
+  // showing Σ GrandTotal was called "Total Material Sales" and a *different* figure was called
+  // "Net Sales", so the two screens appeared to contradict each other.
   const overviewKpisReal = [
-    { key: "sales", title: "Total Material Sales", value: formatSAR(grandTotalSum), sub: `${txCount} transactions`, tone: "success" as Severity, icon: "trending" },
-    { key: "net", title: "Net Sales", value: formatSAR(netSales), sub: "After discounts", tone: "info" as Severity, icon: "receipt" },
+    { key: "sales", title: "Net Takings", value: formatSAR(grandTotalSum), sub: `${txCount} transactions · incl. VAT`, tone: "success" as Severity, icon: "trending" },
+    { key: "net", title: "Gross Sales", value: formatSAR(grossSales), sub: `Ex-VAT · less ${formatSAR(discountsTotal)} discounts`, tone: "info" as Severity, icon: "receipt" },
     { key: "tx", title: "Transactions", value: String(txCount), sub: `Avg basket ${formatSAR(avgBasket)}`, tone: "info" as Severity, icon: "cart" },
     {
-      key: "low", title: "Low Stock Materials", value: `${lowStockCount + criticalStockCount} SKUs`, sub: `${criticalStockCount} out of stock`,
+      key: "low", title: "Low Stock Materials", value: `${lowStockCount + criticalStockCount} SKUs`, sub: `${criticalStockCount} out of stock · warehouse`,
       tone: (criticalStockCount > 0 ? "critical" : lowStockCount > 0 ? "warning" : "success") as Severity, icon: "package",
     },
     {
@@ -195,7 +237,7 @@ function OverviewPage() {
 
   const hourlyReal = useMemo(() => {
     const buckets = new Map<string, { gross: number; net: number; returns: number; vat: number }>();
-    for (const o of completedOrders) {
+    for (const o of revenueOrders) {
       const label = `${String(new Date(o.createdAt).getHours()).padStart(2, "0")}:00`;
       const cur = buckets.get(label) ?? { gross: 0, net: 0, returns: 0, vat: 0 };
       cur.gross += o.subTotal;
@@ -204,7 +246,7 @@ function OverviewPage() {
       buckets.set(label, cur);
     }
     return [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([time, v]) => ({ time, ...v }));
-  }, [completedOrders]);
+  }, [revenueOrders]);
 
   const dispatchPipelineReal = useMemo(() => {
     const toneFor: Record<string, Severity> = { Pending: "warning", Assigned: "info", Loading: "info", Dispatched: "info", Delivered: "success", "Failed / Returned": "critical" };
@@ -246,7 +288,7 @@ function OverviewPage() {
     const map = new Map<string, { sales: number; units: number; uom: string }>();
     const catHealth = new Map<string, string>();
     const rank: Record<string, number> = { Healthy: 0, Low: 1, Critical: 2 };
-    for (const o of completedOrders) {
+    for (const o of revenueOrders) {
       for (const l of o.lines) {
         const p = productMap.get(l.productId);
         const cat = p?.categoryName ?? "Uncategorized";
@@ -269,11 +311,11 @@ function OverviewPage() {
         icon: categoryIconFor(name),
       }))
       .sort((a, b) => b.sales - a.sales);
-  }, [completedOrders, productMap, stockLevelsList]);
+  }, [revenueOrders, productMap, stockLevelsList]);
 
   const topProductByCategoryReal = useMemo(() => {
     const map = new Map<string, { name: string; total: number }>();
-    for (const o of completedOrders) {
+    for (const o of revenueOrders) {
       for (const l of o.lines) {
         const p = productMap.get(l.productId);
         const cat = p?.categoryName ?? "Uncategorized";
@@ -282,20 +324,20 @@ function OverviewPage() {
       }
     }
     return Object.fromEntries([...map.entries()].map(([k, v]) => [k, v.name]));
-  }, [completedOrders, productMap]);
+  }, [revenueOrders, productMap]);
 
-  const contractorOrdersList = completedOrders.filter((o) => o.type === "Contractor");
+  const contractorOrdersList = revenueOrders.filter((o) => o.type === "Contractor");
   const contractorSalesTotal = contractorOrdersList.reduce((s, o) => s + o.grandTotal, 0);
   const contractorPct = grandTotalSum ? Math.round((contractorSalesTotal / grandTotalSum) * 100) : 0;
   const returnsTotal = returnsList.reduce((s, r) => s + r.totalAmount, 0);
 
   const salesPerfKpisReal = [
-    { key: "gross", title: "Gross Sales", value: formatSAR(grossSales), sub: "All completed orders", tone: "success" as Severity, icon: "trending" },
-    { key: "net", title: "Net Sales", value: formatSAR(netSales), sub: "After discounts", tone: "info" as Severity, icon: "receipt" },
+    { key: "gross", title: "Gross Sales", value: formatSAR(grossSales), sub: "Ex-VAT, before discounts", tone: "success" as Severity, icon: "trending" },
+    { key: "net", title: "Net Takings", value: formatSAR(grandTotalSum), sub: "Incl. VAT & fees", tone: "info" as Severity, icon: "receipt" },
     { key: "discounts", title: "Discounts", value: formatSAR(discountsTotal), sub: grossSales ? `${((discountsTotal / grossSales) * 100).toFixed(1)}% of gross` : "—", tone: "info" as Severity, icon: "chart" },
-    { key: "returns", title: "Completed Returns", value: formatSAR(returnsTotal), sub: `${returnsList.length} items`, tone: (returnsTotal > 0 ? "warning" : "success") as Severity, icon: "history" },
+    { key: "returns", title: "Refunds Paid", value: formatSAR(returnsTotal), sub: `${returnsList.length} return tickets`, tone: (returnsTotal > 0 ? "warning" : "success") as Severity, icon: "history" },
     { key: "basket", title: "Average Basket", value: formatSAR(avgBasket), sub: "Retail + contractor", tone: "info" as Severity, icon: "cart" },
-    { key: "contractor", title: "Contractor Sales", value: formatSAR(contractorSalesTotal), sub: `${contractorPct}% of gross`, tone: "success" as Severity, icon: "users" },
+    { key: "contractor", title: "Contractor Sales", value: formatSAR(contractorSalesTotal), sub: `${contractorPct}% of net takings`, tone: "success" as Severity, icon: "users" },
   ];
 
   const recentOrdersReal = useMemo(
@@ -312,8 +354,8 @@ function OverviewPage() {
   );
 
   const branchPerformanceReal = useMemo(() => {
-    const ordersByBranch = new Map<number, typeof completedOrders>();
-    for (const o of completedOrders) ordersByBranch.set(o.branchId, [...(ordersByBranch.get(o.branchId) ?? []), o]);
+    const ordersByBranch = new Map<number, typeof revenueOrders>();
+    for (const o of revenueOrders) ordersByBranch.set(o.branchId, [...(ordersByBranch.get(o.branchId) ?? []), o]);
     const shiftsByTerminal = new Map(terminalsList.map((t) => [t.id, t.branchId]));
     const warehouseBranchMap = new Map((warehouses ?? []).map((w) => [w.id, w.branchId]));
     return (branches ?? []).map((b) => {
@@ -325,7 +367,7 @@ function OverviewPage() {
       const branchOpenShifts = (cashierShifts ?? []).filter((s) => shiftsByTerminal.get(s.terminalId) === b.id && s.status === "Open").length;
       return { branch: b.nameEn, sales: formatSAR(sales), tx, returns: "—", basket: formatSAR(basket), low, shifts: branchOpenShifts };
     });
-  }, [branches, completedOrders, terminalsList, cashierShifts, stockLevelsList, warehouses]);
+  }, [branches, revenueOrders, terminalsList, cashierShifts, stockLevelsList, warehouses]);
 
   const inventoryKpisReal = [
     { key: "avail", title: "Available Stock", value: availableUnits.toLocaleString(), sub: "units on hand", tone: "success" as Severity, icon: "package" },
@@ -390,7 +432,7 @@ function OverviewPage() {
 
   const paymentBreakdownReal = useMemo(() => {
     const map = new Map<string, { amount: number; tx: number }>();
-    for (const o of completedOrders) {
+    for (const o of revenueOrders) {
       for (const p of o.payments) {
         const cur = map.get(p.method) ?? { amount: 0, tx: 0 };
         cur.amount += p.amount;
@@ -401,7 +443,7 @@ function OverviewPage() {
     return [...map.entries()]
       .map(([method, v]) => ({ method, amount: formatSAR(v.amount), tx: v.tx, tone: PAYMENT_META[method]?.tone ?? "info", icon: PAYMENT_META[method]?.icon ?? "receipt" }))
       .sort((a, b) => b.tx - a.tx);
-  }, [completedOrders]);
+  }, [revenueOrders]);
 
   const returnBreakdownReal = useMemo(() => {
     const standard = returnsList.filter((r) => r.type === "Standard");

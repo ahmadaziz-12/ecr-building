@@ -20,7 +20,9 @@ import {
   PaginationBar,
   exportToCsv,
   type FilterFieldDef,
+  type FilterDraftValue,
 } from "./shared";
+import { resolveDateRangeBounds, type DateRangeValue } from "@/components/buildpos/FilterControls";
 import { RedeemPointsDialog } from "./RedeemPointsDialog";
 import { AdjustPointsDialog } from "./AdjustPointsDialog";
 import { CustomerStatementDialog } from "./CustomerStatementDialog";
@@ -82,16 +84,15 @@ function fmtDate(iso: string): string {
     minute: "2-digit",
   });
 }
-function inDateRange(iso: string, from: string, to: string): boolean {
+function inDateRange(iso: string, range: DateRangeValue | undefined): boolean {
+  const bounds = resolveDateRangeBounds(range);
+  if (!bounds) return true;
   const d = new Date(iso).getTime();
-  if (from && d < new Date(from).getTime()) return false;
-  if (to && d > new Date(`${to}T23:59:59`).getTime()) return false;
-  return true;
+  return d >= bounds.from.getTime() && d <= bounds.to.getTime();
 }
 
 const FIELDS: FilterFieldDef[] = [
-  { kind: "date", key: "dateFrom", placeholder: "From" },
-  { kind: "date", key: "dateTo", placeholder: "To" },
+  { kind: "daterange", key: "dateRange", placeholder: "Date Range" },
   { kind: "search", key: "search", placeholder: "Search customer, order #…" },
 ];
 
@@ -105,8 +106,8 @@ export function LoyaltyPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [tab, setTab] = useState<Tab>("All");
-  const [draft, setDraft] = useState<Record<string, string>>(() => emptyFilterDraft(FIELDS));
-  const [applied, setApplied] = useState<Record<string, string>>(draft);
+  const [draft, setDraft] = useState<Record<string, FilterDraftValue>>(() => emptyFilterDraft(FIELDS));
+  const [applied, setApplied] = useState<Record<string, FilterDraftValue>>(draft);
 
   // A cross-linked page load (e.g. Customers' "View Loyalty" row action ->
   // /finance/loyalty?customerId=42) seeds the search filter with that member's name — ONCE per
@@ -138,15 +139,12 @@ export function LoyaltyPage() {
   );
 
   const filtered = useMemo(() => {
+    const search = (applied.search as string) ?? "";
     return all.filter((t) => {
       if (tab !== "All" && t.type !== tab) return false;
-      if (
-        (applied.dateFrom || applied.dateTo) &&
-        !inDateRange(t.createdAt, applied.dateFrom, applied.dateTo)
-      )
-        return false;
-      if (applied.search) {
-        const s = applied.search.trim().toLowerCase();
+      if (!inDateRange(t.createdAt, applied.dateRange as DateRangeValue)) return false;
+      if (search) {
+        const s = search.trim().toLowerCase();
         if (
           s &&
           !t.customerName.toLowerCase().includes(s) &&

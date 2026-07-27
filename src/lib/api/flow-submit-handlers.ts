@@ -280,7 +280,7 @@ export function useFlowSubmitHandlers(): Record<
       if (!rows.length) throw new Error("At least one line item is required.");
 
       const lines = rows.map((row) => {
-        if (!row.sku || !row.qty) throw new Error("Every line needs an item and a quantity.");
+        if (!row.sku || !(Number(row.qty) > 0)) throw new Error("Every line needs an item and a quantity greater than 0.");
         const product = products?.find((p) => p.sku.toLowerCase() === row.sku.toLowerCase());
         if (!product) throw new Error(`Unknown SKU "${row.sku}".`);
         return {
@@ -380,7 +380,7 @@ export function useFlowSubmitHandlers(): Record<
       // Each row can target several branches at once (the multi-select branch pills) — that
       // fans out into one PO line per branch, all carrying the same qty/cost/batch/expiry.
       const lines = rows.flatMap((row) => {
-        if (!row.sku || !row.branch || !row.qty) throw new Error("Every PO line needs an item, at least one branch and a quantity.");
+        if (!row.sku || !row.branch || !(Number(row.qty) > 0)) throw new Error("Every PO line needs an item, at least one branch and a quantity greater than 0.");
         const product = products?.find((p) => p.sku === row.sku);
         if (!product) throw new Error(`Unknown SKU "${row.sku}".`);
         const branchNames = row.branch.split(",").map((s) => s.trim()).filter(Boolean);
@@ -431,7 +431,7 @@ export function useFlowSubmitHandlers(): Record<
         : undefined;
 
       const lines = rows.map((row) => {
-        if (!row.sku || !row.qty) throw new Error("Every return line needs an item and quantity.");
+        if (!row.sku || !(Number(row.qty) > 0)) throw new Error("Every return line needs an item and a quantity greater than 0.");
         const product = products?.find((p) => p.sku === row.sku);
         if (!product) throw new Error(`Unknown SKU "${row.sku}".`);
         return { productId: product.id, batchNo: row.batchNo || null, qty: Number(row.qty), unitCost: Number(row.unitCost || product.costPrice) };

@@ -278,7 +278,7 @@ export function useRowActions(
           if (!values.items) throw new Error("At least one line item is required.");
           const rows = JSON.parse(values.items) as { sku?: string; qty?: string; unitCost?: string; batchNo?: string; expiryDate?: string }[];
           const lines = rows.map((row) => {
-            if (!row.sku || !row.qty) throw new Error("Every line needs an item and a quantity.");
+            if (!row.sku || !(Number(row.qty) > 0)) throw new Error("Every line needs an item and a quantity greater than 0.");
             const p = products?.find((pr) => pr.sku.toLowerCase() === row.sku!.toLowerCase());
             if (!p) throw new Error(`Unknown SKU "${row.sku}".`);
             return {

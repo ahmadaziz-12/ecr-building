@@ -160,10 +160,13 @@ export function useBulkActions(
               };
               const from = resolve(values.from);
               const to = resolve(values.to);
+              if (from.warehouseId !== null && from.warehouseId === to.warehouseId) throw new Error("Source and destination warehouse must differ.");
+              if (from.branchId !== null && from.branchId === to.branchId) throw new Error("Source and destination branch must differ.");
               if (!values.items) throw new Error("At least one line item is required.");
               const rows = JSON.parse(values.items) as { sku?: string; qty?: string; unitCost?: string }[];
+              if (!rows.length) throw new Error("At least one line item is required.");
               const lines = rows.map((row) => {
-                if (!row.sku || !row.qty) throw new Error("Every line needs an item and a quantity.");
+                if (!row.sku || !(Number(row.qty) > 0)) throw new Error("Every line needs an item and a quantity greater than 0.");
                 const p = products?.find((pr) => pr.sku.toLowerCase() === row.sku!.toLowerCase());
                 if (!p) throw new Error(`Unknown SKU "${row.sku}".`);
                 return { productId: p.id, qty: Number(row.qty), unitCost: Number(row.unitCost || p.costPrice), batchNo: null, expiryDate: null };

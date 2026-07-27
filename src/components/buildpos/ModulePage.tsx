@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Pill, SectionCard } from "@/components/buildpos/sections";
+import { MultiSelectFilter, DateRangeFilter, resolveDateRangeBounds, type DateRangeValue } from "@/components/buildpos/FilterControls";
 import { getModule } from "@/lib/buildpos/modules";
 import type { Severity } from "@/lib/buildpos/format";
 import { getFlow, type Field, type Flow } from "@/lib/buildpos/flows";
@@ -60,6 +61,8 @@ const FILTER_ALIASES: Record<string, string> = {
   "VAT Rate": "VAT",
   "Days to Expiry": "Days Left",
   "Sync Date": "Last Sync",
+  // "Item" is the reports' name for a product picker; every stock table calls the column "Product".
+  Item: "Product",
 };
 
 function resolveFilterColumn(filterLabel: string, columns: string[]): number | null {
@@ -97,7 +100,13 @@ type ActiveFlow = {
   fieldOverrides?: Record<string, Partial<Field>>;
 };
 
-type SavedView = { name: string; columnFilters: Record<string, string>; activeTab: number; searchText: string };
+type SavedView = {
+  name: string;
+  columnFilters: Record<string, string[]>;
+  dateRangeFilters: Record<string, DateRangeValue>;
+  activeTab: number;
+  searchText: string;
+};
 
 export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (terminalId: number) => void } = {}) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -114,8 +123,8 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
   const [returnPolicyDialogOpen, setReturnPolicyDialogOpen] = useState(false);
   const { data: returnPolicyConfig } = useReturnPolicyConfig(pathname === "/finance/returns");
   const [activeTab, setActiveTab] = useState(0);
-  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
-  const [dateRangeFilters, setDateRangeFilters] = useState<Record<string, { from: string; to: string }>>({});
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const [dateRangeFilters, setDateRangeFilters] = useState<Record<string, DateRangeValue>>({});
   const [searchText, setSearchText] = useState("");
   const [page, setPage] = useState(1);
   const [detailRow, setDetailRow] = useState<{ id: number | undefined; row: (string | number)[] } | null>(null);
@@ -145,10 +154,10 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
   // A cross-linked page load (e.g. a category's "View SKUs" -> /stock/inventory?category=Cement)
   // seeds the filter/search state instead of landing on an unfiltered table.
   useEffect(() => {
-    const seeded: Record<string, string> = {};
-    if (typeof search.category === "string") seeded.Category = search.category;
-    if (typeof search.status === "string") seeded.Status = search.status;
-    if (typeof search.module === "string") seeded.Module = search.module;
+    const seeded: Record<string, string[]> = {};
+    if (typeof search.category === "string") seeded.Category = [search.category];
+    if (typeof search.status === "string") seeded.Status = [search.status];
+    if (typeof search.module === "string") seeded.Module = [search.module];
     setColumnFilters(seeded);
     setSearchText(typeof search.sku === "string" ? search.sku : typeof search.code === "string" ? search.code : "");
     setActiveTab(0);
@@ -167,7 +176,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
   function handleSaveView() {
     const name = window.prompt("Name this view:");
     if (!name) return;
-    const next = [...savedViews.filter((v) => v.name !== name), { name, columnFilters, activeTab, searchText }];
+    const next = [...savedViews.filter((v) => v.name !== name), { name, columnFilters, dateRangeFilters, activeTab, searchText }];
     setSavedViews(next);
     localStorage.setItem(`buildpos:views:${pathname}`, JSON.stringify(next));
     toast.success(`View "${name}" saved.`);
@@ -177,6 +186,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
     const view = savedViews.find((v) => v.name === name);
     if (!view) return;
     setColumnFilters(view.columnFilters);
+    setDateRangeFilters(view.dateRangeFilters ?? {});
     setActiveTab(view.activeTab);
     setSearchText(view.searchText);
     setPage(1);
@@ -208,21 +218,20 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
         }),
       );
     }
-    for (const [label, value] of Object.entries(columnFilters)) {
-      if (!value) continue;
+    for (const [label, values] of Object.entries(columnFilters)) {
+      if (!values || values.length === 0) continue;
       const colIdx = resolveFilterColumn(label, columns);
       if (colIdx === null) continue;
-      rows = rows.filter(({ row }) => String(row[colIdx] ?? "").toLowerCase().includes(value.toLowerCase()));
+      rows = rows.filter(({ row }) => values.includes(String(row[colIdx] ?? "")));
     }
     for (const [label, range] of Object.entries(dateRangeFilters)) {
-      if (!range.from && !range.to) continue;
+      const bounds = resolveDateRangeBounds(range);
+      if (!bounds) continue;
       const colIdx = resolveFilterColumn(label, columns);
       if (colIdx === null) continue;
-      const from = range.from ? new Date(range.from).getTime() : -Infinity;
-      const to = range.to ? new Date(range.to).getTime() + 86_400_000 : Infinity;
       rows = rows.filter(({ row }) => {
         const ms = Date.parse(String(row[colIdx] ?? ""));
-        return Number.isNaN(ms) ? true : ms >= from && ms <= to;
+        return Number.isNaN(ms) ? true : ms >= bounds.from.getTime() && ms <= bounds.to.getTime();
       });
     }
     if (searchText.trim()) {
@@ -356,10 +365,11 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
         </div>
       )}
 
-      {/* Filters */}
+      {/* Filters — Search reads first and widest (the filter someone reaches for first), the
+          rest of the fields sit smaller alongside it, and Date Range always trails last. */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 bg-white p-2 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
         <Filter className="ml-1 h-4 w-4 text-muted-foreground" />
-        {m.filters.map((f) => {
+        {[...m.filters].sort((a, b) => (a === "Search" ? -1 : b === "Search" ? 1 : 0)).map((f) => {
           if (f === "Search") {
             return (
               <input
@@ -367,52 +377,39 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
                 value={searchText}
                 onChange={(e) => { setSearchText(e.target.value); setPage(1); }}
                 placeholder="Search…"
-                className="h-8 w-40 rounded-md border border-black/10 bg-canvas px-2.5 text-xs outline-none focus:border-brand/40"
+                className="h-9 w-72 rounded-md border border-black/10 bg-canvas px-3 text-sm font-medium outline-none focus:border-brand/40"
               />
             );
           }
           const colIdx = resolveFilterColumn(f, columns);
-          if (colIdx === null) {
-            return (
-              <span key={f} className="rounded-md border border-black/10 bg-canvas px-2.5 py-1 text-xs font-medium text-muted-foreground/70">
-                {f}
-              </span>
-            );
-          }
+          // A filter that maps to no column can't narrow anything. It used to render as a
+          // non-interactive chip that looked like a control and silently did nothing — the class
+          // of bug behind "the date filter on Supplier Returns doesn't work". Render nothing
+          // instead, so the bar only ever shows filters that actually filter.
+          if (colIdx === null) return null;
           const options = Array.from(new Set(baseRows.map((row) => String(row[colIdx] ?? "")))).filter(Boolean).sort();
           return (
-            <select
+            <MultiSelectFilter
               key={f}
-              value={columnFilters[f] ?? ""}
-              onChange={(e) => { setColumnFilters((s) => ({ ...s, [f]: e.target.value })); setPage(1); }}
-              className="h-8 rounded-md border border-black/10 bg-canvas px-2 text-xs font-medium text-foreground hover:border-brand/40 focus:border-brand/40 focus:outline-none"
-            >
-              <option value="">{f}</option>
-              {options.map((o) => (
-                <option key={o} value={o}>{o}</option>
-              ))}
-            </select>
+              label={f}
+              allLabel={`All ${f}`}
+              options={options}
+              selected={columnFilters[f] ?? []}
+              onChange={(next) => { setColumnFilters((s) => ({ ...s, [f]: next })); setPage(1); }}
+              triggerClassName="w-auto"
+            />
           );
         })}
-        {m.dateRangeFilters?.map((f) => (
-          <div key={f} className="flex items-center gap-1">
-            <input
-              type="date"
-              value={dateRangeFilters[f]?.from ?? ""}
-              onChange={(e) => { setDateRangeFilters((s) => ({ ...s, [f]: { from: e.target.value, to: s[f]?.to ?? "" } })); setPage(1); }}
-              className="h-8 rounded-md border border-black/10 bg-canvas px-2 text-xs text-foreground outline-none focus:border-brand/40"
-              title={`${f} from`}
+        {m.dateRangeFilters?.map((f) =>
+          resolveFilterColumn(f, columns) === null ? null : (
+            <DateRangeFilter
+              key={f}
+              label={f}
+              value={dateRangeFilters[f] ?? { preset: "" }}
+              onChange={(v) => { setDateRangeFilters((s) => ({ ...s, [f]: v })); setPage(1); }}
             />
-            <span className="text-xs text-muted-foreground">–</span>
-            <input
-              type="date"
-              value={dateRangeFilters[f]?.to ?? ""}
-              onChange={(e) => { setDateRangeFilters((s) => ({ ...s, [f]: { from: s[f]?.from ?? "", to: e.target.value } })); setPage(1); }}
-              className="h-8 rounded-md border border-black/10 bg-canvas px-2 text-xs text-foreground outline-none focus:border-brand/40"
-              title={`${f} to`}
-            />
-          </div>
-        ))}
+          ),
+        )}
         {savedViews.length > 0 && (
           <select
             value=""

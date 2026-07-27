@@ -629,12 +629,15 @@ export function mapMaintenance(rows: MaintenanceDto[]): LiveTable {
 
 export function mapAuditLogs(rows: AuditLogDto[]): LiveTable {
   return {
-    columns: ["Event #", "Time", "Module", "Action", "Record", "User", "Branch", "Severity"],
-    statusCol: 7,
+    // "Date" alongside "Time" so the page's date-range filter has a column to resolve to — Time
+    // carries the clock component and reads as an event timestamp, Date is the filterable day.
+    columns: ["Event #", "Time", "Date", "Module", "Action", "Record", "User", "Branch", "Severity"],
+    statusCol: 8,
     ids: rows.map((a) => a.id),
     rows: rows.map((a) => [
       `EV-${String(a.id).padStart(5, "0")}`,
       new Date(a.createdAt).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }),
+      fmtDate(a.createdAt),
       a.module, a.event, a.recordId ?? "—", a.userName ?? "system", a.branchId ?? "—", a.severity,
     ]),
   };

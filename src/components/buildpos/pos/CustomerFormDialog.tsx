@@ -40,8 +40,12 @@ export function CustomerFormDialog({ customer, open, onOpenChange }: { customer:
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  const creditLimitValid = form.creditLimit === "" || Number(form.creditLimit) >= 0;
+  const creditTermDaysValid = form.creditTermDays === "" || Number(form.creditTermDays) >= 0;
+  const isValid = !!form.nameEn.trim() && creditLimitValid && creditTermDaysValid;
+
   async function submit() {
-    if (!form.nameEn.trim()) return;
+    if (!isValid) return;
     const payload = {
       nameEn: form.nameEn.trim(), nameAr: form.nameAr || null, type: form.type, phone: form.phone || null,
       email: form.email || null, vatNo: form.vatNo || null, creditLimit: Number(form.creditLimit) || 0,
@@ -130,7 +134,7 @@ export function CustomerFormDialog({ customer, open, onOpenChange }: { customer:
         </div>
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button size="sm" disabled={!form.nameEn.trim() || saving} onClick={submit} className="bg-brand text-brand-foreground hover:bg-brand/90">
+          <Button size="sm" disabled={!isValid || saving} onClick={submit} className="bg-brand text-brand-foreground hover:bg-brand/90">
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : isEdit ? "Save Changes" : "Add Customer"}
           </Button>
         </DialogFooter>

@@ -1,161 +1,145 @@
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
-import {
-  BadgePercent, Banknote, CalendarRange, Clock, Download, FileBarChart2, PackageSearch, Receipt,
-  RotateCcw, Scale, TrendingUp,
-} from "lucide-react";
 import { PageHeader, KpiGrid } from "@/components/buildpos/PageHeader";
 import { SectionCard } from "@/components/buildpos/sections";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { exportToCsv } from "@/components/buildpos/pos/shared";
 import {
-  useContractorAgingReport, useDiscountUtilizationReport, useRefundMethodsReport, useRestockingFeesReport,
-  useReturnsAnalysisReport, useSalesSummaryReport, useSlowMovingReport, useTopProductsReport, useVatReport,
-  type ReportDateRange,
+  EMPTY_FILTER_STATE, ReportFilterBar, activeFilterCount, toReportQuery,
+  type ReportFilterState,
+} from "./ReportFilterBar";
+import { ReportTable, type ReportColumn, type ReportDetail } from "./ReportTable";
+import { REPORTS, REPORT_BY_KEY, REPORT_GROUPS, type ReportKey } from "./report-registry";
+import {
+  useCashierPerformanceReport, useCategoryPerformanceReport, useContractorAgingReport,
+  useCustomerReturnsReport, useDamagedItemsReport, useDiscountUtilizationReport, useEmployeeAuditReport,
+  useExpiryReport, useInventoryReport, useItemReport, useLowStockReport, usePaymentMethodsReport,
+  useProfitMarginReport, usePurchaseOrderReport, useRefundMethodsReport, useReportFilterOptions,
+  useRestockingFeesReport, useReturnsAnalysisReport, useSalesSummaryReport, useSlowMovingReport,
+  useStockCountVarianceReport, useSupplierPerformanceReport, useSupplierReturnsReport,
+  useTopProductsReport, useVatReport,
 } from "@/lib/api/reports";
 
-// Module 12 (BRD §7): the operational reports console — one view per ReportsController endpoint,
-// every view filterable and exportable. Replaces the static report-registry table that never
-// surfaced any actual numbers.
+// Module 12 (BRD §7/§11): the operational reports console. The report catalogue, its filters and
+// its columns are declared in report-registry.ts; this file is the shell — picker, shared filter
+// bar, and the handful of aggregate reports whose shape is a summary rather than a row list.
 
 const money = (n: number) => `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
 const int = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 0 });
-const qty = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
-type ReportKey =
-  | "sales-summary" | "top-products" | "discount-utilization"
-  | "returns-analysis" | "refund-methods" | "restocking-fees"
-  | "vat" | "slow-moving" | "contractor-aging";
-
-const REPORTS: { key: ReportKey; label: string; desc: string; group: string; icon: typeof FileBarChart2; dated: boolean }[] = [
-  { key: "sales-summary", label: "Sales Summary", desc: "Gross, discounts, VAT and net — by payment method and cashier.", group: "Sales", icon: TrendingUp, dated: true },
-  { key: "top-products", label: "Top Products", desc: "Best sellers by revenue in the period.", group: "Sales", icon: FileBarChart2, dated: true },
-  { key: "discount-utilization", label: "Discount Utilization", desc: "How much margin is being given away, and on how many orders.", group: "Sales", icon: BadgePercent, dated: true },
-  { key: "returns-analysis", label: "Returns Analysis", desc: "Refunds, VAT reversals and restocking fees by return type.", group: "Returns", icon: RotateCcw, dated: true },
-  { key: "refund-methods", label: "Refund Methods", desc: "How approved refunds were paid back out.", group: "Returns", icon: Banknote, dated: true },
-  { key: "restocking-fees", label: "Restocking Fees", desc: "Fees withheld on surplus returns, month by month.", group: "Returns", icon: Receipt, dated: true },
-  { key: "vat", label: "VAT Report", desc: "Output VAT by rate, reversals, and the net position.", group: "Tax & B2B", icon: Scale, dated: true },
-  { key: "contractor-aging", label: "Contractor Aging", desc: "B2B credit exposure and how stale each account is.", group: "Tax & B2B", icon: Clock, dated: false },
-  { key: "slow-moving", label: "Slow-Moving Stock", desc: "On-hand items with no sales in the chosen window.", group: "Inventory", icon: PackageSearch, dated: false },
-];
-
-const GROUPS = ["Sales", "Returns", "Tax & B2B", "Inventory"];
-
-function firstOfMonth(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-}
-function todayIso(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
-function daysAgoIso(days: number): string {
-  const d = new Date(Date.now() - days * 86_400_000);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-const PRESETS: { label: string; range: () => ReportDateRange }[] = [
-  { label: "Today", range: () => ({ from: todayIso(), to: todayIso() }) },
-  { label: "7 Days", range: () => ({ from: daysAgoIso(6), to: todayIso() }) },
-  { label: "This Month", range: () => ({ from: firstOfMonth(), to: todayIso() }) },
-  { label: "30 Days", range: () => ({ from: daysAgoIso(29), to: todayIso() }) },
-  { label: "All Time", range: () => ({}) },
-];
-
-function LoadingRows({ cols }: { cols: number }) {
-  return (
-    <>
-      {[0, 1, 2].map((i) => (
-        <TableRow key={i}>
-          <TableCell colSpan={cols}>
-            <div className="h-4 w-full animate-pulse rounded bg-black/5" />
-          </TableCell>
-        </TableRow>
-      ))}
-    </>
-  );
-}
-
-function EmptyRow({ cols, label = "No data for the selected period." }: { cols: number; label?: string }) {
-  return (
-    <TableRow>
-      <TableCell colSpan={cols} className="py-8 text-center text-sm text-muted-foreground">{label}</TableCell>
-    </TableRow>
-  );
-}
-
-function ExportButton({ onClick }: { onClick: () => void }) {
-  return (
-    <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => { onClick(); toast.success("Exported CSV"); }}>
-      <Download className="h-3.5 w-3.5" /> Export
-    </Button>
-  );
+function initialState(key: ReportKey): ReportFilterState {
+  const def = REPORT_BY_KEY[key];
+  return {
+    ...EMPTY_FILTER_STATE,
+    range: def.dated ? { preset: "This Month" } : { preset: "" },
+    selections: {},
+    knobs: { ...(def.defaultKnobs ?? {}) },
+  };
 }
 
 export function ReportsConsole() {
   const [active, setActive] = useState<ReportKey>("sales-summary");
-  const [range, setRange] = useState<ReportDateRange>(() => ({ from: firstOfMonth(), to: todayIso() }));
-  const [preset, setPreset] = useState("This Month");
-  const [topTake, setTopTake] = useState(10);
-  const [slowDays, setSlowDays] = useState(30);
+  // Filters are remembered per report: switching to Low Stock and back shouldn't silently drop the
+  // branch/date window you'd set up on Sales Summary.
+  const [states, setStates] = useState<Partial<Record<ReportKey, ReportFilterState>>>({});
 
-  const activeDef = REPORTS.find((r) => r.key === active)!;
+  const def = REPORT_BY_KEY[active];
+  const state = states[active] ?? initialState(active);
+  const query = useMemo(() => toReportQuery(state, def.dated), [state, def.dated]);
+  const on = (key: ReportKey) => active === key;
 
-  // Only the active report's query is enabled — switching reports fetches on demand and caches.
-  const salesSummary = useSalesSummaryReport(range, active === "sales-summary");
-  const topProducts = useTopProductsReport(range, topTake, active === "top-products");
-  const discountUtil = useDiscountUtilizationReport(range, active === "discount-utilization");
-  const returnsAnalysis = useReturnsAnalysisReport(range, active === "returns-analysis");
-  const refundMethods = useRefundMethodsReport(range, active === "refund-methods");
-  const restockingFees = useRestockingFeesReport(range, active === "restocking-fees");
-  const vat = useVatReport(range, active === "vat");
-  const slowMoving = useSlowMovingReport(slowDays, active === "slow-moving");
-  const contractorAging = useContractorAgingReport(active === "contractor-aging");
+  const { data: options } = useReportFilterOptions();
 
-  const returnsTotals = useMemo(() => {
-    const rows = returnsAnalysis.data ?? [];
-    return {
-      count: rows.reduce((s, r) => s + r.count, 0),
-      gross: rows.reduce((s, r) => s + r.grossRefund, 0),
-      vatReversed: rows.reduce((s, r) => s + r.vatReversed, 0),
-      fees: rows.reduce((s, r) => s + r.restockingFees, 0),
-      net: rows.reduce((s, r) => s + r.netCashback, 0),
-    };
-  }, [returnsAnalysis.data]);
+  // Every report's hook is declared unconditionally (hooks rules) but gated by `enabled`, so only
+  // the visible report fetches; switching reports serves the previous one from cache.
+  const salesSummary = useSalesSummaryReport(query, on("sales-summary"));
+  const topProducts = useTopProductsReport(query, on("top-products"));
+  const discountUtil = useDiscountUtilizationReport(query, on("discount-utilization"));
+  const cashierPerf = useCashierPerformanceReport(query, on("cashier-performance"));
+  const profitMargin = useProfitMarginReport(query, on("profit-margin"));
+  const categoryPerf = useCategoryPerformanceReport(query, on("category-performance"));
+  const paymentMethods = usePaymentMethodsReport(query, on("payment-methods"));
 
-  function applyPreset(label: string) {
-    const found = PRESETS.find((p) => p.label === label);
-    if (!found) return;
-    setPreset(label);
-    setRange(found.range());
+  const returnsAnalysis = useReturnsAnalysisReport(query, on("returns-analysis"));
+  const refundMethods = useRefundMethodsReport(query, on("refund-methods"));
+  const restockingFees = useRestockingFeesReport(query, on("restocking-fees"));
+  const customerReturns = useCustomerReturnsReport(query, on("customer-returns"));
+  const damagedItems = useDamagedItemsReport(query, on("damaged-items"));
+
+  const itemReport = useItemReport(query, on("item-report"));
+  const inventoryReport = useInventoryReport(query, on("inventory-report"));
+  const lowStock = useLowStockReport(query, on("low-stock"));
+  const stockCountVariance = useStockCountVarianceReport(query, on("stock-count-variance"));
+  const slowMoving = useSlowMovingReport(query, on("slow-moving"));
+  const expiry = useExpiryReport(query, on("expiry-report"));
+
+  const purchaseOrders = usePurchaseOrderReport(query, on("purchase-orders"));
+  const supplierReturns = useSupplierReturnsReport(query, on("supplier-returns"));
+  const supplierPerf = useSupplierPerformanceReport(query, on("supplier-performance"));
+
+  const vat = useVatReport(query, on("vat"));
+  const contractorAging = useContractorAgingReport(query, on("contractor-aging"));
+  const employeeAudit = useEmployeeAuditReport(query, on("employee-audit"));
+
+  // Maps each list-shaped report to its result. The aggregate reports (sales summary, VAT,
+  // discount utilization) return an object, not rows, and render their own block below.
+  const TABLE_DATA: Partial<Record<ReportKey, { data: unknown[] | undefined; isLoading: boolean }>> = {
+    "top-products": topProducts,
+    "cashier-performance": cashierPerf,
+    "profit-margin": profitMargin,
+    "category-performance": categoryPerf,
+    "payment-methods": paymentMethods,
+    "returns-analysis": returnsAnalysis,
+    "refund-methods": refundMethods,
+    "restocking-fees": restockingFees,
+    "customer-returns": customerReturns,
+    "damaged-items": damagedItems,
+    "item-report": itemReport,
+    "inventory-report": inventoryReport,
+    "low-stock": lowStock,
+    "stock-count-variance": stockCountVariance,
+    "slow-moving": slowMoving,
+    "expiry-report": expiry,
+    "purchase-orders": purchaseOrders,
+    "supplier-returns": supplierReturns,
+    "supplier-performance": supplierPerf,
+    "contractor-aging": contractorAging,
+    "employee-audit": employeeAudit,
+  };
+
+  function setState(next: ReportFilterState) {
+    setStates((s) => ({ ...s, [active]: next }));
   }
 
-  function setRangePart(part: "from" | "to", value: string) {
-    setPreset("");
-    setRange((r) => ({ ...r, [part]: value || undefined }));
+  function clearFilters() {
+    setStates((s) => ({ ...s, [active]: initialState(active) }));
   }
 
-  const rangeLabel = range.from || range.to ? `${range.from ?? "…"} → ${range.to ?? "…"}` : "All time";
+  const rangeLabel = query.from || query.to
+    ? `${query.from ?? "…"} → ${query.to ?? "…"}`
+    : def.dated ? "All time" : "Live snapshot";
+
+  const table = TABLE_DATA[active];
+  const rows = (table?.data ?? []) as never[];
 
   return (
     <div className="space-y-4">
       <PageHeader
         group="Insights"
         title="Reports"
-        desc="Operational, financial, returns, VAT and inventory reports — live from the transaction data."
+        desc="Operational, inventory, procurement, returns, tax and audit reports — live from the transaction data, with drill-down to the individual items behind every row."
       />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[280px_1fr]">
         {/* Report picker */}
         <div className="flex gap-2 overflow-x-auto pb-1 xl:flex-col xl:overflow-visible xl:pb-0">
-          {GROUPS.map((group) => (
+          {REPORT_GROUPS.map((group) => (
             <div key={group} className="flex shrink-0 gap-2 xl:block xl:shrink">
-              <p className="hidden px-1 pb-1.5 pt-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground first:pt-0 xl:block">{group}</p>
+              <p className="hidden px-1 pb-1.5 pt-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground first:pt-0 xl:block">
+                {group}
+              </p>
               {REPORTS.filter((r) => r.group === group).map((r) => {
                 const Icon = r.icon;
                 const isActive = r.key === active;
+                const count = states[r.key] ? activeFilterCount(states[r.key]!, r.dated) : 0;
                 return (
                   <button
                     key={r.key}
@@ -168,8 +152,13 @@ export function ReportsConsole() {
                     }`}
                   >
                     <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${isActive ? "text-brand" : "text-muted-foreground"}`} />
-                    <span>
-                      <span className={`block text-xs font-semibold ${isActive ? "text-brand" : "text-foreground"}`}>{r.label}</span>
+                    <span className="min-w-0">
+                      <span className={`flex items-center gap-1.5 text-xs font-semibold ${isActive ? "text-brand" : "text-foreground"}`}>
+                        {r.label}
+                        {count > 0 && !isActive && (
+                          <span className="rounded-full bg-brand/10 px-1.5 text-[10px] font-medium text-brand">{count}</span>
+                        )}
+                      </span>
                       <span className="hidden text-[11px] leading-snug text-muted-foreground xl:block">{r.desc}</span>
                     </span>
                   </button>
@@ -181,54 +170,17 @@ export function ReportsConsole() {
 
         {/* Active report */}
         <div className="min-w-0 space-y-4">
-          {/* Filter bar */}
-          {activeDef.dated ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 bg-white p-2.5">
-              <CalendarRange className="ms-1 h-4 w-4 text-muted-foreground" />
-              {PRESETS.map((p) => (
-                <button
-                  key={p.label}
-                  type="button"
-                  onClick={() => applyPreset(p.label)}
-                  className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
-                    preset === p.label ? "bg-brand text-brand-foreground" : "bg-canvas text-foreground/80 hover:bg-brand/10"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Input type="date" value={range.from ?? ""} onChange={(e) => setRangePart("from", e.target.value)} className="h-8 w-36 text-xs" />
-                <span>to</span>
-                <Input type="date" value={range.to ?? ""} onChange={(e) => setRangePart("to", e.target.value)} className="h-8 w-36 text-xs" />
-              </div>
-              {active === "top-products" && (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <span className="ms-1">Top</span>
-                  <Input type="number" min={1} max={100} value={topTake} onChange={(e) => setTopTake(Math.max(1, Math.min(100, Number(e.target.value) || 10)))} className="h-8 w-16 text-xs" />
-                </div>
-              )}
-            </div>
-          ) : active === "slow-moving" ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 bg-white p-2.5">
-              <Clock className="ms-1 h-4 w-4 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">No sales in the last</span>
-              {[30, 60, 90].map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => setSlowDays(d)}
-                  className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
-                    slowDays === d ? "bg-brand text-brand-foreground" : "bg-canvas text-foreground/80 hover:bg-brand/10"
-                  }`}
-                >
-                  {d} days
-                </button>
-              ))}
-            </div>
-          ) : null}
+          <ReportFilterBar
+            dated={def.dated}
+            filters={def.filters}
+            knobs={def.knobs}
+            options={options}
+            state={state}
+            onChange={setState}
+            onClear={clearFilters}
+          />
 
-          {/* ————— Sales Summary ————— */}
+          {/* ————— Sales Summary (aggregate) ————— */}
           {active === "sales-summary" && (
             <>
               <KpiGrid
@@ -241,196 +193,56 @@ export function ReportsConsole() {
                 ]}
               />
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <SectionCard
+                <ReportTable
                   title="By Payment Method"
-                  desc={`${salesSummary.data?.byMethod.length ?? 0} methods`}
-                  action={<ExportButton onClick={() => exportToCsv("sales-by-method.csv", ["Method", "Amount", "Transactions"], (salesSummary.data?.byMethod ?? []).map((r) => [r.method, r.amount, r.count]))} />}
-                >
-                  <Table>
-                    <TableHeader><TableRow><TableHead>Method</TableHead><TableHead className="text-right">Amount</TableHead><TableHead className="text-right">Txns</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {salesSummary.isLoading && <LoadingRows cols={3} />}
-                      {(salesSummary.data?.byMethod ?? []).map((r) => (
-                        <TableRow key={r.method}>
-                          <TableCell className="font-medium">{r.method}</TableCell>
-                          <TableCell className="text-right">{money(r.amount)}</TableCell>
-                          <TableCell className="text-right text-muted-foreground">{int(r.count)}</TableCell>
-                        </TableRow>
-                      ))}
-                      {!salesSummary.isLoading && (salesSummary.data?.byMethod.length ?? 0) === 0 && <EmptyRow cols={3} />}
-                    </TableBody>
-                  </Table>
-                </SectionCard>
-                <SectionCard
+                  columns={[
+                    { key: "method", label: "Method" },
+                    { key: "amount", label: "Amount", format: "money" },
+                    { key: "count", label: "Txns", format: "int" },
+                  ]}
+                  rows={salesSummary.data?.byMethod ?? []}
+                  loading={salesSummary.isLoading}
+                  search={state.search}
+                  exportName="sales-by-method"
+                />
+                <ReportTable
                   title="By Cashier"
-                  desc={`${salesSummary.data?.byCashier.length ?? 0} cashiers`}
-                  action={<ExportButton onClick={() => exportToCsv("sales-by-cashier.csv", ["Cashier", "Amount", "Orders"], (salesSummary.data?.byCashier ?? []).map((r) => [r.cashier, r.amount, r.orders]))} />}
-                >
-                  <Table>
-                    <TableHeader><TableRow><TableHead>Cashier</TableHead><TableHead className="text-right">Amount</TableHead><TableHead className="text-right">Orders</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {salesSummary.isLoading && <LoadingRows cols={3} />}
-                      {(salesSummary.data?.byCashier ?? []).map((r) => (
-                        <TableRow key={r.cashier}>
-                          <TableCell className="font-medium">{r.cashier}</TableCell>
-                          <TableCell className="text-right">{money(r.amount)}</TableCell>
-                          <TableCell className="text-right text-muted-foreground">{int(r.orders)}</TableCell>
-                        </TableRow>
-                      ))}
-                      {!salesSummary.isLoading && (salesSummary.data?.byCashier.length ?? 0) === 0 && <EmptyRow cols={3} />}
-                    </TableBody>
-                  </Table>
-                </SectionCard>
+                  columns={[
+                    { key: "cashier", label: "Cashier" },
+                    { key: "amount", label: "Amount", format: "money" },
+                    { key: "orders", label: "Orders", format: "int" },
+                  ]}
+                  rows={salesSummary.data?.byCashier ?? []}
+                  loading={salesSummary.isLoading}
+                  search={state.search}
+                  exportName="sales-by-cashier"
+                />
               </div>
             </>
           )}
 
-          {/* ————— Top Products ————— */}
-          {active === "top-products" && (
-            <SectionCard
-              title={`Top ${topTake} Products by Revenue`}
-              desc={rangeLabel}
-              action={<ExportButton onClick={() => exportToCsv("top-products.csv", ["#", "SKU", "Product", "Units", "Revenue"], (topProducts.data ?? []).map((r, i) => [i + 1, r.sku, r.name, r.units, r.revenue]))} />}
-            >
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader><TableRow><TableHead className="w-10">#</TableHead><TableHead>SKU</TableHead><TableHead>Product</TableHead><TableHead className="text-right">Units</TableHead><TableHead className="text-right">Revenue</TableHead><TableHead className="w-1/4">Share</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {topProducts.isLoading && <LoadingRows cols={6} />}
-                    {(topProducts.data ?? []).map((r, i) => {
-                      const max = topProducts.data?.[0]?.revenue || 1;
-                      return (
-                        <TableRow key={r.sku}>
-                          <TableCell className="text-muted-foreground">{i + 1}</TableCell>
-                          <TableCell className="font-mono text-xs">{r.sku}</TableCell>
-                          <TableCell className="font-medium">{r.name}</TableCell>
-                          <TableCell className="text-right">{qty(r.units)}</TableCell>
-                          <TableCell className="text-right font-medium">{money(r.revenue)}</TableCell>
-                          <TableCell>
-                            <div className="h-2 rounded-full bg-black/5">
-                              <div className="h-2 rounded-full bg-brand/70" style={{ width: `${Math.max(3, (r.revenue / max) * 100)}%` }} />
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                    {!topProducts.isLoading && (topProducts.data?.length ?? 0) === 0 && <EmptyRow cols={6} />}
-                  </TableBody>
-                </Table>
-              </div>
-            </SectionCard>
-          )}
-
-          {/* ————— Discount Utilization ————— */}
+          {/* ————— Discount Utilization (aggregate) ————— */}
           {active === "discount-utilization" && (
             <>
               <KpiGrid
                 items={[
                   { label: "Total Discounts", value: discountUtil.data ? money(discountUtil.data.totalDiscounts) : "…", sub: rangeLabel, tone: "warning" },
                   { label: "Discounted Orders", value: discountUtil.data ? int(discountUtil.data.discountedOrders) : "…", sub: `of ${discountUtil.data ? int(discountUtil.data.totalOrders) : "…"} orders`, tone: "info" },
-                  { label: "Discount Rate", value: discountUtil.data ? `${discountUtil.data.discountRatePct.toFixed(1)}%` : "…", sub: "Orders carrying a discount", tone: discountUtil.data && discountUtil.data.discountRatePct > 30 ? "critical" : "muted" },
+                  { label: "Discount Rate", value: discountUtil.data ? `${discountUtil.data.discountRatePct.toFixed(1)}%` : "…", sub: "Of gross sales", tone: discountUtil.data && discountUtil.data.discountRatePct > 30 ? "critical" : "muted" },
                 ]}
               />
               <SectionCard title="Reading This Report" desc="BRD §6.2 — discount authorization tiers">
                 <p className="px-1 text-sm leading-relaxed text-muted-foreground">
                   A rising discount rate means margin is leaking through manual discounts. Ceilings per role (Cashier 5% /
                   Senior 10% / Supervisor 15%) gate each discount at the register; anything above the ceiling required a
-                  logged supervisor approval. Cross-check unusual spikes against the Approvals log for the same period.
+                  logged supervisor approval. Cross-check unusual spikes against the Employee Audit report for the same
+                  period, filtered to the Pos module.
                 </p>
               </SectionCard>
             </>
           )}
 
-          {/* ————— Returns Analysis ————— */}
-          {active === "returns-analysis" && (
-            <SectionCard
-              title="Returns by Type"
-              desc={rangeLabel}
-              action={<ExportButton onClick={() => exportToCsv("returns-analysis.csv", ["Type", "Tickets", "Gross Refund", "VAT Reversed", "Restocking Fees", "Net Cashback"], (returnsAnalysis.data ?? []).map((r) => [r.type, r.count, r.grossRefund, r.vatReversed, r.restockingFees, r.netCashback]))} />}
-            >
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader><TableRow><TableHead>Type</TableHead><TableHead className="text-right">Tickets</TableHead><TableHead className="text-right">Gross Refund</TableHead><TableHead className="text-right">VAT Reversed</TableHead><TableHead className="text-right">Restocking Fees</TableHead><TableHead className="text-right">Net Cashback</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {returnsAnalysis.isLoading && <LoadingRows cols={6} />}
-                    {(returnsAnalysis.data ?? []).map((r) => (
-                      <TableRow key={r.type}>
-                        <TableCell className="font-medium">{r.type}</TableCell>
-                        <TableCell className="text-right">{int(r.count)}</TableCell>
-                        <TableCell className="text-right">{money(r.grossRefund)}</TableCell>
-                        <TableCell className="text-right">{money(r.vatReversed)}</TableCell>
-                        <TableCell className="text-right">{money(r.restockingFees)}</TableCell>
-                        <TableCell className="text-right font-medium">{money(r.netCashback)}</TableCell>
-                      </TableRow>
-                    ))}
-                    {!returnsAnalysis.isLoading && (returnsAnalysis.data?.length ?? 0) > 0 && (
-                      <TableRow className="bg-canvas font-semibold">
-                        <TableCell>Total</TableCell>
-                        <TableCell className="text-right">{int(returnsTotals.count)}</TableCell>
-                        <TableCell className="text-right">{money(returnsTotals.gross)}</TableCell>
-                        <TableCell className="text-right">{money(returnsTotals.vatReversed)}</TableCell>
-                        <TableCell className="text-right">{money(returnsTotals.fees)}</TableCell>
-                        <TableCell className="text-right">{money(returnsTotals.net)}</TableCell>
-                      </TableRow>
-                    )}
-                    {!returnsAnalysis.isLoading && (returnsAnalysis.data?.length ?? 0) === 0 && <EmptyRow cols={6} label="No returns in the selected period." />}
-                  </TableBody>
-                </Table>
-              </div>
-            </SectionCard>
-          )}
-
-          {/* ————— Refund Methods ————— */}
-          {active === "refund-methods" && (
-            <SectionCard
-              title="Refunds Paid Out, by Method"
-              desc={rangeLabel}
-              action={<ExportButton onClick={() => exportToCsv("refund-methods.csv", ["Method", "Refunds", "Amount"], (refundMethods.data ?? []).map((r) => [r.method, r.count, r.amount]))} />}
-            >
-              <Table>
-                <TableHeader><TableRow><TableHead>Method</TableHead><TableHead className="text-right">Refunds</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {refundMethods.isLoading && <LoadingRows cols={3} />}
-                  {(refundMethods.data ?? []).map((r, i) => (
-                    <TableRow key={r.method || `unspecified-${i}`}>
-                      <TableCell className="font-medium">
-                        {r.method || <span className="italic text-muted-foreground">Unspecified (legacy record)</span>}
-                      </TableCell>
-                      <TableCell className="text-right">{int(r.count)}</TableCell>
-                      <TableCell className="text-right">{money(r.amount)}</TableCell>
-                    </TableRow>
-                  ))}
-                  {!refundMethods.isLoading && (refundMethods.data?.length ?? 0) === 0 && <EmptyRow cols={3} label="No approved refunds in the selected period." />}
-                </TableBody>
-              </Table>
-            </SectionCard>
-          )}
-
-          {/* ————— Restocking Fees ————— */}
-          {active === "restocking-fees" && (
-            <SectionCard
-              title="Restocking Fees Collected"
-              desc={rangeLabel}
-              action={<ExportButton onClick={() => exportToCsv("restocking-fees.csv", ["Month", "Surplus Returns", "Fees Collected"], (restockingFees.data ?? []).map((r) => [r.month, r.returns, r.feesCollected]))} />}
-            >
-              <Table>
-                <TableHeader><TableRow><TableHead>Month</TableHead><TableHead className="text-right">Surplus Returns</TableHead><TableHead className="text-right">Fees Collected</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {restockingFees.isLoading && <LoadingRows cols={3} />}
-                  {(restockingFees.data ?? []).map((r) => (
-                    <TableRow key={r.month}>
-                      <TableCell className="font-medium">{r.month}</TableCell>
-                      <TableCell className="text-right">{int(r.returns)}</TableCell>
-                      <TableCell className="text-right">{money(r.feesCollected)}</TableCell>
-                    </TableRow>
-                  ))}
-                  {!restockingFees.isLoading && (restockingFees.data?.length ?? 0) === 0 && <EmptyRow cols={3} label="No restocking fees in the selected period." />}
-                </TableBody>
-              </Table>
-            </SectionCard>
-          )}
-
-          {/* ————— VAT ————— */}
+          {/* ————— VAT (aggregate) ————— */}
           {active === "vat" && (
             <>
               <KpiGrid
@@ -440,102 +252,74 @@ export function ReportsConsole() {
                   { label: "Net VAT Position", value: vat.data ? money(vat.data.netVat) : "…", sub: "Payable to ZATCA", tone: "success" },
                 ]}
               />
-              <SectionCard
+              <ReportTable
                 title="Output VAT by Rate"
                 desc="Excludes voided orders; reversals from approved returns"
-                action={<ExportButton onClick={() => exportToCsv("vat-report.csv", ["Rate %", "Taxable Amount", "VAT Collected"], (vat.data?.collected ?? []).map((r) => [r.rate, r.taxableAmount, r.vatCollected]))} />}
-              >
-                <Table>
-                  <TableHeader><TableRow><TableHead>Rate</TableHead><TableHead className="text-right">Taxable Amount</TableHead><TableHead className="text-right">VAT Collected</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {vat.isLoading && <LoadingRows cols={3} />}
-                    {(vat.data?.collected ?? []).map((r) => (
-                      <TableRow key={r.rate}>
-                        <TableCell className="font-medium">{r.rate}%</TableCell>
-                        <TableCell className="text-right">{money(r.taxableAmount)}</TableCell>
-                        <TableCell className="text-right">{money(r.vatCollected)}</TableCell>
-                      </TableRow>
-                    ))}
-                    {!vat.isLoading && (vat.data?.collected.length ?? 0) === 0 && <EmptyRow cols={3} />}
-                  </TableBody>
-                </Table>
-              </SectionCard>
+                columns={[
+                  { key: "rate", label: "Rate", format: "pct" },
+                  { key: "taxableAmount", label: "Taxable Amount", format: "money" },
+                  { key: "vatCollected", label: "VAT Collected", format: "money" },
+                ]}
+                rows={vat.data?.collected ?? []}
+                loading={vat.isLoading}
+                search={state.search}
+                exportName="vat-report"
+              />
             </>
           )}
 
-          {/* ————— Slow-Moving ————— */}
-          {active === "slow-moving" && (
-            <SectionCard
-              title={`No Sales in ${slowDays} Days`}
-              desc={`${slowMoving.data?.length ?? 0} SKUs holding stock`}
-              action={<ExportButton onClick={() => exportToCsv("slow-moving.csv", ["SKU", "Product", "On Hand", "Last Sold"], (slowMoving.data ?? []).map((r) => [r.sku, r.name, r.onHand, r.lastSoldAt ?? "Never"]))} />}
-            >
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader><TableRow><TableHead>SKU</TableHead><TableHead>Product</TableHead><TableHead className="text-right">On Hand</TableHead><TableHead>Last Sold</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {slowMoving.isLoading && <LoadingRows cols={4} />}
-                    {(slowMoving.data ?? []).map((r) => (
-                      <TableRow key={r.sku}>
-                        <TableCell className="font-mono text-xs">{r.sku}</TableCell>
-                        <TableCell className="font-medium">{r.name}</TableCell>
-                        <TableCell className="text-right">{qty(r.onHand)}</TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {r.lastSoldAt
-                            ? new Date(r.lastSoldAt).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })
-                            : <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] font-medium">Never sold</span>}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!slowMoving.isLoading && (slowMoving.data?.length ?? 0) === 0 && <EmptyRow cols={4} label="Nothing slow-moving — every stocked SKU sold recently." />}
-                  </TableBody>
-                </Table>
-              </div>
-            </SectionCard>
+          {/* ————— Every list-shaped report ————— */}
+          {table && def.columns && (
+            <>
+              {KPI_BUILDERS[active] && rows.length > 0 && <KpiGrid items={KPI_BUILDERS[active]!(rows)} />}
+              <ReportTable
+                title={def.tableTitle ?? def.label}
+                desc={`${rows.length} rows · ${rangeLabel}`}
+                columns={def.columns as ReportColumn<never>[]}
+                rows={rows}
+                loading={table.isLoading}
+                search={state.search}
+                detail={def.detail as ReportDetail<never> | undefined}
+                emptyLabel={def.emptyLabel}
+                exportName={def.key}
+              />
+            </>
           )}
 
-          {/* ————— Contractor Aging ————— */}
-          {active === "contractor-aging" && (
-            <SectionCard
-              title="B2B / Contractor Credit Exposure"
-              desc={`${contractorAging.data?.length ?? 0} accounts with outstanding balances`}
-              action={<ExportButton onClick={() => exportToCsv("contractor-aging.csv", ["Customer", "Credit Limit", "Outstanding", "Utilization %", "Days Since Purchase"], (contractorAging.data ?? []).map((r) => [r.customer, r.creditLimit, r.outstanding, r.creditLimit > 0 ? Math.round((r.outstanding / r.creditLimit) * 100) : 0, r.daysSinceLastPurchase]))} />}
-            >
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader><TableRow><TableHead>Customer</TableHead><TableHead className="text-right">Credit Limit</TableHead><TableHead className="text-right">Outstanding</TableHead><TableHead className="w-1/5">Utilization</TableHead><TableHead className="text-right">Inactive</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {contractorAging.isLoading && <LoadingRows cols={5} />}
-                    {(contractorAging.data ?? []).map((r) => {
-                      const util = r.creditLimit > 0 ? (r.outstanding / r.creditLimit) * 100 : 0;
-                      return (
-                        <TableRow key={r.customer}>
-                          <TableCell className="font-medium">{r.customer}</TableCell>
-                          <TableCell className="text-right">{money(r.creditLimit)}</TableCell>
-                          <TableCell className="text-right font-medium">{money(r.outstanding)}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <div className="h-2 flex-1 rounded-full bg-black/5">
-                                <div
-                                  className={`h-2 rounded-full ${util > 90 ? "bg-critical/80" : util > 70 ? "bg-warning/80" : "bg-success/70"}`}
-                                  style={{ width: `${Math.min(100, Math.max(3, util))}%` }}
-                                />
-                              </div>
-                              <span className="w-9 text-right text-[11px] text-muted-foreground">{Math.round(util)}%</span>
+          {/* Contractor aging keeps its utilization bar, which no generic column can express. */}
+          {active === "contractor-aging" && (contractorAging.data?.length ?? 0) > 0 && (
+            <SectionCard title="Credit Utilization" desc="Outstanding against each account's limit">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Customer</TableHead>
+                    <TableHead className="w-1/2">Utilization</TableHead>
+                    <TableHead className="text-right">Outstanding</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(contractorAging.data ?? []).map((r) => {
+                    const util = r.creditLimit > 0 ? (r.outstanding / r.creditLimit) * 100 : 0;
+                    return (
+                      <TableRow key={r.customer}>
+                        <TableCell className="font-medium">{r.customer}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 flex-1 rounded-full bg-black/5">
+                              <div
+                                className={`h-2 rounded-full ${util > 90 ? "bg-critical/80" : util > 70 ? "bg-warning/80" : "bg-success/70"}`}
+                                style={{ width: `${Math.min(100, Math.max(3, util))}%` }}
+                              />
                             </div>
-                          </TableCell>
-                          <TableCell className="text-right text-muted-foreground">
-                            {r.daysSinceLastPurchase > 60
-                              ? <span className="rounded bg-critical/10 px-1.5 py-0.5 text-[11px] font-medium text-critical">{r.daysSinceLastPurchase}d</span>
-                              : `${r.daysSinceLastPurchase}d`}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                    {!contractorAging.isLoading && (contractorAging.data?.length ?? 0) === 0 && <EmptyRow cols={5} label="No B2B accounts carry an outstanding balance." />}
-                  </TableBody>
-                </Table>
-              </div>
+                            <span className="w-9 text-right text-[11px] text-muted-foreground">{Math.round(util)}%</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right font-medium">{money(r.outstanding)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </SectionCard>
           )}
         </div>
@@ -543,3 +327,109 @@ export function ReportsConsole() {
     </div>
   );
 }
+
+type Kpi = { label: string; value: string; sub?: string; tone?: "critical" | "warning" | "success" | "info" | "muted" };
+
+const sum = (rows: never[], key: string) =>
+  rows.reduce((s, r) => s + (Number((r as Record<string, unknown>)[key]) || 0), 0);
+
+// Roll-ups for the list reports where a total genuinely helps read the table. Reports without an
+// entry here just render the table.
+const KPI_BUILDERS: Partial<Record<ReportKey, (rows: never[]) => Kpi[]>> = {
+  "item-report": (rows) => [
+    { label: "Items", value: int(rows.length), sub: "Matching filters", tone: "info" },
+    { label: "Stock Value", value: money(sum(rows, "stockValue")), sub: "At cost", tone: "info" },
+    { label: "Revenue", value: money(sum(rows, "revenue")), sub: "In period", tone: "success" },
+    { label: "Gross Profit", value: money(sum(rows, "grossProfit")), sub: "Revenue − COGS", tone: "success" },
+  ],
+  "inventory-report": (rows) => [
+    { label: "Stock Lines", value: int(rows.length), sub: "Product × location", tone: "info" },
+    { label: "On Hand", value: int(sum(rows, "onHand")), sub: "Units", tone: "info" },
+    { label: "Stock Value", value: money(sum(rows, "stockValue")), sub: "At cost", tone: "success" },
+    { label: "Retail Value", value: money(sum(rows, "retailValue")), sub: "At selling price", tone: "info" },
+  ],
+  "low-stock": (rows) => [
+    { label: "Lines Below Reorder", value: int(rows.length), sub: "Needs replenishment", tone: "warning" },
+    { label: "Out of Stock", value: int(rows.filter((r) => (r as { status: string }).status === "Critical").length), sub: "Can't be sold", tone: "critical" },
+    { label: "Units Short", value: int(sum(rows, "shortfall")), sub: "Below reorder level", tone: "warning" },
+    { label: "Restock Cost", value: money(sum(rows, "restockValue")), sub: "Suggested order at cost", tone: "info" },
+  ],
+  "stock-count-variance": (rows) => [
+    { label: "Counts", value: int(rows.length), sub: "In period", tone: "info" },
+    { label: "Variance Lines", value: int(sum(rows, "varianceLines")), sub: "SKUs that drifted", tone: "warning" },
+    { label: "Net Variance", value: money(sum(rows, "netVarianceValue")), sub: "Overage − shortage", tone: "info" },
+    { label: "Shrinkage Exposure", value: money(sum(rows, "absVarianceValue")), sub: "Absolute variance", tone: "critical" },
+  ],
+  "purchase-orders": (rows) => [
+    { label: "Purchase Orders", value: int(rows.length), sub: "In period", tone: "info" },
+    { label: "Ordered Value", value: money(sum(rows, "total")), sub: "Incl. shipping", tone: "info" },
+    { label: "Qty Pending", value: int(sum(rows, "qtyPending")), sub: "Not yet received", tone: "warning" },
+    { label: "Late POs", value: int(rows.filter((r) => (r as { daysLate: number }).daysLate > 0).length), sub: "Past expected date", tone: "critical" },
+  ],
+  "supplier-returns": (rows) => [
+    { label: "RTS Tickets", value: int(rows.length), sub: "In period", tone: "info" },
+    { label: "Units Returned", value: int(sum(rows, "qty")), sub: "To suppliers", tone: "warning" },
+    { label: "Return Value", value: money(sum(rows, "value")), sub: "At cost", tone: "warning" },
+    { label: "Awaiting Credit", value: int(rows.filter((r) => !(r as { creditNoteRef: string | null }).creditNoteRef).length), sub: "No credit note yet", tone: "critical" },
+  ],
+  "customer-returns": (rows) => [
+    { label: "Return Tickets", value: int(rows.length), sub: "In period", tone: "info" },
+    { label: "Gross Refund", value: money(sum(rows, "grossRefund")), sub: "Ex-VAT", tone: "warning" },
+    { label: "VAT Reversed", value: money(sum(rows, "vatReversal")), sub: "Credit notes issued", tone: "info" },
+    { label: "Net Cashback", value: money(sum(rows, "netCashback")), sub: "Paid back out", tone: "critical" },
+  ],
+  "damaged-items": (rows) => [
+    { label: "Damaged Lines", value: int(rows.length), sub: "In period", tone: "warning" },
+    { label: "Units Lost", value: int(sum(rows, "qty")), sub: "Quarantined", tone: "warning" },
+    { label: "Loss Value", value: money(sum(rows, "lossValue")), sub: "At cost", tone: "critical" },
+    { label: "Pending Approval", value: int(rows.filter((r) => (r as { status: string }).status === "PendingApproval").length), sub: "Awaiting sign-off", tone: "warning" },
+  ],
+  "expiry-report": (rows) => [
+    { label: "Batches", value: int(rows.length), sub: "Matching filters", tone: "info" },
+    { label: "Expiring ≤ 30d", value: int(rows.filter((r) => { const d = (r as { daysLeft: number }).daysLeft; return d >= 0 && d <= 30; }).length), sub: "Move to promo", tone: "warning" },
+    { label: "Expired", value: int(rows.filter((r) => (r as { daysLeft: number }).daysLeft < 0).length), sub: "Write-off pending", tone: "critical" },
+    { label: "Value at Risk", value: money(sum(rows.filter((r) => (r as { daysLeft: number }).daysLeft <= 30) as never[], "value")), sub: "≤ 30 days left", tone: "critical" },
+  ],
+  "profit-margin": (rows) => [
+    { label: "Revenue", value: money(sum(rows, "revenue")), sub: "In period", tone: "success" },
+    { label: "COGS", value: money(sum(rows, "cogs")), sub: "At cost price", tone: "info" },
+    { label: "Gross Profit", value: money(sum(rows, "grossProfit")), sub: "Revenue − COGS", tone: "success" },
+    { label: "Net Profit", value: money(sum(rows, "netProfit")), sub: "After returns", tone: "info" },
+  ],
+  "employee-audit": (rows) => [
+    { label: "Events", value: int(rows.length), sub: "In period", tone: "info" },
+    { label: "Critical", value: int(rows.filter((r) => (r as { severity: string }).severity === "Critical").length), sub: "Needs review", tone: "critical" },
+    { label: "Warnings", value: int(rows.filter((r) => (r as { severity: string }).severity === "Warning").length), sub: "Flagged", tone: "warning" },
+    { label: "Distinct Users", value: int(new Set(rows.map((r) => (r as { userName: string | null }).userName ?? "—")).size), sub: "Acted in period", tone: "muted" },
+  ],
+  "cashier-performance": (rows) => [
+    { label: "Cashiers", value: int(rows.length), sub: "Active in period", tone: "info" },
+    { label: "Orders", value: int(sum(rows, "orders")), sub: "Completed", tone: "info" },
+    { label: "Net Takings", value: money(sum(rows, "net")), sub: "Incl. VAT", tone: "success" },
+    { label: "Voids", value: int(sum(rows, "voidedOrders")), sub: "Reversed at register", tone: "warning" },
+  ],
+  "supplier-performance": (rows) => [
+    { label: "Suppliers", value: int(rows.length), sub: "With activity", tone: "info" },
+    { label: "Ordered Value", value: money(sum(rows, "orderedValue")), sub: "In period", tone: "info" },
+    { label: "Received Value", value: money(sum(rows, "receivedValue")), sub: "Goods in", tone: "success" },
+    { label: "Returned Value", value: money(sum(rows, "returnedValue")), sub: "Sent back", tone: "warning" },
+  ],
+  "payment-methods": (rows) => [
+    { label: "Collected", value: money(sum(rows, "amount")), sub: "All methods", tone: "success" },
+    { label: "Refunded", value: money(sum(rows, "refundAmount")), sub: "Paid back out", tone: "warning" },
+    { label: "Net Settlement", value: money(sum(rows, "net")), sub: "Collected − refunded", tone: "info" },
+    { label: "Transactions", value: int(sum(rows, "transactions")), sub: "Payment records", tone: "muted" },
+  ],
+  "returns-analysis": (rows) => [
+    { label: "Tickets", value: int(sum(rows, "count")), sub: "All types", tone: "info" },
+    { label: "Gross Refund", value: money(sum(rows, "grossRefund")), sub: "Ex-VAT", tone: "warning" },
+    { label: "VAT Reversed", value: money(sum(rows, "vatReversed")), sub: "Credit notes", tone: "info" },
+    { label: "Net Cashback", value: money(sum(rows, "netCashback")), sub: "After fees", tone: "critical" },
+  ],
+  "category-performance": (rows) => [
+    { label: "Categories", value: int(rows.length), sub: "With activity", tone: "info" },
+    { label: "Revenue", value: money(sum(rows, "revenue")), sub: "In period", tone: "success" },
+    { label: "Gross Profit", value: money(sum(rows, "grossProfit")), sub: "Revenue − COGS", tone: "success" },
+    { label: "Stock Value", value: money(sum(rows, "stockValue")), sub: "Branch stock at cost", tone: "info" },
+  ],
+};

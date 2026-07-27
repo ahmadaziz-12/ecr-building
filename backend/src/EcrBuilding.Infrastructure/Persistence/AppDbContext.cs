@@ -46,6 +46,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
     public DbSet<StockAdjustmentLine> StockAdjustmentLines => Set<StockAdjustmentLine>();
     public DbSet<StockMovement> StockMovements => Set<StockMovement>();
+    public DbSet<StockCount> StockCounts => Set<StockCount>();
+    public DbSet<StockCountLine> StockCountLines => Set<StockCountLine>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<PurchaseOrderLine> PurchaseOrderLines => Set<PurchaseOrderLine>();
@@ -284,6 +286,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasOne(x => x.Adjustment).WithMany(x => x.Lines).HasForeignKey(x => x.AdjustmentId);
             b.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId);
             b.Ignore(x => x.Variance);
+        });
+
+        modelBuilder.Entity<StockCount>(b =>
+        {
+            b.HasIndex(x => x.CountNo).IsUnique();
+            b.HasOne(x => x.Warehouse).WithMany().HasForeignKey(x => x.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.CountedBy).WithMany().HasForeignKey(x => x.CountedByUserId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.ApprovedBy).WithMany().HasForeignKey(x => x.ApprovedByUserId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.StockAdjustment).WithMany().HasForeignKey(x => x.StockAdjustmentId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<StockCountLine>(b =>
+        {
+            b.HasOne(x => x.StockCount).WithMany(x => x.Lines).HasForeignKey(x => x.StockCountId);
+            b.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId);
+            b.Ignore(x => x.Variance);
+            b.Ignore(x => x.VarianceValue);
         });
 
         modelBuilder.Entity<Supplier>(b =>

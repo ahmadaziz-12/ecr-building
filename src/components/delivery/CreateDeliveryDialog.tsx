@@ -97,6 +97,14 @@ export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { op
       toast.error(`Driver unavailable — ${driverCheck.reason}.`);
       return;
     }
+    if (![f.fee, f.handling, f.heavy, f.discount].every((n) => Number.isFinite(n) && n >= 0)) {
+      toast.error("Fee, handling, heavy-material and discount charges must be zero or a positive amount.");
+      return;
+    }
+    if (f.discount > f.fee + f.handling + f.heavy) {
+      toast.error("Discount cannot exceed the fee, handling and heavy-material charges combined.");
+      return;
+    }
     setSaving(true);
     const res = await addOrder({
       orderId: f.orderId,

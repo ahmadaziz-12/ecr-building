@@ -35,6 +35,7 @@ import {
   ChevronRight,
   ReceiptText,
   Truck,
+  Play,
 } from "lucide-react";
 import { toast } from "sonner";
 import { productImage } from "@/lib/buildpos/product-images";
@@ -790,7 +791,11 @@ export function PosCheckout() {
   // Module 16 (BRD §3.4): convert the ACTIVE CART into a quotation — project code and customer
   // reference are mandatory, so a small prompt collects them before submitting.
   async function handleCreateQuotation() {
-    if (!effectiveBranchId || cart.length === 0) return;
+    if (!effectiveBranchId || cartIsEmpty) return;
+    if (cart.length === 0 && bundleCart.length > 0) {
+      toast.error("Quotations don't support bundles yet — complete or remove the bundle first.");
+      return;
+    }
     const projectCode = window.prompt("Project code (required):")?.trim();
     if (!projectCode) return;
     const customerReference = window.prompt("Customer reference (required):")?.trim();
@@ -918,22 +923,6 @@ export function PosCheckout() {
               )}
             </div>
 
-            {idle && (
-              <div className="relative mt-4 grid grid-cols-3 gap-3 text-center text-[11px] text-white/60">
-                <div className="rounded-lg bg-white/5 px-2 py-2 ring-1 ring-white/10">
-                  <p className="font-display text-white text-sm">Cash · Mada · STC</p>
-                  <p>Payment ready</p>
-                </div>
-                <div className="rounded-lg bg-white/5 px-2 py-2 ring-1 ring-white/10">
-                  <p className="font-display text-white text-sm">ZATCA Phase 2</p>
-                  <p>Cleared · online</p>
-                </div>
-                <div className="rounded-lg bg-white/5 px-2 py-2 ring-1 ring-white/10">
-                  <p className="font-display text-white text-sm">{user?.name ?? "Cashier"}</p>
-                  <p>{user?.role ?? "cashier"}</p>
-                </div>
-              </div>
-            )}
           </div>
 
           {idle && (
@@ -1057,8 +1046,11 @@ export function PosCheckout() {
                     <p className="truncate text-sm font-medium text-foreground">{h.ticketNo} · {h.customerName ?? "Walk-in"}</p>
                     <p className="text-[11px] text-muted-foreground">{h.lines.length} item{h.lines.length === 1 ? "" : "s"} · {h.notes ?? "No notes"}</p>
                   </div>
-                  <span className="flex flex-none items-center gap-1 font-mono text-sm font-semibold text-foreground">
-                    {money(h.total)} <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="flex flex-none items-center gap-2">
+                    <span className="font-mono text-sm font-semibold text-foreground">{money(h.total)}</span>
+                    <span className="flex items-center gap-1 rounded-md bg-brand/10 px-2 py-1 text-xs font-semibold text-brand">
+                      <Play className="h-3 w-3" /> Resume
+                    </span>
                   </span>
                 </button>
               ))}
@@ -1081,38 +1073,38 @@ export function PosCheckout() {
               )}
             </p>
           </div>
-          <div className="flex gap-1">
+          <div className="flex gap-1.5">
             {customer ? (
               <button
                 onClick={() => setCustomer(null)}
-                className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5"
+                className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-black/5 hover:text-foreground"
                 title="Detach customer"
               >
-                <UserPlus className="h-4 w-4" />
+                <UserPlus className="h-3.5 w-3.5" /> Detach
               </button>
             ) : null}
             <button
               onClick={handleHold}
-              disabled={cart.length === 0 || holdSale.isPending}
-              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5 disabled:opacity-40"
+              disabled={cartIsEmpty || holdSale.isPending}
+              className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               title="Hold sale"
             >
-              {holdSale.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pause className="h-4 w-4" />}
+              {holdSale.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />} Hold
             </button>
             <button
               onClick={handleCreateQuotation}
-              disabled={cart.length === 0 || createQuotation.isPending}
-              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5 disabled:opacity-40"
+              disabled={cartIsEmpty || createQuotation.isPending}
+              className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               title="Convert cart to quotation"
             >
-              {createQuotation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              {createQuotation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />} Quote
             </button>
             <button
               onClick={() => toast.info("Process returns from Finance → Returns & Refunds.")}
-              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5"
+              className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-black/5 hover:text-foreground"
               title="Return"
             >
-              <RotateCcw className="h-4 w-4" />
+              <RotateCcw className="h-3.5 w-3.5" /> Return
             </button>
           </div>
         </div>

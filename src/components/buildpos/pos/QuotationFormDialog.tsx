@@ -127,7 +127,7 @@ export function QuotationFormDialog({ open, onOpenChange, branchId }: { open: bo
                   min={1}
                   className="h-7 w-16 text-right"
                   value={l.qty}
-                  onChange={(e) => setLines((prev) => prev.map((x) => (x.productId === l.productId ? { ...x, qty: Number(e.target.value) || 1 } : x)))}
+                  onChange={(e) => setLines((prev) => prev.map((x) => (x.productId === l.productId ? { ...x, qty: Math.max(1, Number(e.target.value) || 1) } : x)))}
                 />
                 <span className="w-20 text-right text-muted-foreground">{(l.qty * l.price).toFixed(2)}</span>
                 <button onClick={() => setLines((prev) => prev.filter((x) => x.productId !== l.productId))} className="text-muted-foreground hover:text-critical">

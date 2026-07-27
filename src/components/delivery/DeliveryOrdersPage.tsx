@@ -3,7 +3,8 @@ import { Filter, Search, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/buildpos/PageHeader";
 import { Pill, SectionCard } from "@/components/buildpos/sections";
-import { STAGES, STAGE_TONE, useDeliveryStore, type DeliveryOrder, type Stage } from "@/lib/delivery/store";
+import { MultiSelectFilter } from "@/components/buildpos/FilterControls";
+import { STAGES, STAGE_TONE, useDeliveryStore, type DeliveryOrder } from "@/lib/delivery/store";
 import { useAuth } from "@/lib/api/auth";
 import { CreateDeliveryDialog } from "./CreateDeliveryDialog";
 import { StageActionDialog } from "./StageActionDialog";
@@ -76,14 +77,14 @@ function PendingApprovalsPanel() {
 export function DeliveryOrdersPage() {
   const orders = useDeliveryStore((s) => s.orders);
   const [q, setQ] = useState("");
-  const [stage, setStage] = useState<Stage | "All">("All");
+  const [stage, setStage] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [active, setActive] = useState<DeliveryOrder | null>(null);
   const [detail, setDetail] = useState<DeliveryOrder | null>(null);
 
   const rows = useMemo(() => {
     return orders.filter((o) => {
-      if (stage !== "All" && o.stage !== stage) return false;
+      if (stage.length && !stage.includes(o.stage)) return false;
       if (q) {
         const t = q.toLowerCase();
         return o.id.toLowerCase().includes(t) || o.customer.toLowerCase().includes(t) || o.orderId.toLowerCase().includes(t) || o.area.toLowerCase().includes(t);
@@ -102,13 +103,13 @@ export function DeliveryOrdersPage() {
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input placeholder="Search DO, order, customer, area…" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 w-72 rounded-lg border border-black/10 bg-canvas pl-8 pr-3 text-sm outline-none focus:border-brand" />
         </div>
-        <select value={stage} onChange={(e) => setStage(e.target.value as Stage | "All")} className="h-9 rounded-lg border border-black/10 bg-canvas px-2 text-sm">
-          <option value="All">All stages</option>
-          {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
-          <option value="Cancelled">Cancelled</option>
-          <option value="Rescheduled">Rescheduled</option>
-          <option value="Returned to Branch">Returned to Branch</option>
-        </select>
+        <MultiSelectFilter
+          label="Stage"
+          allLabel="All Stages"
+          options={[...STAGES, "Cancelled", "Rescheduled", "Returned to Branch"]}
+          selected={stage}
+          onChange={setStage}
+        />
         <span className="ml-auto text-xs text-muted-foreground">{rows.length} of {orders.length}</span>
       </div>
 

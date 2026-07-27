@@ -65,6 +65,10 @@ export type Field = {
   scannable?: boolean;
   /** Only used when type === "lineItems". */
   lineItemColumns?: LineItemColumn[];
+  /** For a "select" field: the name of another field in the same flow whose current value is
+   *  removed from this field's own option list — e.g. Stock Transfer's "to" excludes whatever
+   *  "from" currently holds, so the same warehouse/branch can never be picked as both ends. */
+  excludeValueOf?: string;
 };
 
 export type FlowStep = {
@@ -604,6 +608,8 @@ export const flows: Record<string, Flow> = {
             type: "select",
             options: ["Warehouse: Riyadh Main Yard", "Warehouse: Jeddah Distribution Center", "Branch: Riyadh Main Yard", "Branch: Jeddah Industrial Branch"],
             required: true,
+            excludeValueOf: "from",
+            hint: "Can't match the From Location — pick a different warehouse or branch.",
           },
           { name: "eta", label: "Expected Arrival", type: "date" },
         ],
