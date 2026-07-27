@@ -45,3 +45,26 @@ public record AdjustmentLineInput(int ProductId, decimal SystemQty, decimal Coun
 public record StockMovementDto(
     int Id, DateTime Date, string Type, int ProductId, string Sku, string ProductName,
     int BranchId, string BranchName, decimal Qty, string Direction, string? RefTable, string? RefId, string? UserName);
+
+// ————— Automatic Stock Count (stocktake sessions) —————
+// SystemQty is null on a blind count until the sheet is posted — the counter must not see what the
+// system already believes, or the number they type is anchored to it.
+public record StockCountLineDto(
+    int Id, int ProductId, string Sku, string ProductName, string CategoryName, string Uom, string? BinLocation,
+    string? Barcode, decimal? SystemQty, decimal? CountedQty, decimal? Variance, decimal? VarianceValue,
+    decimal UnitCost, string? Note, DateTime? CountedAt, string Status);
+public record StockCountDto(
+    int Id, string CountNo, int WarehouseId, string WarehouseName, int BranchId, string BranchName,
+    string Scope, int? CategoryId, string? CategoryName, string Status,
+    DateTime ScheduledFor, DateTime? StartedAt, DateTime? CompletedAt,
+    string? CountedByName, string? ApprovedByName, string? Notes,
+    bool AutoFillUncounted, bool BlindCount, int? StockAdjustmentId,
+    int LineCount, int CountedLines, int VarianceLines, decimal NetVarianceQty, decimal NetVarianceValue,
+    decimal AbsVarianceValue, decimal AccuracyPct, IReadOnlyList<StockCountLineDto> Lines);
+public record GenerateStockCountRequest(
+    int WarehouseId, string Scope, int? CategoryId, DateTime? ScheduledFor, string? Notes,
+    bool AutoFillUncounted = true, bool BlindCount = false, bool IncludeZeroStock = false, int? TopN = null);
+public record SaveStockCountLinesRequest(List<StockCountLineInput> Lines);
+public record StockCountLineInput(int LineId, decimal? CountedQty, string? Note);
+public record ScanStockCountRequest(string Code, decimal Qty = 1, bool Increment = true);
+public record PostStockCountRequest(int? ApproverUserId, string? Notes);

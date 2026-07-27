@@ -90,7 +90,7 @@ export function PaymentDialog({
   const splitCashAmt = Number(splitCash) || 0;
   const splitCardAmt = Number(splitCard) || 0;
   const splitSum = splitCashAmt + splitCardAmt;
-  const splitOk = Math.abs(splitSum - totalDue) < 0.01;
+  const splitOk = splitCashAmt >= 0 && splitCardAmt >= 0 && Math.abs(splitSum - totalDue) < 0.01;
 
   async function charge(payments: PaymentInput[]) {
     setProcessing(true);

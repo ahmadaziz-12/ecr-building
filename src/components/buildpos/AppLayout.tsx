@@ -53,6 +53,7 @@ import {
   Wrench,
   History,
   BookOpen,
+  ClipboardCheck,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import logoAsset from "@/assets/mimony-logo.png.asset.json";
@@ -110,13 +111,19 @@ const nav: Group[] = [
     items: [
       { to: "/stock/inventory", label: "Product Catalog", icon: Package },
       { to: "/admin/categories", label: "Categories & Attributes", icon: Layers },
-      { to: "/stock/warehouses", label: "Warehouses", icon: Warehouse },
+      { to: "/stock/bundles", label: "Bundles & Systems", icon: Blocks },
+    ],
+  },
+  {
+    name: "Stock",
+    items: [
+      { to: "/stock/warehouses", label: "Warehouse Directory", icon: Warehouse },
       { to: "/stock/stocks", label: "Warehouse Stock", icon: Boxes },
       { to: "/stock/branch-stock", label: "Branch Stock", icon: Store },
+      { to: "/stock/stock-count", label: "Stock Count", icon: ClipboardCheck },
       { to: "/stock/movements", label: "Stock Movements", icon: History },
-      { to: "/stock/expiry", label: "Expiry", icon: CalendarClock },
+      { to: "/stock/expiry", label: "Material Validity", icon: CalendarClock },
       { to: "/stock/transfers", label: "Stock Transfers", icon: ArrowLeftRight },
-      { to: "/stock/bundles", label: "Bundles & Systems", icon: Blocks },
     ],
   },
   {

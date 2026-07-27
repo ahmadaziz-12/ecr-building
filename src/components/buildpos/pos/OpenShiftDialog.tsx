@@ -21,8 +21,10 @@ export function OpenShiftDialog({ open, onOpenChange, branchId }: { open: boolea
     setOpeningFloat("1000");
   }
 
+  const floatValid = Number.isFinite(Number(openingFloat)) && Number(openingFloat) >= 0;
+
   async function submit() {
-    if (!terminalId) return;
+    if (!terminalId || !floatValid) return;
     try {
       await openShift.mutateAsync({ terminalId: Number(terminalId), openingFloat: Number(openingFloat) || 0 });
       toast.success("Shift opened");
@@ -52,7 +54,7 @@ export function OpenShiftDialog({ open, onOpenChange, branchId }: { open: boolea
         </div>
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button size="sm" disabled={!terminalId || openShift.isPending} onClick={submit} className="bg-brand text-brand-foreground hover:bg-brand/90">
+          <Button size="sm" disabled={!terminalId || !floatValid || openShift.isPending} onClick={submit} className="bg-brand text-brand-foreground hover:bg-brand/90">
             {openShift.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Open Shift"}
           </Button>
         </DialogFooter>

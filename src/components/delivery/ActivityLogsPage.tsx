@@ -1,12 +1,16 @@
 import { useMemo, useState } from "react";
 import { PageHeader, KpiGrid } from "@/components/buildpos/PageHeader";
 import { Pill, SectionCard } from "@/components/buildpos/sections";
+import { MultiSelectFilter } from "@/components/buildpos/FilterControls";
 import { useAuditLogs, useBranches } from "@/lib/api/admin";
+
+const SEVERITIES = ["info", "warning", "critical"];
+const SEVERITY_LABELS: Record<string, string> = { info: "Info", warning: "Warning", critical: "Critical" };
 
 export function DeliveryLogsPage() {
   const { data: events } = useAuditLogs("delivery");
   const { data: branches } = useBranches();
-  const [severity, setSeverity] = useState<"all" | "info" | "warning" | "critical">("all");
+  const [severity, setSeverity] = useState<string[]>([]);
   const [q, setQ] = useState("");
 
   const branchName = (id: number | null) => (id ? (branches?.find((b) => b.id === id)?.nameEn ?? `#${id}`) : "—");
@@ -15,7 +19,7 @@ export function DeliveryLogsPage() {
     () =>
       (events ?? []).filter(
         (e) =>
-          (severity === "all" || e.severity.toLowerCase() === severity) &&
+          (severity.length === 0 || severity.includes(e.severity.toLowerCase())) &&
           (!q || e.event.toLowerCase().includes(q.toLowerCase()) || e.recordId?.includes(q)),
       ),
     [events, severity, q],
@@ -42,9 +46,7 @@ export function DeliveryLogsPage() {
       ]} />
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 bg-white p-2">
         <input placeholder="Search event or record…" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 w-72 rounded-lg border border-black/10 bg-canvas px-3 text-sm" />
-        <select value={severity} onChange={(e) => setSeverity(e.target.value as never)} className="h-9 rounded-lg border border-black/10 bg-canvas px-2 text-sm">
-          <option value="all">All severity</option><option value="info">Info</option><option value="warning">Warning</option><option value="critical">Critical</option>
-        </select>
+        <MultiSelectFilter label="Severity" allLabel="All Severity" options={SEVERITIES} labels={SEVERITY_LABELS} selected={severity} onChange={setSeverity} />
       </div>
       <SectionCard title="Events" desc={`${rows.length} matching`}>
         <div className="overflow-x-auto">

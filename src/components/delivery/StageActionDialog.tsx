@@ -90,6 +90,10 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
       toast.error("Reason is required for return-to-branch.");
       return;
     }
+    if ((target === "Rescheduled" || target === "Cancelled") && !reason) {
+      toast.error(`Reason is required to mark this ${target.toLowerCase()}.`);
+      return;
+    }
     setSaving(true);
     const res = await moveStage(order.id, target as Stage, "Current User", reason || undefined);
     setSaving(false);

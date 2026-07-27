@@ -29,8 +29,10 @@ export function VoidOrderDialog({ order, onClose }: { order: OrderDto | null; on
   const { user } = useAuth();
   const canVoidAlone = user?.posCeilings.canVoidTransactions ?? false;
 
+  const authorizationOk = canVoidAlone || (authorizerEmail.trim() !== "" && authorizerPin.trim() !== "");
+
   async function confirm() {
-    if (!order || !reason.trim() || !reasonCode) return;
+    if (!order || !reason.trim() || !reasonCode || !authorizationOk) return;
     try {
       await voidOrder.mutateAsync({
         id: order.id, reason: reason.trim(), reasonCode,
@@ -88,7 +90,7 @@ export function VoidOrderDialog({ order, onClose }: { order: OrderDto | null; on
           <Button
             size="sm"
             variant="destructive"
-            disabled={!reason.trim() || !reasonCode || voidOrder.isPending}
+            disabled={!reason.trim() || !reasonCode || !authorizationOk || voidOrder.isPending}
             onClick={confirm}
           >
             {voidOrder.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Void Order"}

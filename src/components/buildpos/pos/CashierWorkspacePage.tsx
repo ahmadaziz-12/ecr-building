@@ -7,8 +7,9 @@ import { Pill, SectionCard } from "@/components/buildpos/sections";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  RowActionsMenu, statusTone, FilterBar, emptyFilterDraft, exportToCsv, type FilterFieldDef,
+  RowActionsMenu, statusTone, FilterBar, emptyFilterDraft, exportToCsv, type FilterFieldDef, type FilterDraftValue,
 } from "./shared";
+import { resolveDateRangeBounds, type DateRangeValue } from "@/components/buildpos/FilterControls";
 import { RequestApprovalDialog } from "./RequestApprovalDialog";
 import { PriceCheckDialog } from "./PriceCheckDialog";
 import { StockEnquiryDialog } from "./StockEnquiryDialog";
@@ -22,8 +23,7 @@ import { useBranches } from "@/lib/api/admin";
 const APPROVAL_TYPES = ["Discount", "PriceOverride", "Refund"];
 const APPROVAL_TYPE_LABELS: Record<string, string> = { Discount: "Discount", PriceOverride: "Price Override", Refund: "Refund" };
 const FIELDS: FilterFieldDef[] = [
-  { kind: "date", key: "dateFrom", placeholder: "From Date" },
-  { kind: "date", key: "dateTo", placeholder: "To Date" },
+  { kind: "daterange", key: "dateRange", placeholder: "Date Range" },
   { kind: "select", key: "approvalType", placeholder: "Approval Type", options: APPROVAL_TYPES, labels: APPROVAL_TYPE_LABELS },
   { kind: "search", key: "search", placeholder: "Search ticket, customer, reason…" },
 ];
@@ -40,11 +40,11 @@ function shiftDuration(openedAt: string): string {
   const mins = Math.floor((ms % 3_600_000) / 60_000);
   return `${hours}h ${mins}m`;
 }
-function inDateRange(iso: string, from: string, to: string): boolean {
+function inDateRange(iso: string, range: DateRangeValue | undefined): boolean {
+  const bounds = resolveDateRangeBounds(range);
+  if (!bounds) return true;
   const d = new Date(iso).getTime();
-  if (from && d < new Date(from).getTime()) return false;
-  if (to && d > new Date(`${to}T23:59:59`).getTime()) return false;
-  return true;
+  return d >= bounds.from.getTime() && d <= bounds.to.getTime();
 }
 
 export function CashierWorkspacePage() {
@@ -59,8 +59,8 @@ export function CashierWorkspacePage() {
   const approveApproval = useApproveApproval();
   const rejectApproval = useRejectApproval();
 
-  const [draft, setDraft] = useState<Record<string, string>>(() => emptyFilterDraft(FIELDS));
-  const [applied, setApplied] = useState<Record<string, string>>(draft);
+  const [draft, setDraft] = useState<Record<string, FilterDraftValue>>(() => emptyFilterDraft(FIELDS));
+  const [applied, setApplied] = useState<Record<string, FilterDraftValue>>(draft);
   const [requestingApproval, setRequestingApproval] = useState(false);
   const [priceCheckOpen, setPriceCheckOpen] = useState(false);
   const [stockEnquiryOpen, setStockEnquiryOpen] = useState(false);
@@ -68,10 +68,11 @@ export function CashierWorkspacePage() {
   const myShift = useMemo(() => (shifts ?? []).find((s) => s.status === "Open" && s.cashierName === user?.name), [shifts, user?.name]);
 
   const filteredParked = useMemo(() => {
+    const search = (applied.search as string) ?? "";
     return (parkedSales ?? []).filter((p) => {
-      if ((applied.dateFrom || applied.dateTo) && !inDateRange(p.createdAt, applied.dateFrom, applied.dateTo)) return false;
-      if (applied.search) {
-        const t = applied.search.trim().toLowerCase();
+      if (!inDateRange(p.createdAt, applied.dateRange as DateRangeValue)) return false;
+      if (search) {
+        const t = search.trim().toLowerCase();
         if (t && !p.ticketNo.toLowerCase().includes(t) && !(p.customerName ?? "").toLowerCase().includes(t) && !(p.notes ?? "").toLowerCase().includes(t)) return false;
       }
       return true;
@@ -79,11 +80,13 @@ export function CashierWorkspacePage() {
   }, [parkedSales, applied]);
 
   const filteredApprovals = useMemo(() => {
+    const approvalType = (applied.approvalType as string[]) ?? [];
+    const search = (applied.search as string) ?? "";
     return (approvals ?? []).filter((a) => {
-      if (applied.approvalType && a.type !== applied.approvalType) return false;
-      if ((applied.dateFrom || applied.dateTo) && !inDateRange(a.createdAt, applied.dateFrom, applied.dateTo)) return false;
-      if (applied.search) {
-        const t = applied.search.trim().toLowerCase();
+      if (approvalType.length && !approvalType.includes(a.type)) return false;
+      if (!inDateRange(a.createdAt, applied.dateRange as DateRangeValue)) return false;
+      if (search) {
+        const t = search.trim().toLowerCase();
         if (t && !a.requestedByName.toLowerCase().includes(t) && !a.reason.toLowerCase().includes(t)) return false;
       }
       return true;

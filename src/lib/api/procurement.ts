@@ -260,11 +260,15 @@ export function mapPurchaseOrders(rows: PurchaseOrderDto[]): LiveTable {
 
 export function mapRts(rows: ReturnToSupplierDto[]): LiveTable {
   return {
-    columns: ["RTS #", "Supplier", "Branch", "Linked PO", "Reason", "Items", "Value (ر.س)", "Credit Note", "Created", "Status"],
-    statusCol: 9,
+    // The date column is called "Date" (not "Created") so the page's Date range filter resolves to
+    // it — RTS.Date is the business date the goods went back, which is what anyone filtering an
+    // RTS report means, and it's also what the Supplier Returns report filters on server-side.
+    columns: ["RTS #", "Supplier", "Branch", "Warehouse", "Linked PO", "Reason", "Items", "Value (ر.س)", "Credit Note", "Date", "Status"],
+    statusCol: 10,
     ids: rows.map((r) => r.id),
     rows: rows.map((r) => [
-      r.rtsNo, r.supplierName, r.branchName, r.purchaseOrderNo ?? "—", r.reason, r.lines.reduce((s, l) => s + l.qty, 0),
+      r.rtsNo, r.supplierName, r.branchName, r.warehouseName, r.purchaseOrderNo ?? "—", r.reason,
+      r.lines.reduce((s, l) => s + l.qty, 0),
       r.lines.reduce((s, l) => s + l.qty * l.unitCost, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
       r.creditNoteRef ?? "—", fmtDate(r.date), r.status,
     ]),

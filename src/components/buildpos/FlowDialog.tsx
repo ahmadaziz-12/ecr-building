@@ -9,6 +9,7 @@ import { useBranches, useTerminals, useUsers, useRoles } from "@/lib/api/admin";
 import { useStockLevels, useBranchStockLevels } from "@/lib/api/inventory";
 import { sellableUoms, unitPriceFor, factorToStock } from "@/lib/buildpos/uom";
 import { fileToCompressedDataUrl } from "@/lib/buildpos/image";
+import { SearchableSelect } from "@/components/buildpos/SearchableSelect";
 
 type LineItemRow = Record<string, string>;
 
@@ -167,17 +168,19 @@ function LineItemsField({
                 <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{c.label}</label>
                 {c.type === "product" ? (
                   <>
-                    <select className={inputClass} value={row[c.key] ?? ""} onChange={(e) => updateCell(rowIdx, c.key, e.target.value)}>
-                      <option value="">Select item…</option>
-                      {products?.map((p) => {
+                    <SearchableSelect
+                      value={row[c.key] ?? ""}
+                      onChange={(v) => updateCell(rowIdx, c.key, v)}
+                      placeholder="Select item…"
+                      searchPlaceholder="Search SKU or name…"
+                      options={(products ?? []).map((p) => {
                         const avail = showsAvailability ? availabilityMap!.get(p.sku) : undefined;
-                        return (
-                          <option key={p.id} value={p.sku}>
-                            {p.sku} — {p.nameEn}{avail !== undefined ? ` (Avail: ${avail})` : ""}
-                          </option>
-                        );
+                        return {
+                          value: p.sku,
+                          label: `${p.sku} — ${p.nameEn}${avail !== undefined ? ` (Avail: ${avail})` : ""}`,
+                        };
                       })}
-                    </select>
+                    />
                     {showsAvailability && rowSku && (
                       <p className={`mt-1 text-[11px] ${rowAvailable !== undefined && rowAvailable <= 0 ? "text-critical" : "text-muted-foreground"}`}>
                         {rowAvailable !== undefined ? `Available: ${rowAvailable}` : "No stock record at this location."}
@@ -459,7 +462,7 @@ export function FlowDialog({
 
   function resolveField(f: Field): Field {
     const override = fieldOverrides?.[f.name];
-    const merged = override ? { ...f, ...override } : f;
+    let merged = override ? { ...f, ...override } : f;
     if (merged.optionsSource === "subcategories") {
       // Narrowed live by whichever top-level category is currently picked in the sibling
       // `dependsOn` field — e.g. picking "Electric" lists only Electric's own subcategories.
@@ -473,12 +476,19 @@ export function FlowDialog({
         : children.length === 0
           ? `No subcategories for "${parentName}" — leave blank`
           : merged.placeholder;
-      return { ...merged, options: [...(merged.options ?? []), ...children], placeholder };
+      merged = { ...merged, options: [...(merged.options ?? []), ...children], placeholder };
+    } else if (merged.optionsSource) {
+      // Static options on an optionsSource field are special leading entries ("Unassigned",
+      // "— This is a Main Category —"); the real choices come from the live list.
+      merged = { ...merged, options: [...(merged.options ?? []), ...(liveOptions[merged.optionsSource] ?? [])] };
     }
-    if (!merged.optionsSource) return merged;
-    // Static options on an optionsSource field are special leading entries ("Unassigned",
-    // "— This is a Main Category —"); the real choices come from the live list.
-    return { ...merged, options: [...(merged.options ?? []), ...(liveOptions[merged.optionsSource] ?? [])] };
+    // Applies to every source (static, live, or subcategory-narrowed): a field that must not
+    // offer whatever a sibling already holds — e.g. Stock Transfer's "to" can't be the "from".
+    if (merged.excludeValueOf && merged.options) {
+      const excluded = values[merged.excludeValueOf];
+      if (excluded) merged = { ...merged, options: merged.options.filter((o) => o !== excluded) };
+    }
+    return merged;
   }
 
   function summarizeLineItems(field: Field, raw: string): string {
@@ -513,6 +523,26 @@ export function FlowDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [steps, values, fieldOverrides]);
 
+  // Setting a field's value cascades to the two kinds of field that depend on it, because both
+  // can be left holding a selection their own option list no longer offers:
+  //  • excludeValueOf — e.g. changing Stock Transfer's "from" to whatever "to" already held would
+  //    leave "to" showing a value it now excludes.
+  //  • dependsOn — e.g. Subcategory is narrowed by Category, so changing Category strands a
+  //    subcategory that doesn't belong under the new parent.
+  // Both sweep every step, not just the current one, since a dependent field can live further on.
+  function handleFieldChange(fieldName: string, v: string) {
+    setValues((s) => {
+      const next = { ...s, [fieldName]: v };
+      for (const step of steps) {
+        for (const field of step.fields) {
+          if (field.excludeValueOf === fieldName && next[field.name] === v) next[field.name] = "";
+          if (field.dependsOn === fieldName) next[field.name] = "";
+        }
+      }
+      return next;
+    });
+  }
+
   function reset() {
     setStep(0);
     setValues({});
@@ -524,7 +554,39 @@ export function FlowDialog({
     if (!v) setTimeout(reset, 200);
   }
 
+  // A field's `required` flag (flows.ts) was previously cosmetic — it drew a red asterisk but
+  // never actually blocked Continue/Save, so a flow could be submitted with blank required
+  // fields or a lineItems field carrying zero rows. This makes it real: a lineItems field counts
+  // as satisfied only once at least one row has some cell filled in.
+  function isFieldSatisfied(f: Field): boolean {
+    if (!f.required) return true;
+    const val = values[f.name] ?? f.default;
+    if (f.type === "lineItems") {
+      return parseRows(val ?? "").some((row) => Object.values(row).some((v) => v != null && String(v).trim() !== ""));
+    }
+    return !!val && val.trim().length > 0;
+  }
+
+  function firstMissingField(stepIdx: number): Field | undefined {
+    return steps[stepIdx]?.fields.map(resolveField).find((f) => !isFieldSatisfied(f));
+  }
+
+  function firstMissingFieldOverall(): Field | undefined {
+    for (let i = 0; i < steps.length; i++) {
+      const missing = firstMissingField(i);
+      if (missing) return missing;
+    }
+    return undefined;
+  }
+
   async function save() {
+    const missing = firstMissingFieldOverall();
+    if (missing) {
+      toast.error(`${missing.label} is required.`, {
+        description: missing.type === "lineItems" ? "Add at least one line item." : undefined,
+      });
+      return;
+    }
     if (!onSubmit) {
       setDone(true);
       toast.success(flow?.successTitle ?? `${flow?.title} saved`, {
@@ -550,6 +612,8 @@ export function FlowDialog({
   if (!flow) return null;
   const Icon = flow.icon;
   const current = steps[step];
+  const stepMissing = isReview ? undefined : firstMissingField(step);
+  const overallMissing = isReview ? firstMissingFieldOverall() : undefined;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -699,18 +763,7 @@ export function FlowDialog({
                           <FieldControl
                             field={f}
                             value={values[f.name] ?? f.default ?? ""}
-                            onChange={(v) =>
-                              setValues((s) => {
-                                const next = { ...s, [f.name]: v };
-                                // A field this one narrows (e.g. Subcategory depends on Category)
-                                // may now hold a stale pick — clear it instead of silently keeping
-                                // a choice that no longer belongs under the new value.
-                                for (const other of current?.fields ?? []) {
-                                  if (other.dependsOn === f.name) next[other.name] = "";
-                                }
-                                return next;
-                              })
-                            }
+                            onChange={(v) => handleFieldChange(f.name, v)}
                           />
                         )}
                         {f.hint && <p className="mt-1 text-[11px] text-muted-foreground">{f.hint}</p>}
@@ -739,7 +792,7 @@ export function FlowDialog({
                   <Button
                     size="sm"
                     onClick={save}
-                    disabled={done || saving}
+                    disabled={done || saving || !!overallMissing}
                     className="gap-1 bg-brand text-brand-foreground hover:bg-brand/90"
                   >
                     <Check className="h-4 w-4" /> {saving ? "Saving…" : `Save ${flow.title}`}
@@ -748,6 +801,7 @@ export function FlowDialog({
                   <Button
                     size="sm"
                     onClick={() => setStep((s) => s + 1)}
+                    disabled={!!stepMissing}
                     className="gap-1 bg-brand text-brand-foreground hover:bg-brand/90"
                   >
                     Continue <ChevronRight className="h-4 w-4" />

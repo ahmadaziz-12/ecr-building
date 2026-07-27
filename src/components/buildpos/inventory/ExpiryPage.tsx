@@ -19,6 +19,7 @@ import {
   PaginationBar,
   exportToCsv,
   type FilterFieldDef,
+  type FilterDraftValue,
 } from "@/components/buildpos/pos/shared";
 import { FlowDialog } from "@/components/buildpos/FlowDialog";
 import { getFlow } from "@/lib/buildpos/flows";
@@ -115,15 +116,18 @@ export function ExpiryPage() {
     ],
     [categoryOptions],
   );
-  const [draft, setDraft] = useState<Record<string, string>>(() => emptyFilterDraft(fields));
-  const [applied, setApplied] = useState<Record<string, string>>(draft);
+  const [draft, setDraft] = useState<Record<string, FilterDraftValue>>(() => emptyFilterDraft(fields));
+  const [applied, setApplied] = useState<Record<string, FilterDraftValue>>(draft);
 
   const filtered = useMemo(() => {
+    const category = (applied.category as string[]) ?? [];
+    const status = (applied.status as string[]) ?? [];
+    const search = (applied.search as string) ?? "";
     return activeRows.filter((b) => {
-      if (applied.category && skuToCategory.get(b.sku) !== applied.category) return false;
-      if (applied.status && b.status !== applied.status) return false;
-      if (applied.search) {
-        const t = applied.search.trim().toLowerCase();
+      if (category.length && !category.includes(skuToCategory.get(b.sku) ?? "")) return false;
+      if (status.length && !status.includes(b.status)) return false;
+      if (search) {
+        const t = search.trim().toLowerCase();
         if (
           t &&
           !b.sku.toLowerCase().includes(t) &&

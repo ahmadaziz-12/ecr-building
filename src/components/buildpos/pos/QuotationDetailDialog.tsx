@@ -49,6 +49,10 @@ export function QuotationDetailDialog({
                 <p className="mt-0.5 font-medium">{quotation.customerReference || "—"}</p>
               </div>
               <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Created</p>
+                <p className="mt-0.5 font-medium">{new Date(quotation.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</p>
+              </div>
+              <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Valid Until</p>
                 <p className="mt-0.5 font-medium">{new Date(quotation.validUntil).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</p>
               </div>

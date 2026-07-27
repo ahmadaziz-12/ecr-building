@@ -29,6 +29,7 @@ public static class PermissionCatalog
         new("/stock/warehouses", "Inventory", "Warehouses"),
         new("/stock/stocks", "Inventory", "Warehouse Stock"),
         new("/stock/branch-stock", "Inventory", "Branch Stock"),
+        new("/stock/stock-count", "Inventory", "Stock Count"),
         new("/stock/movements", "Inventory", "Stock Movements"),
         new("/stock/expiry", "Inventory", "Expiry"),
         new("/stock/transfers", "Inventory", "Stock Transfers"),

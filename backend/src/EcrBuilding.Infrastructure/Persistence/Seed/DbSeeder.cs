@@ -158,19 +158,19 @@ public static class DbSeeder
                 new Device
                 {
                     DeviceCode = $"{terminal.Code}-PRN", Type = DeviceType.ReceiptPrinter, Model = "Epson TM-T88VI",
-                    Serial = $"SN-{terminal.Code}-PRN", TerminalId = terminal.Id, Connection = DeviceConnection.Usb,
+                    Serial = $"SN-{terminal.Code}-PRN", TerminalId = terminal.Id, BranchId = branch.Id, Connection = DeviceConnection.Usb,
                     Status = DeviceStatus.Healthy, LastTestAt = DateTime.UtcNow,
                 },
                 new Device
                 {
                     DeviceCode = $"{terminal.Code}-SCN", Type = DeviceType.BarcodeScanner, Model = "Honeywell Voyager 1200g",
-                    Serial = $"SN-{terminal.Code}-SCN", TerminalId = terminal.Id, Connection = DeviceConnection.Usb,
+                    Serial = $"SN-{terminal.Code}-SCN", TerminalId = terminal.Id, BranchId = branch.Id, Connection = DeviceConnection.Usb,
                     Status = DeviceStatus.Healthy, LastTestAt = DateTime.UtcNow,
                 },
                 new Device
                 {
                     DeviceCode = $"{terminal.Code}-DRW", Type = DeviceType.CashDrawer, Model = "APG Vasario 1616",
-                    Serial = $"SN-{terminal.Code}-DRW", TerminalId = terminal.Id, Connection = DeviceConnection.Usb,
+                    Serial = $"SN-{terminal.Code}-DRW", TerminalId = terminal.Id, BranchId = branch.Id, Connection = DeviceConnection.Usb,
                     Status = DeviceStatus.Healthy, LastTestAt = DateTime.UtcNow,
                 });
         }

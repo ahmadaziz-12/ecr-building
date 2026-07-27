@@ -21,9 +21,10 @@ export function CloseShiftDialog({ shift, onClose }: { shift: CashierShiftDto | 
   }, [shift?.id]);
 
   const variance = shift && counted ? Number(counted) - shift.expectedCash : null;
+  const countedValid = counted !== "" && Number.isFinite(Number(counted)) && Number(counted) >= 0;
 
   async function submit() {
-    if (!shift || counted === "") return;
+    if (!shift || !countedValid) return;
     try {
       await closeShift.mutateAsync({ id: shift.id, countedCash: Number(counted) });
       toast.success(`${shift.terminalName} shift closed`);
@@ -55,7 +56,7 @@ export function CloseShiftDialog({ shift, onClose }: { shift: CashierShiftDto | 
         </div>
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" disabled={counted === "" || closeShift.isPending} onClick={submit} className="bg-brand text-brand-foreground hover:bg-brand/90">
+          <Button size="sm" disabled={!countedValid || closeShift.isPending} onClick={submit} className="bg-brand text-brand-foreground hover:bg-brand/90">
             {closeShift.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Close Shift"}
           </Button>
         </DialogFooter>

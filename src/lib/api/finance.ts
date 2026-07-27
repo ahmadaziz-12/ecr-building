@@ -366,6 +366,9 @@ export function mapReturns(rows: ReturnDto[]): LiveTable {
       // Standard/Damaged/Surplus/Exchange tabs and status-pill rendering already key on.
       "Branch",
       "Cashier",
+      // Ditto — but without it the page's Date range filter has no column to resolve to and
+      // silently does nothing.
+      "Date",
     ],
     statusCol: 8,
     ids: rows.map((r) => r.id),
@@ -381,6 +384,7 @@ export function mapReturns(rows: ReturnDto[]): LiveTable {
       r.status,
       r.branchName ?? "—",
       r.cashierName ?? "—",
+      fmtDate(r.createdAt),
     ]),
   };
 }
