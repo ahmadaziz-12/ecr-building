@@ -439,6 +439,10 @@ public static class DbSeeder
         {
             db.StockLevels.Add(new StockLevel { ProductId = product.Id, WarehouseId = warehouses[0].Id, OnHand = 20 + rnd.Next(0, 200), Reserved = rnd.Next(0, 15) });
             db.StockLevels.Add(new StockLevel { ProductId = product.Id, WarehouseId = warehouses[1].Id, OnHand = 10 + rnd.Next(0, 100), Reserved = rnd.Next(0, 8) });
+            // Smaller shop-floor quantities than the warehouses' bulk stock — the branch's own
+            // shelf, independently sellable and independently replenished via a Stock Transfer.
+            db.BranchStockLevels.Add(new BranchStockLevel { ProductId = product.Id, BranchId = riyadh.Id, OnHand = 5 + rnd.Next(0, 40), Reserved = rnd.Next(0, 5) });
+            db.BranchStockLevels.Add(new BranchStockLevel { ProductId = product.Id, BranchId = jeddah.Id, OnHand = 5 + rnd.Next(0, 30), Reserved = rnd.Next(0, 3) });
         }
         await db.SaveChangesAsync();
 

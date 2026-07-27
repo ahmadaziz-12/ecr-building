@@ -71,13 +71,16 @@ public class PurchaseOrderLine
 }
 
 // Numeric values are load-bearing (stored as ints in the DB) — append new members, never renumber.
+// AwaitingCredit is never assigned by any endpoint (kept for backward source-compat only) —
+// Dispatched already represents "sent, awaiting the supplier's credit note".
 public enum ReturnToSupplierStatus
 {
     AwaitingCredit = 0,
     CreditReceived = 1,
     Dispatched = 2,
     Rejected = 3,
-    Draft = 4
+    Draft = 4,
+    Cancelled = 5
 }
 
 public class ReturnToSupplier : BaseEntity

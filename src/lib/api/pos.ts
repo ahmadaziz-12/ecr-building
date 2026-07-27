@@ -662,6 +662,7 @@ export function mapPricingRules(rows: PricingRuleDto[]): LiveTable {
       "Status",
     ],
     statusCol: 8,
+    ids: rows.map((r) => r.id),
     rows: rows.map((r) => [
       `PR-${String(r.id).padStart(3, "0")}`,
       r.name,

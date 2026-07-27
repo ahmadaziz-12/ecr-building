@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   BadgeCheck, Check, Crown, Rocket, Shield, Sparkles, Store, Users, Zap,
   Building2, Boxes, HeadphonesIcon, CreditCard, ArrowRight,
@@ -138,6 +139,14 @@ const addons = [
   { icon: Shield, name: "Advanced Compliance", price: "299 ر.س", per: "/mo", desc: "Audit exports, custom retention & fine-grained logs." },
 ];
 
+// No real payment gateway is wired up (Admin Overview's own health check reports the payment
+// gateway as "Simulated") — faking a successful charge/plan-change here would be dishonest, so a
+// plan or add-on request opens a real, pre-filled lead email instead of silently no-opping.
+function sendLeadEmail(subject: string, planName: string) {
+  const body = `Hi team,\n\nWe'd like to talk about the ${planName} plan for our BuildPOS workspace.\n\nThanks`;
+  window.location.href = `mailto:sales@buildpos.example?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 export function SubscriptionsPage() {
   const [yearly, setYearly] = useState(true);
   const [selected, setSelected] = useState<string>("growth");
@@ -273,7 +282,10 @@ export function SubscriptionsPage() {
 
                 <div className="mt-5 flex flex-col gap-2">
                   <Button
-                    onClick={() => setSelected(p.id)}
+                    onClick={() => {
+                      setSelected(p.id);
+                      if (!isSelected) sendLeadEmail(p.cta, p.name);
+                    }}
                     className={`w-full gap-1.5 ${
                       p.featured
                         ? "bg-brand text-brand-foreground hover:bg-brand/90"
@@ -325,7 +337,10 @@ export function SubscriptionsPage() {
                 </div>
                 <p className="mt-3 font-semibold text-foreground">{a.name}</p>
                 <p className="mt-1 text-xs text-muted-foreground">{a.desc}</p>
-                <button className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline">
+                <button
+                  onClick={() => { sendLeadEmail(`Add-on request: ${a.name}`, a.name); toast.success(`Request drafted for ${a.name} — check your email client.`); }}
+                  className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
+                >
                   Add to subscription <ArrowRight className="h-3 w-3" />
                 </button>
               </div>

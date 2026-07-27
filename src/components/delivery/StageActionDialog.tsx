@@ -25,6 +25,7 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
   const [driverEmpId, setDriverEmpId] = useState(order.driverEmpId ?? "");
   const [vehicleId, setVehicleId] = useState(order.vehicleId ?? "");
   const [signature, setSignature] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const moveStage = useDeliveryStore((s) => s.moveStage);
   const updateOrder = useDeliveryStore((s) => s.updateOrder);
@@ -36,7 +37,7 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
   const driverEmp = employees.find((e) => e.id === driverEmpId);
   const chk = driverEmpId ? driverAvailable(driverEmpId) : null;
 
-  function submit() {
+  async function submit() {
     if (!target) {
       toast.error("Choose a next stage.");
       return;
@@ -79,7 +80,9 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
       toast.error("Reason is required for return-to-branch.");
       return;
     }
-    const res = moveStage(order.id, target as Stage, "Current User", reason || undefined);
+    setSaving(true);
+    const res = await moveStage(order.id, target as Stage, "Current User", reason || undefined);
+    setSaving(false);
     if (!res.ok) {
       toast.error(res.error ?? "Could not move stage.");
       return;
@@ -206,7 +209,7 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
 
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button onClick={submit} disabled={!target} className="bg-brand text-brand-foreground hover:bg-brand/90">Confirm</Button>
+            <Button onClick={submit} disabled={!target || saving} className="bg-brand text-brand-foreground hover:bg-brand/90">{saving ? "Saving…" : "Confirm"}</Button>
           </div>
         </div>
       </DialogContent>

@@ -58,6 +58,7 @@ import { Route as OperateControlTowerRouteImport } from './routes/operate.contro
 import { Route as OperateCustomersRouteImport } from './routes/operate.customers'
 import { Route as OperateOrdersRouteImport } from './routes/operate.orders'
 import { Route as OperatePosCheckoutRouteImport } from './routes/operate.pos-checkout'
+import { Route as StockBranchStockRouteImport } from './routes/stock.branch-stock'
 import { Route as StockBundlesRouteImport } from './routes/stock.bundles'
 import { Route as StockExpiryRouteImport } from './routes/stock.expiry'
 import { Route as StockInventoryRouteImport } from './routes/stock.inventory'
@@ -312,6 +313,11 @@ const OperatePosCheckoutRoute = OperatePosCheckoutRouteImport.update({
   path: '/operate/pos-checkout',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StockBranchStockRoute = StockBranchStockRouteImport.update({
+  id: '/stock/branch-stock',
+  path: '/stock/branch-stock',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StockBundlesRoute = StockBundlesRouteImport.update({
   id: '/stock/bundles',
   path: '/stock/bundles',
@@ -403,6 +409,7 @@ export interface FileRoutesByFullPath {
   '/operate/customers': typeof OperateCustomersRoute
   '/operate/orders': typeof OperateOrdersRoute
   '/operate/pos-checkout': typeof OperatePosCheckoutRoute
+  '/stock/branch-stock': typeof StockBranchStockRoute
   '/stock/bundles': typeof StockBundlesRoute
   '/stock/expiry': typeof StockExpiryRoute
   '/stock/inventory': typeof StockInventoryRoute
@@ -462,6 +469,7 @@ export interface FileRoutesByTo {
   '/operate/customers': typeof OperateCustomersRoute
   '/operate/orders': typeof OperateOrdersRoute
   '/operate/pos-checkout': typeof OperatePosCheckoutRoute
+  '/stock/branch-stock': typeof StockBranchStockRoute
   '/stock/bundles': typeof StockBundlesRoute
   '/stock/expiry': typeof StockExpiryRoute
   '/stock/inventory': typeof StockInventoryRoute
@@ -522,6 +530,7 @@ export interface FileRoutesById {
   '/operate/customers': typeof OperateCustomersRoute
   '/operate/orders': typeof OperateOrdersRoute
   '/operate/pos-checkout': typeof OperatePosCheckoutRoute
+  '/stock/branch-stock': typeof StockBranchStockRoute
   '/stock/bundles': typeof StockBundlesRoute
   '/stock/expiry': typeof StockExpiryRoute
   '/stock/inventory': typeof StockInventoryRoute
@@ -583,6 +592,7 @@ export interface FileRouteTypes {
     | '/operate/customers'
     | '/operate/orders'
     | '/operate/pos-checkout'
+    | '/stock/branch-stock'
     | '/stock/bundles'
     | '/stock/expiry'
     | '/stock/inventory'
@@ -642,6 +652,7 @@ export interface FileRouteTypes {
     | '/operate/customers'
     | '/operate/orders'
     | '/operate/pos-checkout'
+    | '/stock/branch-stock'
     | '/stock/bundles'
     | '/stock/expiry'
     | '/stock/inventory'
@@ -701,6 +712,7 @@ export interface FileRouteTypes {
     | '/operate/customers'
     | '/operate/orders'
     | '/operate/pos-checkout'
+    | '/stock/branch-stock'
     | '/stock/bundles'
     | '/stock/expiry'
     | '/stock/inventory'
@@ -761,6 +773,7 @@ export interface RootRouteChildren {
   OperateCustomersRoute: typeof OperateCustomersRoute
   OperateOrdersRoute: typeof OperateOrdersRoute
   OperatePosCheckoutRoute: typeof OperatePosCheckoutRoute
+  StockBranchStockRoute: typeof StockBranchStockRoute
   StockBundlesRoute: typeof StockBundlesRoute
   StockExpiryRoute: typeof StockExpiryRoute
   StockInventoryRoute: typeof StockInventoryRoute
@@ -1116,6 +1129,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OperatePosCheckoutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/stock/branch-stock': {
+      id: '/stock/branch-stock'
+      path: '/stock/branch-stock'
+      fullPath: '/stock/branch-stock'
+      preLoaderRoute: typeof StockBranchStockRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/stock/bundles': {
       id: '/stock/bundles'
       path: '/stock/bundles'
@@ -1225,6 +1245,7 @@ const rootRouteChildren: RootRouteChildren = {
   OperateCustomersRoute: OperateCustomersRoute,
   OperateOrdersRoute: OperateOrdersRoute,
   OperatePosCheckoutRoute: OperatePosCheckoutRoute,
+  StockBranchStockRoute: StockBranchStockRoute,
   StockBundlesRoute: StockBundlesRoute,
   StockExpiryRoute: StockExpiryRoute,
   StockInventoryRoute: StockInventoryRoute,

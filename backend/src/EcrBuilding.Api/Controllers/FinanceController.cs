@@ -61,7 +61,26 @@ public class ExpensesController(AppDbContext db, IAuditService audit, IGlPosting
         return Ok(Map(expense));
     }
 
-    private static ExpenseDto Map(Expense e) => new(e.Id, e.ExpenseNo, e.Date, e.BranchId, e.Branch?.NameEn ?? "", e.Category, e.Description, e.Vendor, e.Amount, e.Vat, e.Method, e.Status.ToString());
+    [HttpPut("{id:int}/reconcile")]
+    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    public async Task<ActionResult<ExpenseDto>> Reconcile(int id, CancellationToken ct)
+    {
+        var expense = await db.Expenses.Include(e => e.Branch).FirstOrDefaultAsync(e => e.Id == id, ct);
+        if (expense is null) return NotFound();
+        if (expense.Status != ExpenseStatus.Approved)
+        {
+            return BadRequest(new { error = "Only an approved expense can be reconciled." });
+        }
+
+        expense.Reconciled = true;
+        expense.ReconciledAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("finance", "EXPENSE_RECONCILED", id.ToString(), cancellationToken: ct);
+        return Ok(Map(expense));
+    }
+
+    private static ExpenseDto Map(Expense e) => new(
+        e.Id, e.ExpenseNo, e.Date, e.BranchId, e.Branch?.NameEn ?? "", e.Category, e.Description, e.Vendor, e.Amount, e.Vat, e.Method, e.Status.ToString(), e.Reconciled);
 }
 
 [ApiController]
@@ -177,11 +196,11 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IGlPostingS
         {
             foreach (var line in ret.Lines)
             {
-                var level = await db.StockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.WarehouseId == request.WarehouseId, ct);
+                var level = await db.BranchStockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.BranchId == request.BranchId, ct);
                 if (level is null)
                 {
-                    level = new StockLevel { ProductId = line.ProductId, WarehouseId = request.WarehouseId };
-                    db.StockLevels.Add(level);
+                    level = new BranchStockLevel { ProductId = line.ProductId, BranchId = request.BranchId };
+                    db.BranchStockLevels.Add(level);
                 }
                 level.OnHand += line.Qty;
             }
@@ -228,6 +247,24 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IGlPostingS
         }
 
         await db.Entry(ret).Reference(r => r.ApprovedBy).LoadAsync(ct);
+        return Ok(Map(ret));
+    }
+
+    [HttpPut("{id:int}/quarantine")]
+    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    public async Task<ActionResult<ReturnDto>> Quarantine(int id, CancellationToken ct)
+    {
+        var ret = await db.Returns.Include(r => r.Customer).Include(r => r.Order).Include(r => r.ApprovedBy).Include(r => r.Lines).ThenInclude(l => l.Product)
+            .FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (ret is null) return NotFound();
+        if (ret.Status != ReturnStatus.PendingApproval)
+        {
+            return BadRequest(new { error = $"Only a pending return can be quarantined (current status: {ret.Status})." });
+        }
+
+        ret.Status = ReturnStatus.Quarantine;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("finance", "RETURN_QUARANTINED", id.ToString(), cancellationToken: ct);
         return Ok(Map(ret));
     }
 

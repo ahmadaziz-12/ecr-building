@@ -12,12 +12,25 @@ public record AuditLogDto(int Id, DateTime CreatedAt, string Module, string Even
 [ApiController]
 [Route("api/admin/audit-logs")]
 [Authorize]
-[RequireModule(ModuleArea.Admin, AccessLevel.View)]
 public class AuditLogsController(AppDbContext db) : ControllerBase
 {
+    // Scoped requests (e.g. Delivery's own Activity Logs page) only need View on that module —
+    // full, unfiltered log access (admin.audit-logs) requires Admin. Module strings that don't
+    // map to a real ModuleArea (e.g. "zatca") fall back to requiring Admin.
     [HttpGet]
     public async Task<ActionResult<List<AuditLogDto>>> List([FromQuery] string? module, CancellationToken ct)
     {
+        var requiredArea = !string.IsNullOrWhiteSpace(module) && Enum.TryParse<ModuleArea>(module, ignoreCase: true, out var parsedArea)
+            ? parsedArea
+            : ModuleArea.Admin;
+
+        var claim = User.FindFirst($"perm:{requiredArea}")?.Value;
+        var level = Enum.TryParse<AccessLevel>(claim, out var parsedLevel) ? parsedLevel : AccessLevel.None;
+        if (level < AccessLevel.View)
+        {
+            return StatusCode(403, new { error = $"You don't have View access to {requiredArea}." });
+        }
+
         var query = db.AuditLogs.AsQueryable();
         if (!string.IsNullOrWhiteSpace(module)) query = query.Where(a => a.Module == module);
 

@@ -1,7 +1,10 @@
 import { create } from "zustand";
 import { useAuditStore } from "@/lib/store/audit";
 import {
-  apiCreateZone, apiReserveStock, apiTransitionDelivery, STAGE_TO_BACKEND, VEHICLE_TYPE_TO_BACKEND,
+  apiCreateDeliveryOrder, apiCreateZone, apiDeleteZone, apiReserveStock, apiTransitionDelivery,
+  apiCreateDriver, apiUpdateDriver, apiCreateVehicle, apiUpdateVehicle,
+  mapApiDriver, mapApiOrder, mapApiVehicle, mapApiZone,
+  STAGE_TO_BACKEND, VEHICLE_TYPE_TO_BACKEND, DRIVER_STATUS_TO_BACKEND, VEHICLE_STATUS_TO_BACKEND,
 } from "@/lib/api/delivery";
 
 export type Stage =
@@ -145,23 +148,31 @@ type LookupMaps = {
   branchIdByName: Record<string, number>;
 };
 
+export type ActionResult = { ok: boolean; error?: string };
+
+export type DriverInput = { name: string; branch: string; mobile: string; license: string; licenseExpiry: string };
+export type DriverEditInput = DriverInput & { vehicleId?: string; status: Driver["status"] };
+export type VehicleInput = { registration: string; type: Vehicle["type"]; branch: string; capacityTons: number };
+export type VehicleEditInput = VehicleInput & { status: Vehicle["status"] };
+
 type S = {
   orders: DeliveryOrder[];
   drivers: Driver[];
   vehicles: Vehicle[];
   zones: Zone[];
-  seq: number;
   lookups: LookupMaps;
   setSynced: (data: Partial<Pick<S, "orders" | "drivers" | "vehicles" | "zones" | "lookups">>) => void;
-  addOrder: (o: Omit<DeliveryOrder, "id" | "history">) => DeliveryOrder;
+  addOrder: (o: Omit<DeliveryOrder, "id" | "history">) => Promise<ActionResult & { doc?: DeliveryOrder }>;
   updateOrder: (id: string, patch: Partial<DeliveryOrder>) => void;
-  moveStage: (id: string, to: Stage, by: string, note?: string) => { ok: boolean; error?: string };
-  addDriver: (d: Driver) => void;
+  moveStage: (id: string, to: Stage, by: string, note?: string) => Promise<ActionResult>;
+  addDriver: (input: DriverInput) => Promise<ActionResult>;
   updateDriver: (empId: string, patch: Partial<Driver>) => void;
-  addVehicle: (v: Vehicle) => void;
+  editDriver: (empId: string, input: DriverEditInput) => Promise<ActionResult>;
+  addVehicle: (input: VehicleInput) => Promise<ActionResult>;
   updateVehicle: (id: string, patch: Partial<Vehicle>) => void;
-  addZone: (z: Omit<Zone, "id">) => void;
-  removeZone: (id: string) => void;
+  editVehicle: (id: string, input: VehicleEditInput) => Promise<ActionResult>;
+  addZone: (z: Omit<Zone, "id">) => Promise<ActionResult>;
+  removeZone: (id: string) => Promise<ActionResult>;
   reset: () => void;
 };
 
@@ -203,102 +214,88 @@ function validate(o: DeliveryOrder, to: Stage): string | null {
   return null;
 }
 
-let orderSeq = 1026;
+function errMsg(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
+}
 
 export const useDeliveryStore = create<S>()((set, get) => ({
   orders: [],
   drivers: [],
   vehicles: [],
   zones: [],
-  seq: orderSeq,
   lookups: { productIdBySku: {}, branchIdByName: {} },
   setSynced: (data) => set((s) => ({ ...s, ...data })),
-  addOrder: (o) => {
-    const id = `DO-2026-${String(get().seq).padStart(4, "0")}`;
-    const doc: DeliveryOrder = { ...o, id, history: [] };
-    set((s) => ({ orders: [doc, ...s.orders], seq: s.seq + 1 }));
-    useAuditStore.getState().log({
-      module: "delivery", event: "DELIVERY_CREATED", recordId: id, branch: doc.branch, severity: "info",
-      newValue: doc.customer,
-    });
 
-    // Best-effort real persistence — resolves SKUs/branch against the live catalog synced into `lookups`.
-    // Falls back to local-only if a SKU/branch can't be matched (e.g. dialog defaults not seeded).
+  // Backend-first: resolves SKUs/branch/driver/vehicle against the live catalog synced into
+  // `lookups`, then waits for the real DB row before it ever appears in the UI — no phantom
+  // orders that look created but never made it past a validation error on the server.
+  addOrder: async (o) => {
     const { productIdBySku, branchIdByName } = get().lookups;
     const branchId =
-      branchIdByName[doc.branch] ?? Object.entries(branchIdByName).find(([name]) => name.includes(doc.address.city))?.[1];
-    const lineInputs = doc.lines
+      branchIdByName[o.branch] ?? Object.entries(branchIdByName).find(([name]) => name.includes(o.address.city))?.[1];
+    if (!branchId) return { ok: false, error: `Unknown branch "${o.branch}".` };
+
+    const lineInputs = o.lines
       .map((l) => ({ productId: productIdBySku[l.sku], deliveryQty: l.deliveryQty }))
       .filter((l): l is { productId: number; deliveryQty: number } => Boolean(l.productId));
+    if (lineInputs.length === 0) return { ok: false, error: "None of these SKUs match the product catalog." };
 
-    if (branchId && lineInputs.length > 0) {
-      import("@/lib/api/client").then(({ apiPost }) =>
-        apiPost("/api/delivery/orders", {
-          orderId: null,
-          customerId: null,
-          project: doc.project ?? null,
-          poRef: doc.poRef ?? null,
-          branchId,
-          weightTons: doc.weightTons,
-          area: doc.area,
-          address: {
-            type: doc.address.type, contactName: doc.address.contactName, contactMobile: doc.address.contactMobile,
-            city: doc.address.city, district: doc.address.district, street: doc.address.street,
-            landmark: doc.address.landmark ?? null, instructions: doc.address.instructions ?? null,
-          },
-          promisedDate: doc.promisedDate,
-          promisedTime: doc.promisedTime,
-          timeSlot: doc.timeSlot ?? null,
-          priority: doc.priority,
-          driverId: null,
-          vehicleId: null,
-          amount: doc.amount,
-          charges: { fee: doc.charges.fee, handling: doc.charges.handling, heavy: doc.charges.heavy, discount: doc.charges.discount },
-          lines: lineInputs,
-        }).catch((err) => console.warn("Delivery order not persisted to backend:", err)),
-      );
+    const driverId = o.driverEmpId ? Number(o.driverEmpId.replace("EMP-", "")) : null;
+    const vehicleBackendId = o.vehicleId ? (get().vehicles.find((v) => v.id === o.vehicleId)?._backendId ?? null) : null;
+
+    try {
+      let created = await apiCreateDeliveryOrder({
+        orderId: null, customerId: null, project: o.project ?? null, poRef: o.poRef ?? null, branchId,
+        weightTons: o.weightTons, area: o.area,
+        address: {
+          type: o.address.type, contactName: o.address.contactName, contactMobile: o.address.contactMobile,
+          city: o.address.city, district: o.address.district || null, street: o.address.street || null,
+          landmark: o.address.landmark ?? null, instructions: o.address.instructions ?? null,
+        },
+        promisedDate: o.promisedDate, promisedTime: o.promisedTime, timeSlot: o.timeSlot ?? null, priority: o.priority,
+        driverId, vehicleId: vehicleBackendId, amount: o.amount,
+        charges: { fee: o.charges.fee, handling: o.charges.handling, heavy: o.charges.heavy, discount: o.charges.discount },
+        lines: lineInputs,
+      });
+
+      if (o.stockReserved) {
+        try {
+          created = await apiReserveStock(created.id);
+        } catch (err) {
+          console.warn("Order created but stock reservation failed:", err);
+        }
+      }
+
+      const doc = mapApiOrder(created);
+      set((s) => ({ orders: [doc, ...s.orders] }));
+      useAuditStore.getState().log({
+        module: "delivery", event: "DELIVERY_CREATED", recordId: doc.id, branch: doc.branch, severity: "info",
+        newValue: doc.customer,
+      });
+      return { ok: true, doc };
+    } catch (err) {
+      return { ok: false, error: errMsg(err, "Could not create delivery order.") };
     }
-    return doc;
   },
+
   updateOrder: (id, patch) =>
     set((s) => ({ orders: s.orders.map((o) => (o.id === id ? { ...o, ...patch } : o)) })),
-  moveStage: (id, to, by, note) => {
+
+  // Backend-first: the state-machine guards run here for a fast local rejection, but the stage
+  // only actually changes once the server confirms the transition — same guards run again there
+  // against the authoritative row, so a stale client can't fake a transition it lost the race on.
+  moveStage: async (id, to, by, note) => {
     const o = get().orders.find((x) => x.id === id);
     if (!o) return { ok: false, error: "Not found" };
     const err = validate(o, to);
     if (err) return { ok: false, error: err };
-    const from = o.stage;
-    const patch: Partial<DeliveryOrder> = {
-      stage: to,
-      history: [...o.history, { at: Date.now(), from, to, by, note }],
-    };
-    if (to === "Dispatched") patch.dispatchedAt = Date.now();
-    if (to === "Delivered") patch.deliveredAt = Date.now();
-    set((s) => ({ orders: s.orders.map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+    if (!o._backendId) return { ok: false, error: "This order has no backend record to transition." };
 
-    const evMap: Record<Stage, string> = {
-      Pending: "DELIVERY_UPDATED",
-      Assigned: "DELIVERY_DRIVER_ASSIGNED",
-      Loading: "DELIVERY_LOADING_STARTED",
-      "Ready to Dispatch": "DELIVERY_LOADING_COMPLETED",
-      Dispatched: "DELIVERY_DISPATCHED",
-      "Partially Delivered": "DELIVERY_PARTIALLY_COMPLETED",
-      Delivered: "DELIVERY_COMPLETED",
-      Failed: "DELIVERY_FAILED",
-      "Returned to Branch": "DELIVERY_RETURNED_TO_BRANCH",
-      Cancelled: "DELIVERY_UPDATED",
-      Rescheduled: "DELIVERY_RESCHEDULED",
-    };
-    useAuditStore.getState().log({
-      module: "delivery", event: evMap[to], recordId: id, branch: o.branch,
-      oldValue: from, newValue: to, reason: note, severity: to === "Failed" ? "critical" : "info",
-    });
+    const driverBackendId = o.driverEmpId ? Number(o.driverEmpId.replace("EMP-", "")) : undefined;
+    const vehicleBackendId = get().vehicles.find((v) => v.id === o.vehicleId)?._backendId;
 
-    // Real transition against the backend state machine — same guards, persisted to MariaDB.
-    if (o._backendId) {
-      const driverBackendId = o.driverEmpId ? Number(o.driverEmpId.replace("EMP-", "")) : undefined;
-      const vehicleBackendId = get().vehicles.find((v) => v.id === o.vehicleId)?._backendId;
-      apiTransitionDelivery(o._backendId, {
+    try {
+      const updated = await apiTransitionDelivery(o._backendId, {
         toStage: STAGE_TO_BACKEND[to],
         driverId: driverBackendId, vehicleId: vehicleBackendId,
         lines: o.lines.map((l) => ({
@@ -307,23 +304,121 @@ export const useDeliveryStore = create<S>()((set, get) => ({
         })).filter((l) => l.productId),
         receivedBy: o.receivedBy ?? null, proof: o.proof ?? null, failureReason: o.failureReason ?? null,
         nextAction: o.nextAction ?? null, note: note ?? null,
-      }).catch((err) => console.warn("Stage transition not persisted to backend:", err));
+      });
+
+      const doc = mapApiOrder(updated);
+      set((s) => ({ orders: s.orders.map((x) => (x.id === id ? doc : x)) }));
+
+      const evMap: Record<Stage, string> = {
+        Pending: "DELIVERY_UPDATED",
+        Assigned: "DELIVERY_DRIVER_ASSIGNED",
+        Loading: "DELIVERY_LOADING_STARTED",
+        "Ready to Dispatch": "DELIVERY_LOADING_COMPLETED",
+        Dispatched: "DELIVERY_DISPATCHED",
+        "Partially Delivered": "DELIVERY_PARTIALLY_COMPLETED",
+        Delivered: "DELIVERY_COMPLETED",
+        Failed: "DELIVERY_FAILED",
+        "Returned to Branch": "DELIVERY_RETURNED_TO_BRANCH",
+        Cancelled: "DELIVERY_UPDATED",
+        Rescheduled: "DELIVERY_RESCHEDULED",
+      };
+      useAuditStore.getState().log({
+        module: "delivery", event: evMap[to], recordId: id, branch: o.branch,
+        oldValue: o.stage, newValue: to, reason: note, severity: to === "Failed" ? "critical" : "info",
+      });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: errMsg(err, "Could not move stage.") };
     }
-    return { ok: true };
   },
-  addDriver: (d) => set((s) => ({ drivers: [...s.drivers, d] })),
+
+  addDriver: async (input) => {
+    const branchId = get().lookups.branchIdByName[input.branch];
+    if (!branchId) return { ok: false, error: `Unknown branch "${input.branch}".` };
+    try {
+      const created = await apiCreateDriver({
+        name: input.name, branchId, mobile: input.mobile, license: input.license, licenseExpiry: input.licenseExpiry,
+      });
+      set((s) => ({ drivers: [...s.drivers, mapApiDriver(created)] }));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: errMsg(err, "Could not create driver.") };
+    }
+  },
   updateDriver: (empId, patch) =>
     set((s) => ({ drivers: s.drivers.map((d) => (d.empId === empId ? { ...d, ...patch } : d)) })),
-  addVehicle: (v) => set((s) => ({ vehicles: [...s.vehicles, v] })),
+  editDriver: async (empId, input) => {
+    const driver = get().drivers.find((d) => d.empId === empId);
+    if (!driver?._backendId) return { ok: false, error: "Driver not found." };
+    const branchId = get().lookups.branchIdByName[input.branch];
+    if (!branchId) return { ok: false, error: `Unknown branch "${input.branch}".` };
+    const vehicleBackendId = input.vehicleId ? (get().vehicles.find((v) => v.id === input.vehicleId)?._backendId ?? null) : null;
+    try {
+      const updated = await apiUpdateDriver(driver._backendId, {
+        name: input.name, branchId, mobile: input.mobile, license: input.license, licenseExpiry: input.licenseExpiry,
+        vehicleId: vehicleBackendId, status: DRIVER_STATUS_TO_BACKEND[input.status] ?? "Available",
+      });
+      set((s) => ({ drivers: s.drivers.map((d) => (d.empId === empId ? mapApiDriver(updated) : d)) }));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: errMsg(err, "Could not update driver.") };
+    }
+  },
+
+  addVehicle: async (input) => {
+    const branchId = get().lookups.branchIdByName[input.branch];
+    if (!branchId) return { ok: false, error: `Unknown branch "${input.branch}".` };
+    try {
+      const created = await apiCreateVehicle({
+        registration: input.registration, type: VEHICLE_TYPE_TO_BACKEND[input.type] ?? "Pickup", branchId, capacityTons: input.capacityTons,
+      });
+      set((s) => ({ vehicles: [...s.vehicles, mapApiVehicle(created)] }));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: errMsg(err, "Could not create vehicle.") };
+    }
+  },
   updateVehicle: (id, patch) =>
     set((s) => ({ vehicles: s.vehicles.map((v) => (v.id === id ? { ...v, ...patch } : v)) })),
-  addZone: (z) => {
-    const tempId = `Z-${String(get().zones.length + 1).padStart(2, "0")}`;
-    set((s) => ({ zones: [...s.zones, { ...z, id: tempId }] }));
-    apiCreateZone(z).catch((err) => console.warn("Zone not persisted to backend:", err));
+  editVehicle: async (id, input) => {
+    const vehicle = get().vehicles.find((v) => v.id === id);
+    if (!vehicle?._backendId) return { ok: false, error: "Vehicle not found." };
+    const branchId = get().lookups.branchIdByName[input.branch];
+    if (!branchId) return { ok: false, error: `Unknown branch "${input.branch}".` };
+    try {
+      const updated = await apiUpdateVehicle(vehicle._backendId, {
+        registration: input.registration, type: VEHICLE_TYPE_TO_BACKEND[input.type] ?? "Pickup", branchId,
+        capacityTons: input.capacityTons, status: VEHICLE_STATUS_TO_BACKEND[input.status] ?? "Available",
+      });
+      set((s) => ({ vehicles: s.vehicles.map((v) => (v.id === id ? mapApiVehicle(updated) : v)) }));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: errMsg(err, "Could not update vehicle.") };
+    }
   },
-  removeZone: (id) => set((s) => ({ zones: s.zones.filter((z) => z.id !== id) })),
-  reset: () => set({ orders: [], drivers: [], vehicles: [], zones: [], seq: 1026 }),
+
+  addZone: async (z) => {
+    try {
+      const created = await apiCreateZone(z);
+      set((s) => ({ zones: [...s.zones, mapApiZone(created)] }));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: errMsg(err, "Could not create zone.") };
+    }
+  },
+  removeZone: async (id) => {
+    const zone = get().zones.find((z) => z.id === id);
+    if (!zone?._backendId) return { ok: false, error: "Zone not found." };
+    try {
+      await apiDeleteZone(zone._backendId);
+      set((s) => ({ zones: s.zones.filter((z) => z.id !== id) }));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: errMsg(err, "Could not delete zone.") };
+    }
+  },
+
+  reset: () => set({ orders: [], drivers: [], vehicles: [], zones: [] }),
 }));
 
 export const STAGE_TONE: Record<Stage, "info" | "warning" | "success" | "critical" | "muted"> = {
@@ -343,5 +438,3 @@ export const STAGE_TONE: Record<Stage, "info" | "warning" | "success" | "critica
 export function allowedNext(stage: Stage): Stage[] {
   return ALLOWED_TRANSITIONS[stage];
 }
-
-export { apiReserveStock, VEHICLE_TYPE_TO_BACKEND };

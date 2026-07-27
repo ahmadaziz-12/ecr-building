@@ -2,6 +2,7 @@ namespace EcrBuilding.Application.Insights;
 
 public record SalesSegmentDto(string Segment, decimal Value, decimal SharePct, int Tx, decimal AvgBasket, decimal ReturnsPct, string Trend);
 public record KpiDto(int Id, string Name, string Category, string Owner, decimal Target, decimal Actual, decimal VariancePct, string Status, string Period);
+public record UpdateKpiTargetRequest(decimal Target);
 public record ReportDefinitionDto(int Id, string Code, string Name, string Category, string Owner, string Frequency, string Format, string Status);
 public record BiFeedDto(int Id, string Name, string Source, string Destination, string Frequency, DateTime LastRun, int Rows, int Failed, string Latency, string Status);
 

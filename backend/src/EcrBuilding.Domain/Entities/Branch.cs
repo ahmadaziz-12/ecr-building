@@ -17,4 +17,5 @@ public class Branch : BaseEntity
     public EntityStatus Status { get; set; } = EntityStatus.Active;
 
     public ICollection<Terminal> Terminals { get; set; } = new List<Terminal>();
+    public ICollection<BranchStockLevel> StockLevels { get; set; } = new List<BranchStockLevel>();
 }

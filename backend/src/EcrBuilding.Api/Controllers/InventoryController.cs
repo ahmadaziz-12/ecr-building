@@ -20,9 +20,29 @@ public class WarehousesController(AppDbContext db, IAuditService audit) : Contro
     public async Task<ActionResult<List<WarehouseDto>>> List(CancellationToken ct)
     {
         var warehouses = await db.Warehouses.Include(w => w.Branch).Include(w => w.Bins).OrderBy(w => w.Code).ToListAsync(ct);
-        var reservationCounts = await db.StockLevels.Where(s => s.Reserved > 0).GroupBy(s => s.WarehouseId)
-            .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
-        return Ok(warehouses.Select(w => Map(w, reservationCounts.GetValueOrDefault(w.Id))).ToList());
+
+        var levels = await db.StockLevels.Include(s => s.Product).ToListAsync(ct);
+        var levelsByWarehouse = levels.GroupBy(s => s.WarehouseId).ToDictionary(g => g.Key, g => g.ToList());
+        var reservationCounts = levelsByWarehouse.ToDictionary(g => g.Key, g => g.Value.Count(s => s.Reserved > 0));
+
+        var transfers = await db.StockTransfers
+            .Where(t => t.Status != StockTransferStatus.Received && t.Status != StockTransferStatus.Cancelled)
+            .Select(t => new { t.FromWarehouseId, t.ToWarehouseId }).ToListAsync(ct);
+        var transfersOut = transfers.GroupBy(t => t.FromWarehouseId).ToDictionary(g => g.Key, g => g.Count());
+        var transfersIn = transfers.GroupBy(t => t.ToWarehouseId).ToDictionary(g => g.Key, g => g.Count());
+
+        var now = DateTime.UtcNow;
+        var activeBatchCounts = await db.StockBatches.Where(b => b.ManualStatus != StockBatchStatus.WrittenOff && b.ExpiryDate >= now)
+            .GroupBy(b => b.WarehouseId).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+
+        return Ok(warehouses.Select(w =>
+        {
+            var wLevels = levelsByWarehouse.GetValueOrDefault(w.Id, []);
+            var stockValue = wLevels.Sum(s => s.OnHand * (s.Product?.CostPrice ?? 0));
+            var lowStockCount = wLevels.Count(s => s.Available <= 0 || s.Available <= (s.Product?.ReorderLevel ?? 0));
+            return Map(w, reservationCounts.GetValueOrDefault(w.Id), stockValue, wLevels.Count, lowStockCount,
+                transfersOut.GetValueOrDefault(w.Id), transfersIn.GetValueOrDefault(w.Id), activeBatchCounts.GetValueOrDefault(w.Id));
+        }).ToList());
     }
 
     [HttpPost]
@@ -38,13 +58,84 @@ public class WarehousesController(AppDbContext db, IAuditService audit) : Contro
         await db.SaveChangesAsync(ct);
         await db.Entry(warehouse).Reference(w => w.Branch).LoadAsync(ct);
         await audit.LogAsync("inventory", "WAREHOUSE_CREATED", warehouse.Id.ToString(), newValue: request, cancellationToken: ct);
-        return Ok(Map(warehouse, 0));
+        return Ok(Map(warehouse, 0, 0, 0, 0, 0, 0, 0));
     }
 
-    private static WarehouseDto Map(Warehouse w, int reservationCount) => new(
+    [HttpPut("{id:int}")]
+    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    public async Task<ActionResult<WarehouseDto>> Update(int id, UpdateWarehouseRequest request, CancellationToken ct)
+    {
+        var warehouse = await db.Warehouses.Include(w => w.Branch).Include(w => w.Bins).FirstOrDefaultAsync(w => w.Id == id, ct);
+        if (warehouse is null) return NotFound();
+        if (!Enum.TryParse<WarehouseType>(request.Type, out var type)) return BadRequest(new { error = $"Unknown warehouse type \"{request.Type}\"." });
+        if (!Enum.TryParse<EntityStatus>(request.Status, out var status)) return BadRequest(new { error = $"Unknown status \"{request.Status}\"." });
+
+        var old = Map(warehouse, 0, 0, 0, 0, 0, 0, 0);
+        warehouse.Code = request.Code;
+        warehouse.Name = request.Name;
+        warehouse.BranchId = request.BranchId;
+        warehouse.Type = type;
+        warehouse.Status = status;
+        await db.SaveChangesAsync(ct);
+        await db.Entry(warehouse).Reference(w => w.Branch).LoadAsync(ct);
+
+        var updated = Map(warehouse, 0, 0, 0, 0, 0, 0, 0);
+        await audit.LogAsync("inventory", "WAREHOUSE_UPDATED", id.ToString(), oldValue: old, newValue: updated, cancellationToken: ct);
+        return Ok(updated);
+    }
+
+    [HttpPut("{id:int}/status")]
+    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    public async Task<ActionResult<WarehouseDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
+    {
+        var warehouse = await db.Warehouses.Include(w => w.Branch).Include(w => w.Bins).FirstOrDefaultAsync(w => w.Id == id, ct);
+        if (warehouse is null) return NotFound();
+        if (!Enum.TryParse<EntityStatus>(request.Status, out var status)) return BadRequest(new { error = $"Unknown status \"{request.Status}\"." });
+
+        warehouse.Status = status;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "WAREHOUSE_STATUS_CHANGED", id.ToString(), newValue: request, cancellationToken: ct);
+        return Ok(Map(warehouse, 0, 0, 0, 0, 0, 0, 0));
+    }
+
+    [HttpPost("{id:int}/bins")]
+    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    public async Task<ActionResult<WarehouseDto>> CreateBin(int id, CreateWarehouseBinRequest request, CancellationToken ct)
+    {
+        var warehouse = await db.Warehouses.Include(w => w.Branch).Include(w => w.Bins).FirstOrDefaultAsync(w => w.Id == id, ct);
+        if (warehouse is null) return NotFound();
+
+        var bin = new WarehouseBin { WarehouseId = id, BinCode = request.BinCode, Label = request.Label, CapacityTons = request.CapacityTons };
+        db.WarehouseBins.Add(bin);
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "WAREHOUSE_BIN_CREATED", id.ToString(), newValue: request, cancellationToken: ct);
+
+        warehouse.Bins.Add(bin);
+        return Ok(Map(warehouse, 0, 0, 0, 0, 0, 0, 0));
+    }
+
+    [HttpDelete("{id:int}/bins/{binId:int}")]
+    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    public async Task<ActionResult<WarehouseDto>> DeleteBin(int id, int binId, CancellationToken ct)
+    {
+        var warehouse = await db.Warehouses.Include(w => w.Branch).Include(w => w.Bins).FirstOrDefaultAsync(w => w.Id == id, ct);
+        if (warehouse is null) return NotFound();
+        var bin = warehouse.Bins.FirstOrDefault(b => b.Id == binId);
+        if (bin is null) return NotFound();
+
+        db.WarehouseBins.Remove(bin);
+        warehouse.Bins.Remove(bin);
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "WAREHOUSE_BIN_DELETED", id.ToString(), cancellationToken: ct);
+        return Ok(Map(warehouse, 0, 0, 0, 0, 0, 0, 0));
+    }
+
+    private static WarehouseDto Map(Warehouse w, int reservationCount, decimal stockValue, int skuCount, int lowStockCount,
+        int openTransfersOut, int openTransfersIn, int activeBatchCount) => new(
         w.Id, w.Code, w.Name, w.BranchId, w.Branch?.NameEn ?? "", w.Type.ToString(), w.Status.ToString(),
         w.Bins.Select(b => new WarehouseBinDto(b.Id, b.BinCode, b.Label, b.CapacityTons, b.FilledTons)).ToList(),
-        reservationCount, reservationCount == 0);
+        reservationCount, reservationCount == 0,
+        stockValue, skuCount, lowStockCount, openTransfersOut, openTransfersIn, activeBatchCount);
 }
 
 [ApiController]
@@ -65,6 +156,29 @@ public class StockLevelsController(AppDbContext db) : ControllerBase
             return new StockLevelDto(
                 s.ProductId, s.Product!.Sku, s.Product.NameEn, s.Product.Category?.NameEn ?? "", s.WarehouseId,
                 s.Warehouse?.Name ?? "", s.OnHand, s.Reserved, s.Available, s.Product.ReorderLevel,
+                s.OnHand * s.Product.CostPrice, status);
+        }).ToList());
+    }
+}
+
+[ApiController]
+[Route("api/inventory/branch-stock-levels")]
+[Authorize]
+[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+public class BranchStockLevelsController(AppDbContext db) : ControllerBase
+{
+    [HttpGet]
+    public async Task<ActionResult<List<BranchStockLevelDto>>> List(CancellationToken ct)
+    {
+        var levels = await db.BranchStockLevels.Include(s => s.Product).ThenInclude(p => p!.Category)
+            .Include(s => s.Branch).OrderBy(s => s.Product!.Sku).ToListAsync(ct);
+
+        return Ok(levels.Select(s =>
+        {
+            var status = s.Available <= 0 ? "Critical" : s.Available <= s.Product!.ReorderLevel ? "Low" : "Healthy";
+            return new BranchStockLevelDto(
+                s.ProductId, s.Product!.Sku, s.Product.NameEn, s.Product.Category?.NameEn ?? "", s.BranchId,
+                s.Branch?.NameEn ?? "", s.OnHand, s.Reserved, s.Available, s.Product.ReorderLevel,
                 s.OnHand * s.Product.CostPrice, status);
         }).ToList());
     }
@@ -150,113 +264,286 @@ public class StockBatchesController(AppDbContext db, IAuditService audit) : Cont
 [RequireModule(ModuleArea.Inventory, AccessLevel.View)]
 public class StockTransfersController(AppDbContext db, IAuditService audit) : ControllerBase
 {
+    private IQueryable<StockTransfer> WithIncludes() => db.StockTransfers
+        .Include(t => t.FromWarehouse).Include(t => t.ToWarehouse).Include(t => t.FromBranch).Include(t => t.ToBranch)
+        .Include(t => t.Lines).ThenInclude(l => l.Product);
+
+    // A transfer's source/destination is EITHER a warehouse OR a branch — these three helpers hide
+    // which one behind a single call so Create/Dispatch/Receive/Cancel don't need to branch on it
+    // themselves. Used both at Create (fail fast on an impossible draft) and at Dispatch (stock may
+    // have moved between Create and Dispatch, so it's re-checked, not just trusted from Create).
+    private async Task<string?> ValidateDebitAsync(int? warehouseId, int? branchId, int productId, decimal qty, string? batchNo, string? productName, CancellationToken ct)
+    {
+        if (warehouseId is not null)
+        {
+            var level = await db.StockLevels.FirstOrDefaultAsync(s => s.ProductId == productId && s.WarehouseId == warehouseId, ct);
+            if (level is null || level.Available < qty)
+            {
+                return $"Insufficient available stock for \"{productName}\" at the source warehouse (available: {level?.Available ?? 0}, requested: {qty}).";
+            }
+            if (!string.IsNullOrWhiteSpace(batchNo))
+            {
+                var batch = await db.StockBatches.FirstOrDefaultAsync(b => b.ProductId == productId && b.WarehouseId == warehouseId && b.BatchNo == batchNo, ct);
+                if (batch is null || batch.Qty < qty)
+                {
+                    return $"Batch \"{batchNo}\" doesn't have enough quantity for \"{productName}\" (available: {batch?.Qty ?? 0}, requested: {qty}).";
+                }
+            }
+            return null;
+        }
+        var branchLevel = await db.BranchStockLevels.FirstOrDefaultAsync(s => s.ProductId == productId && s.BranchId == branchId, ct);
+        return branchLevel is null || branchLevel.Available < qty
+            ? $"Insufficient available stock for \"{productName}\" at the source branch (available: {branchLevel?.Available ?? 0}, requested: {qty})."
+            : null;
+    }
+
+    private async Task DebitAsync(int? warehouseId, int? branchId, int productId, decimal qty, string? batchNo, CancellationToken ct)
+    {
+        if (warehouseId is not null)
+        {
+            var level = await db.StockLevels.FirstAsync(s => s.ProductId == productId && s.WarehouseId == warehouseId, ct);
+            level.OnHand -= qty;
+            if (!string.IsNullOrWhiteSpace(batchNo))
+            {
+                var batch = await db.StockBatches.FirstAsync(b => b.ProductId == productId && b.WarehouseId == warehouseId && b.BatchNo == batchNo, ct);
+                batch.Qty -= qty;
+            }
+            return;
+        }
+        var branchLevel = await db.BranchStockLevels.FirstAsync(s => s.ProductId == productId && s.BranchId == branchId, ct);
+        branchLevel.OnHand -= qty;
+    }
+
+    // Also used to restore a Cancel-while-InTransit — "give it back to the source" is the same
+    // operation as "credit this location", find-or-create included.
+    private async Task CreditAsync(int? warehouseId, int? branchId, int productId, decimal qty, string? batchNo, DateTime? expiryDate, CancellationToken ct)
+    {
+        if (warehouseId is not null)
+        {
+            var level = await db.StockLevels.FirstOrDefaultAsync(s => s.ProductId == productId && s.WarehouseId == warehouseId, ct);
+            if (level is null)
+            {
+                level = new StockLevel { ProductId = productId, WarehouseId = warehouseId.Value };
+                db.StockLevels.Add(level);
+            }
+            level.OnHand += qty;
+
+            if (!string.IsNullOrWhiteSpace(batchNo) && qty > 0)
+            {
+                var batch = await db.StockBatches.FirstOrDefaultAsync(b => b.ProductId == productId && b.WarehouseId == warehouseId && b.BatchNo == batchNo, ct);
+                if (batch is null)
+                {
+                    batch = new StockBatch
+                    {
+                        ProductId = productId, WarehouseId = warehouseId.Value, BatchNo = batchNo,
+                        ReceivedDate = DateTime.UtcNow, ExpiryDate = expiryDate ?? DateTime.UtcNow.AddYears(1),
+                    };
+                    db.StockBatches.Add(batch);
+                }
+                batch.Qty += qty;
+            }
+            return;
+        }
+        var branchLevel = await db.BranchStockLevels.FirstOrDefaultAsync(s => s.ProductId == productId && s.BranchId == branchId, ct);
+        if (branchLevel is null)
+        {
+            branchLevel = new BranchStockLevel { ProductId = productId, BranchId = branchId!.Value };
+            db.BranchStockLevels.Add(branchLevel);
+        }
+        branchLevel.OnHand += qty; // branches don't batch-track — no destination StockBatch here
+    }
+
     [HttpGet]
     public async Task<ActionResult<List<StockTransferDto>>> List(CancellationToken ct)
     {
-        var transfers = await db.StockTransfers.Include(t => t.FromWarehouse).Include(t => t.ToWarehouse)
-            .Include(t => t.Lines).ThenInclude(l => l.Product).OrderByDescending(t => t.CreatedAt).ToListAsync(ct);
-        return Ok(transfers.Select(Map).ToList());
+        var transfers = await WithIncludes().OrderByDescending(t => t.CreatedAt).ToListAsync(ct);
+        var approverIds = transfers.Where(t => t.ApproverUserId != null).Select(t => t.ApproverUserId!.Value).Distinct().ToList();
+        var approvers = await db.Users.Where(u => approverIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.Name, ct);
+        return Ok(transfers.Select(t => Map(t, approvers)).ToList());
     }
 
     [HttpPost]
     [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
     public async Task<ActionResult<StockTransferDto>> Create(CreateStockTransferRequest request, CancellationToken ct)
     {
-        if (request.FromWarehouseId == request.ToWarehouseId)
+        if ((request.FromWarehouseId is null) == (request.FromBranchId is null))
+        {
+            return BadRequest(new { error = "Pick exactly one source — a warehouse or a branch." });
+        }
+        if ((request.ToWarehouseId is null) == (request.ToBranchId is null))
+        {
+            return BadRequest(new { error = "Pick exactly one destination — a warehouse or a branch." });
+        }
+        if (request.FromWarehouseId is not null && request.FromWarehouseId == request.ToWarehouseId)
         {
             return BadRequest(new { error = "Source and destination warehouse must differ." });
+        }
+        if (request.FromBranchId is not null && request.FromBranchId == request.ToBranchId)
+        {
+            return BadRequest(new { error = "Source and destination branch must differ." });
+        }
+
+        if (request.Lines.Count == 0)
+        {
+            return BadRequest(new { error = "At least one line item is required." });
+        }
+
+        // Fail fast on a draft that could never be fulfilled, rather than letting it sit through
+        // approval and only discovering the shortfall at Dispatch. Re-checked at Dispatch too,
+        // since stock can move between Create and Dispatch (other sales, other transfers).
+        var productNames = await db.Products.Where(p => request.Lines.Select(l => l.ProductId).Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, p => p.NameEn, ct);
+        foreach (var line in request.Lines)
+        {
+            var productName = productNames.GetValueOrDefault(line.ProductId, $"product #{line.ProductId}");
+            var error = await ValidateDebitAsync(request.FromWarehouseId, request.FromBranchId, line.ProductId, line.Qty, line.BatchNo, productName, ct);
+            if (error is not null) return BadRequest(new { error });
         }
 
         var transferNo = $"TRF-{DateTime.UtcNow:yyyy}-{await db.StockTransfers.CountAsync(ct) + 1:D4}";
         var transfer = new StockTransfer
         {
-            TransferNo = transferNo, FromWarehouseId = request.FromWarehouseId, ToWarehouseId = request.ToWarehouseId,
+            TransferNo = transferNo,
+            FromWarehouseId = request.FromWarehouseId, FromBranchId = request.FromBranchId,
+            ToWarehouseId = request.ToWarehouseId, ToBranchId = request.ToBranchId,
             Eta = request.Eta, Carrier = request.Carrier, Notes = request.Notes,
-            Lines = request.Lines.Select(l => new StockTransferLine { ProductId = l.ProductId, Qty = l.Qty, UnitCost = l.UnitCost }).ToList(),
+            Lines = request.Lines.Select(l => new StockTransferLine
+            {
+                ProductId = l.ProductId, Qty = l.Qty, UnitCost = l.UnitCost, BatchNo = l.BatchNo, ExpiryDate = l.ExpiryDate,
+            }).ToList(),
         };
         db.StockTransfers.Add(transfer);
         await db.SaveChangesAsync(ct);
         await audit.LogAsync("inventory", "TRANSFER_CREATED", transfer.Id.ToString(), newValue: request, cancellationToken: ct);
 
-        await db.Entry(transfer).Reference(t => t.FromWarehouse).LoadAsync(ct);
-        await db.Entry(transfer).Reference(t => t.ToWarehouse).LoadAsync(ct);
-        foreach (var line in transfer.Lines) await db.Entry(line).Reference(l => l.Product).LoadAsync(ct);
-        return Ok(Map(transfer));
+        var created = await WithIncludes().FirstAsync(t => t.Id == transfer.Id, ct);
+        return Ok(Map(created, []));
     }
+
+    [HttpPut("{id:int}/submit")]
+    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    public Task<ActionResult<StockTransferDto>> Submit(int id, CancellationToken ct) =>
+        Transition(id, StockTransferStatus.Draft, StockTransferStatus.PendingApproval, "TRANSFER_SUBMITTED", null, ct);
 
     [HttpPut("{id:int}/approve")]
     [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
-    public async Task<ActionResult<StockTransferDto>> Approve(int id, CancellationToken ct)
-    {
-        var transfer = await db.StockTransfers.Include(t => t.Lines).ThenInclude(l => l.Product)
-            .Include(t => t.FromWarehouse).Include(t => t.ToWarehouse).FirstOrDefaultAsync(t => t.Id == id, ct);
-        if (transfer is null) return NotFound();
-        if (transfer.Status != Domain.Entities.StockTransferStatus.Draft) return BadRequest(new { error = "Only draft transfers can be approved." });
+    public Task<ActionResult<StockTransferDto>> Approve(int id, ApproveStockTransferRequest request, CancellationToken ct) =>
+        Transition(id, StockTransferStatus.PendingApproval, StockTransferStatus.Approved, "TRANSFER_APPROVED",
+            t => t.ApproverUserId = request.ApproverUserId ?? t.ApproverUserId, ct);
 
-        transfer.Status = Domain.Entities.StockTransferStatus.Approved;
+    private async Task<ActionResult<StockTransferDto>> Transition(int id, StockTransferStatus from, StockTransferStatus to, string auditEvent, Action<StockTransfer>? apply, CancellationToken ct)
+    {
+        var transfer = await WithIncludes().FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (transfer is null) return NotFound();
+        if (transfer.Status != from) return BadRequest(new { error = $"Transfer must be {from} to perform this action (currently {transfer.Status})." });
+
+        apply?.Invoke(transfer);
+        transfer.Status = to;
         await db.SaveChangesAsync(ct);
-        await audit.LogAsync("inventory", "TRANSFER_APPROVED", transfer.Id.ToString(), cancellationToken: ct);
-        return Ok(Map(transfer));
+        await audit.LogAsync("inventory", auditEvent, transfer.Id.ToString(), cancellationToken: ct);
+        return Ok(Map(transfer, []));
     }
 
     [HttpPut("{id:int}/dispatch")]
     [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
     public async Task<ActionResult<StockTransferDto>> Dispatch(int id, CancellationToken ct)
     {
-        var transfer = await db.StockTransfers.Include(t => t.Lines).ThenInclude(l => l.Product)
-            .Include(t => t.FromWarehouse).Include(t => t.ToWarehouse).FirstOrDefaultAsync(t => t.Id == id, ct);
+        var transfer = await WithIncludes().FirstOrDefaultAsync(t => t.Id == id, ct);
         if (transfer is null) return NotFound();
-        if (transfer.Status != Domain.Entities.StockTransferStatus.Approved) return BadRequest(new { error = "Only approved transfers can be dispatched." });
-
-        transfer.Status = Domain.Entities.StockTransferStatus.InTransit;
-        await db.SaveChangesAsync(ct);
-        await audit.LogAsync("inventory", "TRANSFER_DISPATCHED", transfer.Id.ToString(), cancellationToken: ct);
-        return Ok(Map(transfer));
-    }
-
-    [HttpPut("{id:int}/receive")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
-    public async Task<ActionResult<StockTransferDto>> Receive(int id, CancellationToken ct)
-    {
-        var transfer = await db.StockTransfers.Include(t => t.Lines).Include(t => t.FromWarehouse).Include(t => t.ToWarehouse).FirstOrDefaultAsync(t => t.Id == id, ct);
-        if (transfer is null) return NotFound();
-        if (transfer.Status == Domain.Entities.StockTransferStatus.Received) return BadRequest(new { error = "Transfer already received." });
+        if (transfer.Status != StockTransferStatus.Approved) return BadRequest(new { error = "Only approved transfers can be dispatched." });
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         foreach (var line in transfer.Lines)
         {
-            var from = await db.StockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.WarehouseId == transfer.FromWarehouseId, ct);
-            if (from is null || from.Available < line.Qty)
-            {
-                transfer.Status = Domain.Entities.StockTransferStatus.Discrepancy;
-                await db.SaveChangesAsync(ct);
-                await tx.CommitAsync(ct);
-                return BadRequest(new { error = $"Insufficient stock for product {line.ProductId} at source warehouse." });
-            }
-            from.OnHand -= line.Qty;
-
-            var to = await db.StockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.WarehouseId == transfer.ToWarehouseId, ct);
-            if (to is null)
-            {
-                to = new StockLevel { ProductId = line.ProductId, WarehouseId = transfer.ToWarehouseId };
-                db.StockLevels.Add(to);
-            }
-            to.OnHand += line.Qty;
+            var error = await ValidateDebitAsync(transfer.FromWarehouseId, transfer.FromBranchId, line.ProductId, line.Qty, line.BatchNo, line.Product?.NameEn, ct);
+            if (error is not null) return BadRequest(new { error });
         }
 
-        transfer.Status = Domain.Entities.StockTransferStatus.Received;
+        // Two-phase stock movement: leave the source now (truck loaded), arrive at destination only
+        // on Receive. Deducting only at Receive (the old behavior) left source stock double-allocatable
+        // for the entire time a shipment was "in transit".
+        foreach (var line in transfer.Lines)
+        {
+            await DebitAsync(transfer.FromWarehouseId, transfer.FromBranchId, line.ProductId, line.Qty, line.BatchNo, ct);
+        }
+
+        transfer.Status = StockTransferStatus.InTransit;
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
-        await audit.LogAsync("inventory", "TRANSFER_RECEIVED", transfer.Id.ToString(), cancellationToken: ct);
-
-        foreach (var line in transfer.Lines) await db.Entry(line).Reference(l => l.Product).LoadAsync(ct);
-        return Ok(Map(transfer));
+        await audit.LogAsync("inventory", "TRANSFER_DISPATCHED", transfer.Id.ToString(), cancellationToken: ct);
+        return Ok(Map(transfer, []));
     }
 
-    private static StockTransferDto Map(StockTransfer t) => new(
-        t.Id, t.TransferNo, t.FromWarehouseId, t.FromWarehouse?.Name ?? "", t.ToWarehouseId, t.ToWarehouse?.Name ?? "",
-        t.Status.ToString(), t.Eta, t.Carrier, t.Notes, t.Lines.Sum(l => l.Qty * l.UnitCost),
-        t.Lines.Select(l => new StockTransferLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.UnitCost)).ToList());
+    [HttpPut("{id:int}/receive")]
+    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    public async Task<ActionResult<StockTransferDto>> Receive(int id, ReceiveStockTransferRequest? request, CancellationToken ct)
+    {
+        var transfer = await WithIncludes().FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (transfer is null) return NotFound();
+        if (transfer.Status != StockTransferStatus.InTransit) return BadRequest(new { error = "Only an in-transit transfer can be received." });
+
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        foreach (var line in transfer.Lines)
+        {
+            var receivedQty = request?.Lines?.FirstOrDefault(l => l.LineId == line.Id)?.ReceivedQty ?? line.Qty;
+            line.ReceivedQty = receivedQty;
+            await CreditAsync(transfer.ToWarehouseId, transfer.ToBranchId, line.ProductId, receivedQty, line.BatchNo, line.ExpiryDate, ct);
+        }
+
+        transfer.Status = StockTransferStatus.Received;
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        await audit.LogAsync("inventory", "TRANSFER_RECEIVED", transfer.Id.ToString(), newValue: request, cancellationToken: ct);
+        return Ok(Map(transfer, []));
+    }
+
+    [HttpPut("{id:int}/cancel")]
+    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    public async Task<ActionResult<StockTransferDto>> Cancel(int id, CancellationToken ct)
+    {
+        var transfer = await WithIncludes().FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (transfer is null) return NotFound();
+        if (transfer.Status is not (StockTransferStatus.Draft or StockTransferStatus.PendingApproval
+            or StockTransferStatus.Approved or StockTransferStatus.InTransit))
+        {
+            return BadRequest(new { error = "Only a Draft, Pending Approval, Approved, or In Transit transfer can be cancelled." });
+        }
+
+        if (transfer.Status == StockTransferStatus.InTransit)
+        {
+            // Stock left the source at Dispatch and nothing has arrived yet (Receive is single-shot
+            // and terminal) — recalling the shipment means giving it all back to the source.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            foreach (var line in transfer.Lines)
+            {
+                await CreditAsync(transfer.FromWarehouseId, transfer.FromBranchId, line.ProductId, line.Qty, line.BatchNo, line.ExpiryDate, ct);
+            }
+            transfer.Status = StockTransferStatus.Cancelled;
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+        else
+        {
+            transfer.Status = StockTransferStatus.Cancelled;
+            await db.SaveChangesAsync(ct);
+        }
+
+        await audit.LogAsync("inventory", "TRANSFER_CANCELLED", transfer.Id.ToString(), cancellationToken: ct);
+        return Ok(Map(transfer, []));
+    }
+
+    private static StockTransferDto Map(StockTransfer t, Dictionary<int, string> approvers) => new(
+        t.Id, t.TransferNo,
+        t.FromWarehouseId, t.FromWarehouse?.Name, t.FromBranchId, t.FromBranch?.NameEn,
+        t.ToWarehouseId, t.ToWarehouse?.Name, t.ToBranchId, t.ToBranch?.NameEn,
+        t.FromWarehouse?.Name ?? (t.FromBranch is not null ? $"{t.FromBranch.NameEn} (Branch)" : ""),
+        t.ToWarehouse?.Name ?? (t.ToBranch is not null ? $"{t.ToBranch.NameEn} (Branch)" : ""),
+        t.Status.ToString(), t.Eta, t.Carrier, t.Notes, t.ApproverUserId,
+        t.ApproverUserId is not null && approvers.TryGetValue(t.ApproverUserId.Value, out var n) ? n : null,
+        t.Lines.Sum(l => l.Qty * l.UnitCost),
+        t.Lines.Select(l => new StockTransferLineDto(
+            l.Id, l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.UnitCost,
+            l.ReceivedQty, l.Qty - l.ReceivedQty, l.BatchNo, l.ExpiryDate)).ToList());
 }
 
 [ApiController]

@@ -1,5 +1,6 @@
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
+using EcrBuilding.Application.Admin;
 using EcrBuilding.Application.Insights;
 using EcrBuilding.Domain.Entities;
 using EcrBuilding.Domain.Enums;
@@ -14,7 +15,7 @@ namespace EcrBuilding.Api.Controllers;
 [Route("api/insights")]
 [Authorize]
 [RequireModule(ModuleArea.Insights, AccessLevel.View)]
-public class InsightsController(AppDbContext db) : ControllerBase
+public class InsightsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet("sales")]
     public async Task<ActionResult<List<SalesSegmentDto>>> Sales(CancellationToken ct)
@@ -72,6 +73,19 @@ public class InsightsController(AppDbContext db) : ControllerBase
         }).ToList());
     }
 
+    [HttpPut("kpi/{id:int}/target")]
+    [RequireModule(ModuleArea.Insights, AccessLevel.Edit)]
+    public async Task<ActionResult> UpdateKpiTarget(int id, UpdateKpiTargetRequest request, CancellationToken ct)
+    {
+        var kpi = await db.Kpis.FirstOrDefaultAsync(k => k.Id == id, ct);
+        if (kpi is null) return NotFound();
+
+        kpi.Target = request.Target;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("insights", "KPI_TARGET_UPDATED", id.ToString(), newValue: request, cancellationToken: ct);
+        return Ok(new { ok = true });
+    }
+
     [HttpGet("reports")]
     public async Task<ActionResult<List<ReportDefinitionDto>>> Reports(CancellationToken ct)
     {
@@ -79,11 +93,40 @@ public class InsightsController(AppDbContext db) : ControllerBase
         return Ok(rows.Select(r => new ReportDefinitionDto(r.Id, r.Code, r.Name, r.Category, r.Owner, r.Frequency, r.Format, r.Status.ToString())).ToList());
     }
 
+    [HttpPut("reports/{id:int}/status")]
+    [RequireModule(ModuleArea.Insights, AccessLevel.Edit)]
+    public async Task<ActionResult<ReportDefinitionDto>> SetReportStatus(int id, SetStatusRequest request, CancellationToken ct)
+    {
+        var report = await db.ReportDefinitions.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (report is null) return NotFound();
+        if (!Enum.TryParse<EntityStatus>(request.Status, out var status)) return BadRequest(new { error = $"Unknown status \"{request.Status}\"." });
+
+        report.Status = status;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("insights", "REPORT_STATUS_CHANGED", id.ToString(), newValue: request, cancellationToken: ct);
+        return Ok(new ReportDefinitionDto(report.Id, report.Code, report.Name, report.Category, report.Owner, report.Frequency, report.Format, report.Status.ToString()));
+    }
+
     [HttpGet("bi")]
     public async Task<ActionResult<List<BiFeedDto>>> BiFeeds(CancellationToken ct)
     {
         var rows = await db.BiFeeds.OrderBy(f => f.Name).ToListAsync(ct);
         return Ok(rows.Select(f => new BiFeedDto(f.Id, f.Name, f.Source, f.Destination, f.Frequency, f.LastRun, f.Rows, f.Failed, f.Latency, f.Status)).ToList());
+    }
+
+    [HttpPost("bi/{id:int}/retry")]
+    [RequireModule(ModuleArea.Insights, AccessLevel.Edit)]
+    public async Task<ActionResult<BiFeedDto>> RetryBiFeed(int id, CancellationToken ct)
+    {
+        var feed = await db.BiFeeds.FirstOrDefaultAsync(f => f.Id == id, ct);
+        if (feed is null) return NotFound();
+
+        feed.Failed = 0;
+        feed.LastRun = DateTime.UtcNow;
+        feed.Status = "Healthy";
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("insights", "BI_FEED_RETRIED", id.ToString(), cancellationToken: ct);
+        return Ok(new BiFeedDto(feed.Id, feed.Name, feed.Source, feed.Destination, feed.Frequency, feed.LastRun, feed.Rows, feed.Failed, feed.Latency, feed.Status));
     }
 }
 

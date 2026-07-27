@@ -42,6 +42,31 @@ public class SuppliersController(AppDbContext db, IAuditService audit) : Control
         return Ok(Map(supplier));
     }
 
+    [HttpPut("{id:int}")]
+    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    public async Task<ActionResult<SupplierDto>> Update(int id, UpsertSupplierRequest request, CancellationToken ct)
+    {
+        var supplier = await db.Suppliers.FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (supplier is null) return NotFound();
+
+        var old = Map(supplier);
+        supplier.Code = request.Code;
+        supplier.NameEn = request.NameEn;
+        supplier.NameAr = request.NameAr;
+        supplier.Type = request.Type;
+        supplier.VatNo = request.VatNo;
+        supplier.Phone = request.Phone;
+        supplier.Email = request.Email;
+        supplier.CategoriesJson = JsonSerializer.Serialize(request.Categories);
+        supplier.Terms = request.Terms;
+        supplier.Currency = request.Currency;
+        supplier.LeadTimeDays = request.LeadTimeDays;
+        supplier.Iban = request.Iban;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("suppliers", "SUPPLIER_UPDATED", id.ToString(), oldValue: old, newValue: Map(supplier), cancellationToken: ct);
+        return Ok(Map(supplier));
+    }
+
     [HttpPut("{id:int}/status")]
     [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
     public async Task<ActionResult<SupplierDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
@@ -313,6 +338,13 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IG
                 return BadRequest(new { error = $"Insufficient available stock for product {line.ProductId} at the selected warehouse." });
             }
             level.OnHand -= line.Qty;
+
+            if (!string.IsNullOrWhiteSpace(line.BatchNo))
+            {
+                var batch = await db.StockBatches.FirstOrDefaultAsync(
+                    b => b.ProductId == line.ProductId && b.WarehouseId == rts.WarehouseId && b.BatchNo == line.BatchNo, ct);
+                if (batch is not null) batch.Qty = Math.Max(0, batch.Qty - line.Qty);
+            }
         }
         rts.Status = ReturnToSupplierStatus.Dispatched;
         await db.SaveChangesAsync(ct);
@@ -327,9 +359,9 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IG
     {
         var rts = await WithIncludes().FirstOrDefaultAsync(r => r.Id == id, ct);
         if (rts is null) return NotFound();
-        if (rts.Status is not (ReturnToSupplierStatus.Dispatched or ReturnToSupplierStatus.AwaitingCredit))
+        if (rts.Status != ReturnToSupplierStatus.Dispatched)
         {
-            return BadRequest(new { error = "Only a Dispatched or Awaiting Credit return can receive a credit note." });
+            return BadRequest(new { error = "Only a Dispatched return can receive a credit note." });
         }
 
         rts.CreditNoteRef = request.CreditNoteRef;
@@ -352,13 +384,44 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IG
     {
         var rts = await WithIncludes().FirstOrDefaultAsync(r => r.Id == id, ct);
         if (rts is null) return NotFound();
-        if (rts.Status is not (ReturnToSupplierStatus.Dispatched or ReturnToSupplierStatus.AwaitingCredit))
+        if (rts.Status != ReturnToSupplierStatus.Dispatched)
         {
-            return BadRequest(new { error = "Only a Dispatched or Awaiting Credit return can be rejected." });
+            return BadRequest(new { error = "Only a Dispatched return can be rejected." });
+        }
+
+        // The supplier refused a dispatched return — restore what Dispatch removed, since the
+        // goods never actually left (or came back into) our stock.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        foreach (var line in rts.Lines)
+        {
+            var level = await db.StockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.WarehouseId == rts.WarehouseId, ct);
+            if (level is not null) level.OnHand += line.Qty;
+
+            if (!string.IsNullOrWhiteSpace(line.BatchNo))
+            {
+                var batch = await db.StockBatches.FirstOrDefaultAsync(
+                    b => b.ProductId == line.ProductId && b.WarehouseId == rts.WarehouseId && b.BatchNo == line.BatchNo, ct);
+                if (batch is not null) batch.Qty += line.Qty;
+            }
         }
         rts.Status = ReturnToSupplierStatus.Rejected;
         await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
         await audit.LogAsync("suppliers", "RTS_REJECTED", rts.Id.ToString(), cancellationToken: ct);
+        return Ok(Map(rts));
+    }
+
+    [HttpPut("{id:int}/cancel")]
+    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    public async Task<ActionResult<ReturnToSupplierDto>> Cancel(int id, CancellationToken ct)
+    {
+        var rts = await WithIncludes().FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (rts is null) return NotFound();
+        if (rts.Status != ReturnToSupplierStatus.Draft) return BadRequest(new { error = "Only a Draft return can be cancelled." });
+
+        rts.Status = ReturnToSupplierStatus.Cancelled;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("suppliers", "RTS_CANCELLED", rts.Id.ToString(), cancellationToken: ct);
         return Ok(Map(rts));
     }
 

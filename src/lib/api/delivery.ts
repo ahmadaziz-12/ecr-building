@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPost, apiPut } from "./client";
+import { apiGet, apiPost, apiPut, apiDelete } from "./client";
 import type {
   DeliveryOrder, Driver, Vehicle, Zone, Stage, Priority, DeliveryLine,
 } from "@/lib/delivery/store";
@@ -46,6 +46,7 @@ const DRIVER_STATUS_TO_FRONTEND: Record<string, Driver["status"]> = {
   Available: "Available", Assigned: "Assigned", Loading: "Loading", OnDelivery: "On Delivery",
   OnBreak: "On Break", OffShift: "Off Shift", OnLeave: "On Leave", LicenceExpired: "Licence Expired", Inactive: "Inactive",
 };
+export const DRIVER_STATUS_TO_BACKEND: Record<string, string> = Object.fromEntries(Object.entries(DRIVER_STATUS_TO_FRONTEND).map(([k, v]) => [v, k]));
 const VEHICLE_TYPE_TO_FRONTEND: Record<string, Vehicle["type"]> = {
   FlatbedTruck: "Flatbed Truck", BoxTruck: "Box Truck", Pickup: "Pickup", DeliveryVan: "Delivery Van", HeavyTruck: "Heavy Truck",
 };
@@ -53,6 +54,7 @@ export const VEHICLE_TYPE_TO_BACKEND: Record<string, string> = Object.fromEntrie
 const VEHICLE_STATUS_TO_FRONTEND: Record<string, Vehicle["status"]> = {
   Available: "Available", Assigned: "Assigned", Loading: "Loading", OnDelivery: "On Delivery", Maintenance: "Maintenance", Inactive: "Inactive",
 };
+export const VEHICLE_STATUS_TO_BACKEND: Record<string, string> = Object.fromEntries(Object.entries(VEHICLE_STATUS_TO_FRONTEND).map(([k, v]) => [v, k]));
 const CUSTOMER_TYPE_TO_FRONTEND: Record<string, DeliveryOrder["customerType"]> = {
   WalkIn: "Walk-in", Retail: "Retail", Contractor: "Contractor", B2B: "B2B",
 };
@@ -127,6 +129,21 @@ export function useInvalidateDelivery() {
   };
 }
 
+export type CreateDeliveryOrderRequest = {
+  orderId: number | null; customerId: number | null; project: string | null; poRef: string | null; branchId: number;
+  weightTons: number; area: string;
+  address: {
+    type: string; contactName: string; contactMobile: string; city: string;
+    district: string | null; street: string | null; landmark: string | null; instructions: string | null;
+  };
+  promisedDate: string; promisedTime: string; timeSlot: string | null; priority: string;
+  driverId: number | null; vehicleId: number | null; amount: number;
+  charges: { fee: number; handling: number; heavy: number; discount: number };
+  lines: { productId: number; deliveryQty: number }[];
+};
+export async function apiCreateDeliveryOrder(body: CreateDeliveryOrderRequest) {
+  return apiPost<ApiDeliveryOrder>("/api/delivery/orders", body);
+}
 export async function apiTransitionDelivery(backendId: number, body: Record<string, unknown>) {
   return apiPut<ApiDeliveryOrder>(`/api/delivery/orders/${backendId}/transition`, body);
 }
@@ -135,4 +152,25 @@ export async function apiReserveStock(backendId: number) {
 }
 export async function apiCreateZone(body: { name: string; city: string; distanceKm: number; fee: number }) {
   return apiPost<ApiZone>("/api/delivery/zones", body);
+}
+export async function apiDeleteZone(backendId: number) {
+  return apiDelete<void>(`/api/delivery/zones/${backendId}`);
+}
+
+export type UpsertDriverRequest = { name: string; branchId: number; mobile: string; license: string; licenseExpiry: string };
+export type UpdateDriverRequest = UpsertDriverRequest & { vehicleId: number | null; status: string };
+export async function apiCreateDriver(body: UpsertDriverRequest) {
+  return apiPost<ApiDriver>("/api/delivery/drivers", body);
+}
+export async function apiUpdateDriver(backendId: number, body: UpdateDriverRequest) {
+  return apiPut<ApiDriver>(`/api/delivery/drivers/${backendId}`, body);
+}
+
+export type UpsertVehicleRequest = { registration: string; type: string; branchId: number; capacityTons: number };
+export type UpdateVehicleRequest = UpsertVehicleRequest & { status: string };
+export async function apiCreateVehicle(body: UpsertVehicleRequest) {
+  return apiPost<ApiVehicle>("/api/delivery/vehicles", body);
+}
+export async function apiUpdateVehicle(backendId: number, body: UpdateVehicleRequest) {
+  return apiPut<ApiVehicle>(`/api/delivery/vehicles/${backendId}`, body);
 }

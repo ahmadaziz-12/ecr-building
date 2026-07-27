@@ -17,7 +17,7 @@ import { useAuth } from "@/lib/api/auth";
 import { useBranches } from "@/lib/api/admin";
 import { ApiError } from "@/lib/api/client";
 import {
-  useZatcaIdentity, useZatcaSettings, useZatcaInvoices,
+  useZatcaIdentity, useZatcaSettings, useZatcaInvoices, useSubmitZatcaInvoice,
   useUpsertZatcaSettings, useGenerateZatcaCsr, useZatcaComplianceCsid, useZatcaProductionOnboarding, useSetZatcaEnvironment,
   type UpsertZatcaSettingsRequest, type ZatcaComplianceTestDto,
 } from "@/lib/api/zatca";
@@ -82,8 +82,18 @@ export function ZatcaSettingsPage() {
   const complianceCsid = useZatcaComplianceCsid();
   const productionOnboarding = useZatcaProductionOnboarding();
   const setEnvironment = useSetZatcaEnvironment();
+  const submitInvoice = useSubmitZatcaInvoice();
   const [complianceTests, setComplianceTests] = useState<ZatcaComplianceTestDto[]>([]);
   useEffect(() => setComplianceTests([]), [branchId]);
+
+  async function handleRetry(orderId: number) {
+    try {
+      await submitInvoice.mutateAsync(orderId);
+      toast.success("Invoice resubmitted to ZATCA");
+    } catch (err) {
+      toast.error(errMsg(err, "Failed to resubmit invoice"));
+    }
+  }
 
   const [draft, setDraft] = useState<UpsertZatcaSettingsRequest>(emptyDraft);
   const [loadedFor, setLoadedFor] = useState<number | null>(null);
@@ -525,7 +535,9 @@ export function ZatcaSettingsPage() {
                       </td>
                       <td className="py-2 pr-3">
                         {i.status !== "Cleared" && (
-                          <Button size="sm" variant="outline" className="h-7 gap-1"><RefreshCw className="h-3 w-3" />Retry</Button>
+                          <Button size="sm" variant="outline" className="h-7 gap-1" onClick={() => handleRetry(i.orderId)} disabled={submitInvoice.isPending}>
+                            <RefreshCw className="h-3 w-3" />Retry
+                          </Button>
                         )}
                       </td>
                     </tr>
@@ -559,7 +571,11 @@ export function ZatcaSettingsPage() {
                       <td className="py-2 pr-3 font-mono text-xs">{i.orderNo}</td>
                       <td className="py-2 pr-3">{i.zatcaResponse ?? "Clearance rejected"}</td>
                       <td className="py-2 pr-3">{new Date(i.issueDate).toLocaleString("en-GB")}</td>
-                      <td className="py-2 pr-3"><Button size="sm" variant="outline" className="h-7 gap-1"><RefreshCw className="h-3 w-3" />Retry submission</Button></td>
+                      <td className="py-2 pr-3">
+                        <Button size="sm" variant="outline" className="h-7 gap-1" onClick={() => handleRetry(i.orderId)} disabled={submitInvoice.isPending}>
+                          <RefreshCw className="h-3 w-3" />Retry submission
+                        </Button>
+                      </td>
                     </tr>
                   ))}
                   {!failedInvoices.length && (

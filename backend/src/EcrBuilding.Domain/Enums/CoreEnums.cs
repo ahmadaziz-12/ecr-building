@@ -75,3 +75,10 @@ public enum DeviceStatus
     Disconnected = 1,
     Faulty = 2
 }
+
+public enum DeviceSyncStatus
+{
+    Synced = 0,
+    Pending = 1,
+    Failed = 2
+}

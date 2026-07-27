@@ -19,6 +19,8 @@ import {
   Receipt,
   Wallet,
   Percent,
+  ShieldCheck,
+  Wrench,
 } from "lucide-react";
 
 export type FieldType = "text" | "number" | "select" | "textarea" | "tags" | "toggle" | "date" | "lineItems";
@@ -35,6 +37,12 @@ export type LineItemColumn = {
   type: LineItemColumnType;
   placeholder?: string;
   options?: { value: string; label: string }[];
+  /** For a "product" column: the name of another field in the same flow holding a
+   *  "Warehouse: <name>" / "Branch: <name>" location value — when set, FlowDialog shows each
+   *  product's available quantity at that location and flags a qty column that exceeds it. */
+  availabilityField?: string;
+  /** The line's qty column key, checked against `availabilityField`'s available quantity. */
+  availabilityQtyKey?: string;
 };
 
 export type Field = {
@@ -556,6 +564,45 @@ export const flows: Record<string, Flow> = {
     ],
   },
 
+  "Add Warehouse": {
+    key: "add-warehouse",
+    title: "Add Warehouse",
+    subtitle: "Register a new storage or distribution location",
+    icon: Boxes,
+    steps: [
+      {
+        name: "Details",
+        fields: [
+          { name: "code", label: "Code", type: "text", placeholder: "WH-RUH-02", required: true },
+          { name: "name", label: "Name", type: "text", placeholder: "Riyadh Overflow Yard", required: true, full: true },
+          { name: "branch", label: "Branch", type: "select", options: ["Riyadh Main", "Jeddah"], required: true },
+          {
+            name: "type", label: "Type", type: "select", required: true,
+            options: ["MainYard", "Distribution", "ColdStorage", "Overflow"],
+          },
+        ],
+      },
+    ],
+  },
+
+  "Bin Setup": {
+    key: "bin-setup",
+    title: "Add Storage Bin",
+    subtitle: "Add a bin or rack location to a warehouse",
+    icon: Layers,
+    steps: [
+      {
+        name: "Bin",
+        fields: [
+          { name: "warehouse", label: "Warehouse", type: "select", options: ["Riyadh Main Yard", "Jeddah Distribution Center"], required: true },
+          { name: "binCode", label: "Bin Code", type: "text", placeholder: "C1", required: true },
+          { name: "label", label: "Label", type: "text", placeholder: "Overflow Rack", required: true, full: true },
+          { name: "capacity", label: "Capacity (tons)", type: "number", placeholder: "0" },
+        ],
+      },
+    ],
+  },
+
   "Create Transfer": {
     key: "create-transfer",
     title: "Create Stock Transfer",
@@ -567,16 +614,17 @@ export const flows: Record<string, Flow> = {
         fields: [
           {
             name: "from",
-            label: "From Warehouse",
+            label: "From Location",
             type: "select",
-            options: ["Riyadh Main Yard", "Jeddah Distribution Center"],
+            options: ["Warehouse: Riyadh Main Yard", "Warehouse: Jeddah Distribution Center", "Branch: Riyadh Main Yard", "Branch: Jeddah Industrial Branch"],
             required: true,
+            hint: "A warehouse holds bulk/backroom stock; a branch is its own shop-floor stock.",
           },
           {
             name: "to",
-            label: "To Warehouse",
+            label: "To Location",
             type: "select",
-            options: ["Riyadh Main Yard", "Jeddah Distribution Center"],
+            options: ["Warehouse: Riyadh Main Yard", "Warehouse: Jeddah Distribution Center", "Branch: Riyadh Main Yard", "Branch: Jeddah Industrial Branch"],
             required: true,
           },
           { name: "eta", label: "Expected Arrival", type: "date" },
@@ -586,14 +634,50 @@ export const flows: Record<string, Flow> = {
         name: "Items",
         fields: [
           {
-            name: "skus",
-            label: "SKUs & Qty",
-            type: "tags",
-            placeholder: "CEM-OPC-50KG x 40, TILE-GRY-60X60 x 20",
+            name: "items",
+            label: "Line Items",
+            type: "lineItems",
             full: true,
+            required: true,
+            lineItemColumns: [
+              { key: "sku", label: "Item", type: "product", availabilityField: "from", availabilityQtyKey: "qty" },
+              { key: "qty", label: "Qty", type: "number", placeholder: "0" },
+              { key: "unitCost", label: "Unit Cost (ر.س)", type: "number", placeholder: "0.00" },
+              { key: "batchNo", label: "Batch (optional)", type: "text" },
+              { key: "expiryDate", label: "Expiry (optional)", type: "date" },
+            ],
+            hint: "Batch and expiry are optional — only fill them in for shelf-life-sensitive items (cement, paint, sealants). Available quantity at the source location is shown per item.",
           },
           { name: "carrier", label: "Carrier / Truck", type: "text" },
           { name: "notes", label: "Handover Notes", type: "textarea", full: true },
+        ],
+      },
+    ],
+  },
+
+  "Receive Transfer": {
+    key: "receive-transfer",
+    title: "Receive Stock Transfer",
+    subtitle: "Log actual quantities received against an in-transit transfer",
+    icon: PackageCheck,
+    steps: [
+      {
+        name: "Receive",
+        fields: [
+          {
+            name: "lines",
+            label: "Lines to Receive",
+            type: "lineItems",
+            full: true,
+            required: true,
+            // "line" options are injected per-open by the row action (src/lib/api/row-actions.ts)
+            // from the specific transfer's own lines — this static array is just a fallback.
+            lineItemColumns: [
+              { key: "line", label: "Transfer Line", type: "select", options: [] },
+              { key: "qty", label: "Qty Received", type: "number", placeholder: "0" },
+            ],
+            hint: "Defaults to the full planned quantity — edit a row only if less (or more) actually arrived.",
+          },
         ],
       },
     ],
@@ -721,6 +805,37 @@ export const flows: Record<string, Flow> = {
             type: "select",
             options: ["SAR", "USD", "EUR", "AED"],
           },
+          { name: "leadTime", label: "Lead Time (days)", type: "number" },
+          { name: "iban", label: "Bank IBAN", type: "text" },
+        ],
+      },
+    ],
+  },
+
+  "Edit Supplier": {
+    key: "edit-supplier",
+    title: "Edit Supplier",
+    subtitle: "Update vendor tax details and payment terms",
+    icon: Truck,
+    steps: [
+      {
+        name: "Vendor",
+        fields: [
+          { name: "code", label: "Supplier Code", type: "text", placeholder: "SUP-005", required: true },
+          { name: "nameEn", label: "Legal Name (EN)", type: "text", required: true },
+          { name: "nameAr", label: "Legal Name (AR)", type: "text" },
+          { name: "type", label: "Supplier Type", type: "select", options: ["Manufacturer", "Distributor", "Importer", "Local Vendor"] },
+          { name: "vat", label: "VAT / CR Number", type: "text" },
+          { name: "phone", label: "Contact Phone", type: "text" },
+          { name: "email", label: "Contact Email", type: "text" },
+        ],
+      },
+      {
+        name: "Commercial",
+        fields: [
+          { name: "categories", label: "Supplies Categories", type: "tags", placeholder: "Cement, Steel, Tiles", full: true },
+          { name: "terms", label: "Payment Terms", type: "select", options: ["Advance", "Net 15", "Net 30", "Net 60", "Net 90"] },
+          { name: "currency", label: "Currency", type: "select", options: ["SAR", "USD", "EUR", "AED"] },
           { name: "leadTime", label: "Lead Time (days)", type: "number" },
           { name: "iban", label: "Bank IBAN", type: "text" },
         ],
@@ -1053,6 +1168,209 @@ export const flows: Record<string, Flow> = {
             type: "text",
             placeholder: "192.168.10.24 : 9100",
           },
+          {
+            name: "behaviorProfile",
+            label: "Behavior Profile",
+            type: "text",
+            placeholder: "Alert on idle > 10m",
+          },
+        ],
+      },
+    ],
+  },
+
+  "Add User": {
+    key: "add-user",
+    title: "Add User",
+    subtitle: "Register a new employee login",
+    icon: UserPlus,
+    steps: [
+      {
+        name: "Account",
+        fields: [
+          { name: "name", label: "Full Name", type: "text", required: true },
+          { name: "email", label: "Email", type: "text", placeholder: "name@ecr-building.local", required: true },
+          { name: "password", label: "Temporary Password", type: "text", placeholder: "Passw0rd!", required: true },
+          {
+            name: "role", label: "Role", type: "select", required: true,
+            options: ["Owner", "Admin", "Branch Manager", "Cashier", "Warehouse Staff", "Delivery Driver", "HR Officer", "Accountant"],
+          },
+          {
+            name: "branch", label: "Branch", type: "select",
+            options: ["All Branches", "Riyadh Main Yard", "Jeddah Industrial Branch"],
+          },
+        ],
+      },
+    ],
+  },
+
+  "Edit User": {
+    key: "edit-user",
+    title: "Edit User",
+    subtitle: "Update role, branch and status",
+    icon: UserPlus,
+    steps: [
+      {
+        name: "Account",
+        fields: [
+          { name: "name", label: "Full Name", type: "text", required: true },
+          {
+            name: "role", label: "Role", type: "select", required: true,
+            options: ["Owner", "Admin", "Branch Manager", "Cashier", "Warehouse Staff", "Delivery Driver", "HR Officer", "Accountant"],
+          },
+          {
+            name: "branch", label: "Branch", type: "select",
+            options: ["All Branches", "Riyadh Main Yard", "Jeddah Industrial Branch"],
+          },
+          { name: "status", label: "Status", type: "select", options: ["Active", "Suspended", "Inactive"] },
+        ],
+      },
+    ],
+  },
+
+  "Create Role": {
+    key: "create-role",
+    title: "Create Role",
+    subtitle: "Define a permission template and approval cap",
+    icon: ShieldCheck,
+    steps: [
+      {
+        name: "Role",
+        fields: [
+          { name: "name", label: "Role Name", type: "text", required: true },
+          { name: "description", label: "Description", type: "textarea", full: true },
+          { name: "approvalCap", label: "Approval Cap (SAR)", type: "number", placeholder: "999999 for unlimited" },
+        ],
+      },
+      {
+        name: "Permissions",
+        fields: [
+          { name: "permPos", label: "POS", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permOrders", label: "Orders", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permInventory", label: "Inventory", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permFinance", label: "Finance", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permAdmin", label: "Admin", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permDelivery", label: "Delivery", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permHr", label: "HR", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permInsights", label: "Insights", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permSuppliers", label: "Suppliers", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permNetwork", label: "Network", type: "select", options: ["None", "View", "Edit", "Full"] },
+        ],
+      },
+    ],
+  },
+
+  "Edit Role": {
+    key: "edit-role",
+    title: "Edit Role",
+    subtitle: "Update the permission template and approval cap",
+    icon: ShieldCheck,
+    steps: [
+      {
+        name: "Role",
+        fields: [
+          { name: "name", label: "Role Name", type: "text", required: true },
+          { name: "description", label: "Description", type: "textarea", full: true },
+          { name: "approvalCap", label: "Approval Cap (SAR)", type: "number", placeholder: "999999 for unlimited" },
+        ],
+      },
+      {
+        name: "Permissions",
+        fields: [
+          { name: "permPos", label: "POS", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permOrders", label: "Orders", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permInventory", label: "Inventory", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permFinance", label: "Finance", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permAdmin", label: "Admin", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permDelivery", label: "Delivery", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permHr", label: "HR", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permInsights", label: "Insights", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permSuppliers", label: "Suppliers", type: "select", options: ["None", "View", "Edit", "Full"] },
+          { name: "permNetwork", label: "Network", type: "select", options: ["None", "View", "Edit", "Full"] },
+        ],
+      },
+    ],
+  },
+
+  "Edit Branch": {
+    key: "edit-branch",
+    title: "Edit Branch",
+    subtitle: "Update branch master details",
+    icon: Store,
+    steps: [
+      {
+        name: "Location",
+        fields: [
+          { name: "code", label: "Branch Code", type: "text", placeholder: "RUH-02", required: true },
+          { name: "nameEn", label: "Name (EN)", type: "text", required: true },
+          { name: "nameAr", label: "Name (AR)", type: "text" },
+          {
+            name: "city", label: "City", type: "select",
+            options: ["Riyadh", "Jeddah", "Dammam", "Makkah", "Madinah", "Tabuk", "Abha"],
+          },
+          { name: "address", label: "Street Address", type: "textarea", full: true },
+        ],
+      },
+      {
+        name: "Operations",
+        fields: [
+          { name: "manager", label: "Branch Manager", type: "text" },
+          { name: "warehouse", label: "Attached Warehouse", type: "text" },
+          { name: "hours", label: "Opening Hours", type: "text", placeholder: "07:00 – 23:00" },
+          { name: "zatca", label: "ZATCA VAT Number", type: "text" },
+        ],
+      },
+    ],
+  },
+
+  "Edit Terminal": {
+    key: "edit-terminal",
+    title: "Edit Terminal",
+    subtitle: "Update terminal registration",
+    icon: MonitorSmartphone,
+    steps: [
+      {
+        name: "Terminal",
+        fields: [
+          { name: "id", label: "Terminal ID", type: "text", placeholder: "POS-06", required: true },
+          { name: "name", label: "Display Name", type: "text", placeholder: "Front Counter 6" },
+          {
+            name: "branch", label: "Branch", type: "select",
+            options: ["Riyadh Main Yard", "Jeddah Industrial Branch"], required: true,
+          },
+          {
+            name: "type", label: "Terminal Type", type: "select",
+            options: ["Fixed POS", "Mobile POS", "Kiosk", "Back-office"],
+          },
+          {
+            name: "operator",
+            label: "Default Cashier",
+            type: "select",
+            options: ["Unassigned", "Ahmed Al-Harbi", "Fahad Al-Qahtani", "Sara Al-Otaibi"],
+          },
+          { name: "offline", label: "Enable offline mode", type: "toggle" },
+        ],
+      },
+    ],
+  },
+
+  "Edit Device": {
+    key: "edit-device",
+    title: "Edit Device",
+    subtitle: "Update device configuration",
+    icon: Printer,
+    steps: [
+      {
+        name: "Device",
+        fields: [
+          { name: "model", label: "Model", type: "text", placeholder: "Epson TM-T88VII" },
+          { name: "serial", label: "Serial Number", type: "text" },
+          {
+            name: "connection", label: "Connection", type: "select",
+            options: ["USB", "Bluetooth", "Network (LAN)", "Wi-Fi"],
+          },
+          { name: "ip", label: "IP / MAC / Port", type: "text", placeholder: "192.168.10.24 : 9100" },
+          { name: "behaviorProfile", label: "Behavior Profile", type: "text", placeholder: "Alert on idle > 10m" },
         ],
       },
     ],
@@ -1144,6 +1462,140 @@ export const flows: Record<string, Flow> = {
           { name: "active", label: "Activate on save", type: "toggle" },
           { name: "notes", label: "Description", type: "textarea", full: true },
         ],
+      },
+    ],
+  },
+
+  "Edit Rule": {
+    key: "edit-rule",
+    title: "Edit Rule",
+    subtitle: "Update a policy in the rules engine",
+    icon: Sliders,
+    steps: [
+      {
+        name: "Rule",
+        fields: [
+          { name: "name", label: "Rule Name", type: "text", placeholder: "Contractor discount ceiling", required: true },
+          {
+            name: "domain", label: "Domain", type: "select",
+            options: ["Pricing & Discount", "Refund & Return", "Credit & Payment", "Inventory Movement", "Approvals", "Compliance"],
+          },
+          { name: "priority", label: "Priority", type: "select", options: ["Low", "Normal", "High", "Critical"] },
+        ],
+      },
+      {
+        name: "Conditions",
+        fields: [
+          {
+            name: "when", label: "When (trigger)", type: "select",
+            options: ["On Sale Add Line", "On Discount Apply", "On Payment", "On Refund", "On Shift Close", "On PO Approve"],
+          },
+          { name: "if", label: "If (conditions)", type: "textarea", placeholder: "e.g. customer.type = Contractor AND line.discount > 10%", full: true },
+        ],
+      },
+      {
+        name: "Action",
+        fields: [
+          {
+            name: "action", label: "Then (action)", type: "select",
+            options: ["Require Approval", "Block", "Warn & Log", "Auto-Apply Discount", "Notify Manager"],
+          },
+          { name: "approver", label: "Approver (if any)", type: "select", options: ["Store Manager", "Finance Manager", "Regional Manager"] },
+          { name: "active", label: "Active", type: "toggle" },
+          { name: "notes", label: "Description", type: "textarea", full: true },
+        ],
+      },
+    ],
+  },
+
+  "Add Control": {
+    key: "add-control",
+    title: "Add Control",
+    subtitle: "Log a compliance/audit control",
+    icon: ShieldCheck,
+    steps: [
+      {
+        name: "Control",
+        fields: [
+          { name: "control", label: "Control Name", type: "text", placeholder: "Quarterly access review", required: true },
+          {
+            name: "framework", label: "Framework", type: "select",
+            options: ["ZATCA", "SAMA", "ISO 27001", "Internal Policy", "Data Retention"],
+          },
+          { name: "owner", label: "Owner", type: "text", placeholder: "Compliance Officer", required: true },
+          { name: "lastReview", label: "Last Review", type: "date" },
+          { name: "nextDue", label: "Next Due", type: "date", required: true },
+        ],
+      },
+      {
+        name: "Evidence",
+        fields: [
+          { name: "evidence", label: "Evidence Link / Reference", type: "text", full: true },
+          { name: "findings", label: "Findings", type: "textarea", full: true },
+          { name: "status", label: "Status", type: "select", options: ["Compliant", "Overdue"], default: "Compliant" },
+        ],
+      },
+    ],
+  },
+
+  "Edit Control": {
+    key: "edit-control",
+    title: "Edit Control",
+    subtitle: "Update a compliance/audit control",
+    icon: ShieldCheck,
+    steps: [
+      {
+        name: "Control",
+        fields: [
+          { name: "control", label: "Control Name", type: "text", required: true },
+          {
+            name: "framework", label: "Framework", type: "select",
+            options: ["ZATCA", "SAMA", "ISO 27001", "Internal Policy", "Data Retention"],
+          },
+          { name: "owner", label: "Owner", type: "text", required: true },
+          { name: "lastReview", label: "Last Review", type: "date" },
+          { name: "nextDue", label: "Next Due", type: "date", required: true },
+        ],
+      },
+      {
+        name: "Evidence",
+        fields: [
+          { name: "evidence", label: "Evidence Link / Reference", type: "text", full: true },
+          { name: "findings", label: "Findings", type: "textarea", full: true },
+          { name: "status", label: "Status", type: "select", options: ["Compliant", "Overdue"] },
+        ],
+      },
+    ],
+  },
+
+  "Create Ticket": {
+    key: "create-ticket",
+    title: "Create Ticket",
+    subtitle: "Log a device, product or operational maintenance ticket",
+    icon: Wrench,
+    steps: [
+      {
+        name: "Ticket",
+        fields: [
+          { name: "deviceOrModule", label: "Device / Module", type: "text", placeholder: "POS-03 Receipt Printer", required: true },
+          { name: "branch", label: "Branch", type: "select", options: ["All Branches", "Riyadh Main Yard", "Jeddah Industrial Branch"] },
+          { name: "severity", label: "Severity", type: "select", options: ["Info", "Warning", "Critical"], default: "Warning" },
+          { name: "owner", label: "Assigned To", type: "text", placeholder: "IT Support", required: true },
+          { name: "slaHours", label: "SLA (hours)", type: "number", placeholder: "24" },
+        ],
+      },
+    ],
+  },
+
+  "Edit Setting": {
+    key: "edit-setting",
+    title: "Edit Setting",
+    subtitle: "Update this setting's value",
+    icon: Sliders,
+    steps: [
+      {
+        name: "Value",
+        fields: [{ name: "value", label: "Value", type: "text", required: true, full: true }],
       },
     ],
   },
@@ -1328,14 +1780,14 @@ export const flows: Record<string, Flow> = {
     icon: PackageCheck,
     steps: [
       {
-        name: "Warehouse",
-        desc: "Non-damaged items are added back to this warehouse's stock.",
+        name: "Branch",
+        desc: "Non-damaged items are added back to this branch's own shelf stock.",
         fields: [
           {
-            name: "warehouse",
-            label: "Restock To Warehouse",
+            name: "branch",
+            label: "Restock To Branch",
             type: "select",
-            options: ["Riyadh Main Yard", "Jeddah Distribution Center"],
+            options: ["Riyadh Main Yard", "Jeddah Industrial Branch"],
             required: true,
           },
         ],

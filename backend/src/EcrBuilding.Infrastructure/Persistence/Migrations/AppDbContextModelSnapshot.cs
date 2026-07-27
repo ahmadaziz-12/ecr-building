@@ -359,6 +359,44 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.ToTable("Branches");
                 });
 
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.BranchStockLevel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BranchId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<decimal>("OnHand")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Reserved")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("ProductId", "BranchId")
+                        .IsUnique();
+
+                    b.ToTable("BranchStockLevels");
+                });
+
             modelBuilder.Entity("EcrBuilding.Domain.Entities.BundleLine", b =>
                 {
                     b.Property<int>("Id")
@@ -1114,6 +1152,12 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("BehaviorProfile")
+                        .HasColumnType("longtext");
+
+                    b.Property<int>("BranchId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Connection")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -1150,6 +1194,11 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("varchar(64)");
 
+                    b.Property<string>("SyncStatus")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
                     b.Property<int>("TerminalId")
                         .HasColumnType("int");
 
@@ -1162,6 +1211,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetime(6)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BranchId");
 
                     b.HasIndex("DeviceCode")
                         .IsUnique();
@@ -1435,6 +1486,12 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<string>("Method")
                         .IsRequired()
                         .HasColumnType("longtext");
+
+                    b.Property<bool>("Reconciled")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<DateTime?>("ReconciledAt")
+                        .HasColumnType("datetime(6)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -3194,6 +3251,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("ApproverUserId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Carrier")
                         .HasColumnType("longtext");
 
@@ -3203,7 +3263,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("Eta")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<int>("FromWarehouseId")
+                    b.Property<int?>("FromBranchId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("FromWarehouseId")
                         .HasColumnType("int");
 
                     b.Property<string>("Notes")
@@ -3214,7 +3277,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("varchar(64)");
 
-                    b.Property<int>("ToWarehouseId")
+                    b.Property<int?>("ToBranchId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ToWarehouseId")
                         .HasColumnType("int");
 
                     b.Property<string>("TransferNo")
@@ -3226,7 +3292,11 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("FromBranchId");
+
                     b.HasIndex("FromWarehouseId");
+
+                    b.HasIndex("ToBranchId");
 
                     b.HasIndex("ToWarehouseId");
 
@@ -3244,10 +3314,20 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("BatchNo")
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime?>("ExpiryDate")
+                        .HasColumnType("datetime(6)");
+
                     b.Property<int>("ProductId")
                         .HasColumnType("int");
 
                     b.Property<decimal>("Qty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("ReceivedQty")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
@@ -3412,6 +3492,15 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<string>("IpAddress")
                         .HasColumnType("longtext");
 
+                    b.Property<string>("KioskLockdownPinHash")
+                        .HasColumnType("longtext");
+
+                    b.Property<int?>("KioskLockdownPinLength")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("KioskLockdownPinSetAt")
+                        .HasColumnType("datetime(6)");
+
                     b.Property<DateTime?>("LastSyncAt")
                         .HasColumnType("datetime(6)");
 
@@ -3427,6 +3516,12 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.Property<int?>("OperatorUserId")
                         .HasColumnType("int");
+
+                    b.Property<string>("PairingSecretHash")
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime?>("PairingSecretSetAt")
+                        .HasColumnType("datetime(6)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -3447,6 +3542,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Code")
                         .IsUnique();
+
+                    b.HasIndex("OperatorUserId");
 
                     b.ToTable("Terminals");
                 });
@@ -3988,6 +4085,25 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Shift");
                 });
 
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.BranchStockLevel", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.Branch", "Branch")
+                        .WithMany("StockLevels")
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EcrBuilding.Domain.Entities.Product", "Product")
+                        .WithMany("BranchStockLevels")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("Product");
+                });
+
             modelBuilder.Entity("EcrBuilding.Domain.Entities.BundleLine", b =>
                 {
                     b.HasOne("EcrBuilding.Domain.Entities.ProductBundle", "Bundle")
@@ -4170,11 +4286,19 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Device", b =>
                 {
+                    b.HasOne("EcrBuilding.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("EcrBuilding.Domain.Entities.Terminal", "Terminal")
                         .WithMany("Devices")
                         .HasForeignKey("TerminalId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Branch");
 
                     b.Navigation("Terminal");
                 });
@@ -4786,19 +4910,31 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockTransfer", b =>
                 {
+                    b.HasOne("EcrBuilding.Domain.Entities.Branch", "FromBranch")
+                        .WithMany()
+                        .HasForeignKey("FromBranchId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("EcrBuilding.Domain.Entities.Warehouse", "FromWarehouse")
                         .WithMany()
                         .HasForeignKey("FromWarehouseId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("EcrBuilding.Domain.Entities.Branch", "ToBranch")
+                        .WithMany()
+                        .HasForeignKey("ToBranchId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("EcrBuilding.Domain.Entities.Warehouse", "ToWarehouse")
                         .WithMany()
                         .HasForeignKey("ToWarehouseId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("FromBranch");
 
                     b.Navigation("FromWarehouse");
+
+                    b.Navigation("ToBranch");
 
                     b.Navigation("ToWarehouse");
                 });
@@ -4839,7 +4975,14 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("EcrBuilding.Domain.Entities.User", "Operator")
+                        .WithMany()
+                        .HasForeignKey("OperatorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Branch");
+
+                    b.Navigation("Operator");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.User", b =>
@@ -4927,6 +5070,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Branch", b =>
                 {
+                    b.Navigation("StockLevels");
+
                     b.Navigation("Terminals");
                 });
 
@@ -4963,6 +5108,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Product", b =>
                 {
+                    b.Navigation("BranchStockLevels");
+
                     b.Navigation("StockLevels");
                 });
 

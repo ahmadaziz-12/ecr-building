@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "./client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiGet, apiPost, apiPut } from "./client";
 import type { LiveTable } from "./admin";
 
 export type SalesSegmentDto = { segment: string; value: number; sharePct: number; tx: number; avgBasket: number; returnsPct: number; trend: string };
@@ -14,6 +14,28 @@ export const useInsightsKpi = (enabled = true) => useQuery({ queryKey: ["insight
 export const useInsightsReports = (enabled = true) => useQuery({ queryKey: ["insights", "reports"], queryFn: () => apiGet<ReportDefinitionDto[]>("/api/insights/reports"), enabled });
 export const useInsightsBi = (enabled = true) => useQuery({ queryKey: ["insights", "bi"], queryFn: () => apiGet<BiFeedDto[]>("/api/insights/bi"), enabled });
 export const useAdminOverview = (enabled = true) => useQuery({ queryKey: ["admin", "overview"], queryFn: () => apiGet<AdminOverviewDto>("/api/admin/overview"), enabled });
+
+export function useUpdateKpiTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, target }: { id: number; target: number }) => apiPut(`/api/insights/kpi/${id}/target`, { target }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["insights", "kpi"] }),
+  });
+}
+export function useSetReportStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: number; status: "Active" | "Inactive" }) => apiPut<ReportDefinitionDto>(`/api/insights/reports/${id}/status`, { status }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["insights", "reports"] }),
+  });
+}
+export function useRetryBiFeed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiPost<BiFeedDto>(`/api/insights/bi/${id}/retry`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["insights", "bi"] }),
+  });
+}
 
 function fmtDateTime(iso: string): string {
   return new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -31,6 +53,7 @@ export function mapKpis(rows: KpiDto[]): LiveTable {
   return {
     columns: ["KPI", "Category", "Owner", "Target", "Actual", "Variance", "Status", "Period"],
     statusCol: 6,
+    ids: rows.map((k) => k.id),
     rows: rows.map((k) => [k.name, k.category, k.owner, k.target.toFixed(1), k.actual.toFixed(1), `${k.variancePct > 0 ? "+" : ""}${k.variancePct}%`, k.status, k.period]),
   };
 }
@@ -39,6 +62,7 @@ export function mapReports(rows: ReportDefinitionDto[]): LiveTable {
   return {
     columns: ["Code", "Report", "Category", "Owner", "Frequency", "Format", "Status"],
     statusCol: 6,
+    ids: rows.map((r) => r.id),
     rows: rows.map((r) => [r.code, r.name, r.category, r.owner, r.frequency, r.format, r.status]),
   };
 }
@@ -47,6 +71,7 @@ export function mapBiFeeds(rows: BiFeedDto[]): LiveTable {
   return {
     columns: ["Feed", "Source", "Destination", "Frequency", "Last Run", "Rows", "Failed", "Latency", "Status"],
     statusCol: 8,
+    ids: rows.map((f) => f.id),
     rows: rows.map((f) => [f.name, f.source, f.destination, f.frequency, fmtDateTime(f.lastRun), f.rows, f.failed, f.latency, f.status]),
   };
 }

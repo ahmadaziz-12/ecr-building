@@ -54,6 +54,20 @@ public class MaintenanceController(AppDbContext db, IAuditService audit) : Contr
         return Ok(Map(ticket));
     }
 
+    [HttpPut("{id:int}/assign")]
+    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    public async Task<ActionResult<MaintenanceDto>> Assign(int id, AssignMaintenanceRequest request, CancellationToken ct)
+    {
+        var ticket = await db.MaintenanceTickets.Include(t => t.Branch).FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (ticket is null) return NotFound();
+
+        ticket.Owner = request.Owner;
+        if (ticket.Status == MaintenanceStatus.Open) ticket.Status = MaintenanceStatus.InProgress;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("admin", "MAINTENANCE_TICKET_ASSIGNED", id.ToString(), newValue: request, cancellationToken: ct);
+        return Ok(Map(ticket));
+    }
+
     private static MaintenanceDto Map(MaintenanceTicket t) => new(
         t.Id, t.TicketNo, t.DeviceOrModule, t.BranchId, t.Branch?.NameEn, t.Severity.ToString(), t.Owner, t.SlaHours,
         t.Status.ToString(), t.CreatedAt, t.ResolvedAt);

@@ -88,7 +88,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     public async Task<ActionResult<List<ProductDto>>> List([FromQuery] int? branchId, CancellationToken ct)
     {
         var products = await db.Products.Include(p => p.Category).Include(p => p.StockLevels).ThenInclude(s => s.Warehouse)
-            .OrderBy(p => p.Sku).ToListAsync(ct);
+            .Include(p => p.BranchStockLevels).OrderBy(p => p.Sku).ToListAsync(ct);
         return Ok(products.Select(p => Map(p, branchId)).ToList());
     }
 
@@ -163,17 +163,27 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         return Ok(Map(product));
     }
 
-    // branchId scopes On Hand/Available to that branch's own warehouse(s) instead of summing
-    // across every branch — otherwise a cashier sees stock that's actually sitting at a
-    // different branch's warehouse and only finds out it's unavailable at checkout.
+    // branchId scopes On Hand/Available to that branch's OWN shop-floor stock (BranchStockLevel) —
+    // what a cashier can actually sell right now — instead of the unscoped view, which reports
+    // total bulk warehouse stock across the whole company (used by the general catalog page, not
+    // by checkout/quotation cart-building).
     private static ProductDto Map(Product p, int? branchId = null)
     {
-        var levels = branchId is null ? p.StockLevels : p.StockLevels.Where(s => s.Warehouse?.BranchId == branchId);
+        if (branchId is not null)
+        {
+            var branchLevels = p.BranchStockLevels.Where(s => s.BranchId == branchId);
+            return new(
+                p.Id, p.Sku, p.Barcode, p.NameEn, p.NameAr, p.CategoryId, p.Category?.NameEn ?? "", p.Brand, p.CostPrice,
+                p.SellingPrice, p.VatRate, p.StockUom, JsonSerializer.Deserialize<string[]>(p.SellUomsJson) ?? [], p.Weight,
+                p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
+                branchLevels.Sum(s => s.OnHand), branchLevels.Sum(s => s.Available));
+        }
+
         return new(
             p.Id, p.Sku, p.Barcode, p.NameEn, p.NameAr, p.CategoryId, p.Category?.NameEn ?? "", p.Brand, p.CostPrice,
             p.SellingPrice, p.VatRate, p.StockUom, JsonSerializer.Deserialize<string[]>(p.SellUomsJson) ?? [], p.Weight,
             p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
-            levels.Sum(s => s.OnHand), levels.Sum(s => s.Available));
+            p.StockLevels.Sum(s => s.OnHand), p.StockLevels.Sum(s => s.Available));
     }
 }
 

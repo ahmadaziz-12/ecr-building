@@ -35,6 +35,33 @@ public class DriversController(AppDbContext db, IAuditService audit) : Controlle
         return Ok(Map(driver));
     }
 
+    [HttpPut("{id:int}")]
+    [RequireModule(ModuleArea.Delivery, AccessLevel.Edit)]
+    public async Task<ActionResult<DriverDto>> Update(int id, UpdateDriverRequest request, CancellationToken ct)
+    {
+        var driver = await db.Drivers.Include(d => d.Branch).FirstOrDefaultAsync(d => d.Id == id, ct);
+        if (driver is null) return NotFound();
+
+        if (request.VehicleId is not null && !await db.Vehicles.AnyAsync(v => v.Id == request.VehicleId, ct))
+        {
+            return BadRequest(new { error = $"Unknown vehicle {request.VehicleId}." });
+        }
+
+        var old = Map(driver);
+        driver.Name = request.Name;
+        driver.BranchId = request.BranchId;
+        driver.Mobile = request.Mobile;
+        driver.License = request.License;
+        driver.LicenseExpiry = request.LicenseExpiry;
+        driver.VehicleId = request.VehicleId;
+        driver.Status = Enum.Parse<DriverStatus>(request.Status);
+        await db.SaveChangesAsync(ct);
+        await db.Entry(driver).Reference(d => d.Branch).LoadAsync(ct);
+
+        await audit.LogAsync("delivery", "DRIVER_UPDATED", id.ToString(), oldValue: old, newValue: Map(driver), cancellationToken: ct);
+        return Ok(Map(driver));
+    }
+
     private static DriverDto Map(Driver d) => new(
         d.Id, d.Name, d.BranchId, d.Branch?.NameEn ?? "", d.Mobile, d.License, d.LicenseExpiry, d.VehicleId, d.Status.ToString(),
         d.DeliveriesToday, d.Status == DriverStatus.Available && d.LicenseExpiry > DateTime.UtcNow);
@@ -62,6 +89,26 @@ public class VehiclesController(AppDbContext db, IAuditService audit) : Controll
         await db.SaveChangesAsync(ct);
         await db.Entry(vehicle).Reference(v => v.Branch).LoadAsync(ct);
         await audit.LogAsync("delivery", "VEHICLE_CREATED", vehicle.Id.ToString(), newValue: request, cancellationToken: ct);
+        return Ok(Map(vehicle));
+    }
+
+    [HttpPut("{id:int}")]
+    [RequireModule(ModuleArea.Delivery, AccessLevel.Edit)]
+    public async Task<ActionResult<VehicleDto>> Update(int id, UpdateVehicleRequest request, CancellationToken ct)
+    {
+        var vehicle = await db.Vehicles.Include(v => v.Branch).FirstOrDefaultAsync(v => v.Id == id, ct);
+        if (vehicle is null) return NotFound();
+
+        var old = Map(vehicle);
+        vehicle.Registration = request.Registration;
+        vehicle.Type = Enum.Parse<VehicleType>(request.Type);
+        vehicle.BranchId = request.BranchId;
+        vehicle.CapacityTons = request.CapacityTons;
+        vehicle.Status = Enum.Parse<VehicleStatus>(request.Status);
+        await db.SaveChangesAsync(ct);
+        await db.Entry(vehicle).Reference(v => v.Branch).LoadAsync(ct);
+
+        await audit.LogAsync("delivery", "VEHICLE_UPDATED", id.ToString(), oldValue: old, newValue: Map(vehicle), cancellationToken: ct);
         return Ok(Map(vehicle));
     }
 
