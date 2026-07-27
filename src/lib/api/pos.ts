@@ -225,6 +225,21 @@ export function useUpdatePricingRuleStatus() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance", "pricing-rules"] }),
   });
 }
+export function useUpdatePricingRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, request }: { id: number; request: UpsertPricingRuleRequest }) =>
+      apiPut<PricingRuleDto>(`/api/finance/pricing-rules/${id}`, request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance", "pricing-rules"] }),
+  });
+}
+export function useDeletePricingRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiDelete<void>(`/api/finance/pricing-rules/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance", "pricing-rules"] }),
+  });
+}
 
 // uom: selling UOM (omitted = stock UOM). lengthM/widthM: cut-to-size dimensions — when both are set
 // on an IsCutToSize product the server computes qty = area itself and ignores the sent qty (BRD §2.3).
@@ -564,6 +579,12 @@ export type QuotationDto = {
   convertedOrderNo: string | null;
   createdAt: string;
   lines: QuotationLineDto[];
+  // BRD §3.4 (Module 16): both mandatory — the backend has always returned these, the frontend type
+  // just never declared them.
+  projectCode: string;
+  customerReference: string;
+  // Quotation-level discount rate the user picked (0 = none); every line is priced at this rate.
+  discountPct: number;
 };
 export type CreateQuotationRequest = {
   branchId: number;
@@ -571,9 +592,21 @@ export type CreateQuotationRequest = {
   lines: CartLine[];
   validUntil?: string | null;
   notes?: string;
-  // BRD §3.4 (Module 16): both mandatory — the server rejects quotations without them.
+  // BRD §3.4 (Module 16): mandatory — the server rejects quotations without a project code.
   projectCode: string;
-  customerReference: string;
+  // The customer's own PO/tracking number — optional, since it isn't always known up front.
+  customerReference?: string;
+  // Manual override; omit to fall back to the server's auto contractor-discount rule.
+  discountPct?: number | null;
+};
+export type UpdateQuotationRequest = {
+  customerId: number | null;
+  lines: CartLine[];
+  validUntil?: string | null;
+  notes?: string;
+  projectCode: string;
+  customerReference?: string;
+  discountPct?: number | null;
 };
 
 export const useQuotations = (enabled = true) =>
@@ -588,6 +621,25 @@ export function useCreateQuotation() {
   return useMutation({
     mutationFn: (request: CreateQuotationRequest) =>
       apiPost<QuotationDto>("/api/pos/quotations", request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "quotations"] }),
+  });
+}
+
+export function useUpdateQuotation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, request }: { id: number; request: UpdateQuotationRequest }) =>
+      apiPut<QuotationDto>(`/api/pos/quotations/${id}`, request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "quotations"] }),
+  });
+}
+
+// Soft-cancel (sets Status=Cancelled server-side) — quotations are never hard-deleted so the audit
+// trail and history stay intact, matching how Orders handle Void instead of a real DELETE.
+export function useCancelQuotation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiDelete<void>(`/api/pos/quotations/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "quotations"] }),
   });
 }

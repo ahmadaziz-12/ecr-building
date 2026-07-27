@@ -46,13 +46,15 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
     public async Task<ActionResult<QuotationDto>> Create(CreateQuotationRequest request, CancellationToken ct)
     {
         if (request.Lines.Count == 0) return BadRequest(new { error = "A quotation needs at least one line." });
-        // BRD §3.4: project code and customer reference are MANDATORY on quotations.
+        // BRD §3.4: project code is mandatory. Customer reference (the customer's own PO/tracking
+        // number) is genuinely optional — plenty of quotations are created before the customer has
+        // given one.
         if (string.IsNullOrWhiteSpace(request.ProjectCode)) return BadRequest(new { error = "A project code is required on every quotation." });
-        if (string.IsNullOrWhiteSpace(request.CustomerReference)) return BadRequest(new { error = "A customer reference is required on every quotation." });
+        if (request.DiscountPct is < 0 or > 100) return BadRequest(new { error = "Discount must be between 0 and 100%." });
 
         var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         var customer = request.CustomerId is null ? null : await db.Customers.FindAsync([request.CustomerId], ct);
-        var discountPct = customer?.Type == CustomerType.Contractor ? ContractorDiscountPct : 0m;
+        var (discountPct, quantityRules) = await ResolveDiscountAsync(request.BranchId, customer, request.DiscountPct, ct);
 
         var quotation = new Quotation
         {
@@ -62,27 +64,13 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
             CreatedByUserId = cashierId,
             ValidUntil = request.ValidUntil ?? DateTime.UtcNow.AddDays(15), // BRD §3.4 default
             ProjectCode = request.ProjectCode.Trim(),
-            CustomerReference = request.CustomerReference.Trim(),
+            CustomerReference = request.CustomerReference?.Trim() ?? "",
             Notes = request.Notes,
         };
 
-        foreach (var line in request.Lines)
-        {
-            var product = await db.Products.FindAsync([line.ProductId], ct);
-            if (product is null) return BadRequest(new { error = $"Unknown product {line.ProductId}." });
-
-            var lineTotal = Math.Round(line.Qty * product.SellingPrice * (1 - discountPct / 100), 2);
-            quotation.Lines.Add(new QuotationLine
-            {
-                ProductId = product.Id, Qty = line.Qty, UnitPrice = product.SellingPrice,
-                DiscountPct = discountPct, VatRate = product.VatRate, LineTotal = lineTotal,
-            });
-        }
-
-        quotation.SubTotal = quotation.Lines.Sum(l => l.Qty * l.UnitPrice);
-        quotation.DiscountTotal = quotation.SubTotal - quotation.Lines.Sum(l => l.LineTotal);
-        quotation.VatTotal = quotation.Lines.Sum(l => l.LineTotal * l.VatRate / 100);
-        quotation.GrandTotal = Math.Round(quotation.Lines.Sum(l => l.LineTotal) + quotation.VatTotal, 2);
+        var linesResult = await BuildLines(request.Lines, discountPct, quantityRules, ct);
+        if (linesResult.Error is not null) return BadRequest(new { error = linesResult.Error });
+        ApplyLines(quotation, linesResult.Lines!, discountPct);
 
         db.Quotations.Add(quotation);
         await db.SaveChangesAsync(ct);
@@ -90,6 +78,70 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
 
         var created = await Query().FirstAsync(q => q.Id == quotation.Id, ct);
         return Ok(Map(created));
+    }
+
+    [HttpPut("{id:int}")]
+    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    public async Task<ActionResult<QuotationDto>> Update(int id, UpdateQuotationRequest request, CancellationToken ct)
+    {
+        var quotation = await Query().FirstOrDefaultAsync(q => q.Id == id, ct);
+        if (quotation is null) return NotFound();
+        // Editable up to the moment the customer accepts it — once Accepted/Converted the terms are
+        // considered final, and Rejected/Expired/Cancelled quotations are dead ends, not edit targets.
+        if (quotation.Status is not (QuotationStatus.Draft or QuotationStatus.Sent))
+        {
+            return BadRequest(new { error = $"A {quotation.Status} quotation can no longer be edited." });
+        }
+        if (request.Lines.Count == 0) return BadRequest(new { error = "A quotation needs at least one line." });
+        if (string.IsNullOrWhiteSpace(request.ProjectCode)) return BadRequest(new { error = "A project code is required on every quotation." });
+        if (request.DiscountPct is < 0 or > 100) return BadRequest(new { error = "Discount must be between 0 and 100%." });
+
+        var customer = request.CustomerId is null ? null : await db.Customers.FindAsync([request.CustomerId], ct);
+        var (discountPct, quantityRules) = await ResolveDiscountAsync(quotation.BranchId, customer, request.DiscountPct, ct);
+
+        var linesResult = await BuildLines(request.Lines, discountPct, quantityRules, ct);
+        if (linesResult.Error is not null) return BadRequest(new { error = linesResult.Error });
+
+        var before = new { quotation.ProjectCode, quotation.CustomerReference, quotation.DiscountPct, quotation.GrandTotal };
+
+        db.QuotationLines.RemoveRange(quotation.Lines);
+        quotation.Lines.Clear();
+        quotation.CustomerId = request.CustomerId;
+        quotation.ValidUntil = request.ValidUntil ?? quotation.ValidUntil;
+        quotation.Notes = request.Notes;
+        quotation.ProjectCode = request.ProjectCode.Trim();
+        quotation.CustomerReference = request.CustomerReference?.Trim() ?? "";
+        ApplyLines(quotation, linesResult.Lines!, discountPct);
+
+        await db.SaveChangesAsync(ct);
+        var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await audit.LogAsync("orders", "QUOTATION_UPDATED", id.ToString(), userId: cashierId, branchId: quotation.BranchId,
+            oldValue: before, newValue: new { quotation.ProjectCode, quotation.CustomerReference, quotation.DiscountPct, quotation.GrandTotal }, cancellationToken: ct);
+
+        var updated = await Query().FirstAsync(q => q.Id == id, ct);
+        return Ok(Map(updated));
+    }
+
+    [HttpDelete("{id:int}")]
+    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    {
+        var quotation = await db.Quotations.FirstOrDefaultAsync(q => q.Id == id, ct);
+        if (quotation is null) return NotFound();
+        // Soft-cancel, not a hard delete: the row stays for audit/history (matches Voided orders),
+        // it's just excluded from active work. A quotation already turned into a real order can't be
+        // un-converted from here — cancel the resulting order instead.
+        if (quotation.Status == QuotationStatus.Converted)
+        {
+            return BadRequest(new { error = "This quotation was already converted to an order — cancel the order instead." });
+        }
+        if (quotation.Status == QuotationStatus.Cancelled) return NoContent();
+
+        quotation.Status = QuotationStatus.Cancelled;
+        await db.SaveChangesAsync(ct);
+        var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await audit.LogAsync("orders", "QUOTATION_CANCELLED", id.ToString(), userId: cashierId, branchId: quotation.BranchId, cancellationToken: ct);
+        return NoContent();
     }
 
     [HttpPut("{id:int}/send")]
@@ -185,10 +237,71 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
         .Include(q => q.Customer).Include(q => q.CreatedBy).Include(q => q.ConvertedOrder)
         .Include(q => q.Lines).ThenInclude(l => l.Product);
 
+    // BRD §5.1/§6.2, mirroring OrdersController.Checkout: the Trade Tier rule's own Value overrides
+    // the flat ContractorDiscountPct fallback when one is configured, and a manual DiscountPct
+    // override (typed on the quotation form) always wins over either. Quantity rules are returned
+    // separately since they apply per-line (by SKU + qty), not as a single blanket rate.
+    private async Task<(decimal DiscountPct, List<PricingRule> QuantityRules)> ResolveDiscountAsync(
+        int branchId, Customer? customer, decimal? manualOverride, CancellationToken ct)
+    {
+        var activePricingRules = await db.PricingRules
+            .Where(r => r.Status == PricingRuleStatus.Active
+                && (r.BranchId == null || r.BranchId == branchId)
+                && (r.ValidUntil == null || r.ValidUntil >= DateTime.UtcNow))
+            .ToListAsync(ct);
+        var tradeTierRule = customer?.Type == CustomerType.Contractor
+            ? activePricingRules.Where(r => r.Type == "Trade Tier")
+                .OrderByDescending(r => r.BranchId != null).ThenByDescending(r => r.Priority).FirstOrDefault()
+            : null;
+        var contractorPct = customer?.Type == CustomerType.Contractor ? (tradeTierRule?.Value ?? ContractorDiscountPct) : 0m;
+        var quantityRules = activePricingRules.Where(r => r.Type == "Quantity" && r.MinQuantity is not null).ToList();
+        return (manualOverride ?? contractorPct, quantityRules);
+    }
+
+    // Shared by Create and Update: resolves each line's product and prices it at the larger of the
+    // quotation's blanket discount and any matching per-SKU Quantity rule — same "larger of, doesn't
+    // stack" behavior as OrdersController.Checkout. Returns an error string instead of throwing so
+    // both callers can turn it into a 400.
+    private async Task<(List<QuotationLine>? Lines, string? Error)> BuildLines(
+        List<CartLineInput> requestLines, decimal discountPct, List<PricingRule> quantityRules, CancellationToken ct)
+    {
+        var lines = new List<QuotationLine>();
+        foreach (var line in requestLines)
+        {
+            var product = await db.Products.FindAsync([line.ProductId], ct);
+            if (product is null) return (null, $"Unknown product {line.ProductId}.");
+
+            // Quotation lines are always priced/quantified in stock UOM (no UOM selector on the
+            // quotation builder), so line.Qty is directly comparable to MinQuantity.
+            var quantityPct = quantityRules
+                .Where(r => (r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase)) && line.Qty >= r.MinQuantity)
+                .Select(r => r.Value).DefaultIfEmpty(0m).Max();
+            var lineDiscountPct = Math.Max(discountPct, quantityPct);
+
+            var lineTotal = Math.Round(line.Qty * product.SellingPrice * (1 - lineDiscountPct / 100), 2);
+            lines.Add(new QuotationLine
+            {
+                ProductId = product.Id, Qty = line.Qty, UnitPrice = product.SellingPrice,
+                DiscountPct = lineDiscountPct, VatRate = product.VatRate, LineTotal = lineTotal,
+            });
+        }
+        return (lines, null);
+    }
+
+    private static void ApplyLines(Quotation quotation, List<QuotationLine> lines, decimal discountPct)
+    {
+        foreach (var line in lines) quotation.Lines.Add(line);
+        quotation.DiscountPct = discountPct;
+        quotation.SubTotal = quotation.Lines.Sum(l => l.Qty * l.UnitPrice);
+        quotation.DiscountTotal = quotation.SubTotal - quotation.Lines.Sum(l => l.LineTotal);
+        quotation.VatTotal = quotation.Lines.Sum(l => l.LineTotal * l.VatRate / 100);
+        quotation.GrandTotal = Math.Round(quotation.Lines.Sum(l => l.LineTotal) + quotation.VatTotal, 2);
+    }
+
     private static QuotationDto Map(Quotation q) => new(
         q.Id, q.QuoteNo, q.BranchId, q.CustomerId, q.Customer?.NameEn ?? "Walk-in Customer", q.CreatedBy?.Name ?? "",
         q.Status.ToString(), q.ValidUntil, q.SubTotal, q.DiscountTotal, q.VatTotal, q.GrandTotal, q.Notes,
         q.ConvertedOrderId, q.ConvertedOrder?.OrderNo, q.CreatedAt,
         q.Lines.Select(l => new QuotationLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.UnitPrice, l.DiscountPct, l.VatRate, l.LineTotal)).ToList(),
-        q.ProjectCode, q.CustomerReference);
+        q.ProjectCode, q.CustomerReference, q.DiscountPct);
 }

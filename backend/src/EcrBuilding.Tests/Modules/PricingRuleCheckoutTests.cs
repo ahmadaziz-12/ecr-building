@@ -173,4 +173,30 @@ public class PricingRuleCheckoutTests : IAsyncLifetime
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"Expected OK, got {response.StatusCode}: {body}");
     }
+
+    [Fact]
+    public async Task Quantity_rule_matches_the_products_sku_case_insensitively()
+    {
+        using var db = _factory.CreateDbContext();
+        var (branch, product) = SeedBranchAndProduct(db, sku: "Net12");
+        // Sku is uppercased at rule-creation time (PricingRulesController.Create) — the catalog SKU
+        // itself is stored exactly as entered ("Net12"), so an ordinal comparison would never match.
+        db.PricingRules.Add(new PricingRule
+        {
+            Name = "NetWire Deal", Type = "Quantity", Scope = "SKU: Net12", Condition = ">= 1 units",
+            Action = "-20%", Priority = 10, Status = PricingRuleStatus.Active,
+            DiscountType = RuleDiscountType.Percentage, Value = 20m, MinQuantity = 1m, Sku = "NET12",
+        });
+        db.SaveChanges();
+        var cashierRole = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders]);
+        db.SaveChanges();
+        var cashier = TestDataSeeder.AddUser(db, cashierRole, "cashier-case@test.local", branchId: branch.Id);
+        var client = _factory.CreateAuthenticatedClient(cashier);
+
+        // 1 unit x 100 x (1 - 20%) = 80.
+        var response = await client.PostAsJsonAsync("/api/pos/orders", CheckoutRequest(branch.Id, null, product.Id, qty: 1m, payAmount: 80m));
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"Expected OK, got {response.StatusCode}: {body}");
+    }
 }

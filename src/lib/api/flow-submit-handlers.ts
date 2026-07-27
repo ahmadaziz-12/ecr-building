@@ -1,4 +1,11 @@
-import { useCategories, useCreateCategory, useCreateProduct, useProducts } from "./catalog";
+import {
+  resolveParentCategory,
+  resolveProductCategoryId,
+  useCategories,
+  useCreateCategory,
+  useCreateProduct,
+  useProducts,
+} from "./catalog";
 import { parseUomConversions } from "@/lib/buildpos/uom";
 import { useCreateBundle } from "./bundles";
 import {
@@ -139,11 +146,9 @@ export function useFlowSubmitHandlers(): Record<
 
   return {
     "add-sku": async (values) => {
-      const category = categories?.find(
-        (c) => c.nameEn.toLowerCase() === (values.category ?? "").toLowerCase(),
-      );
       if (!values.sku || !values.nameEn) throw new Error("SKU and Name (English) are required.");
-      if (!category)
+      const categoryId = resolveProductCategoryId(categories, values.category ?? "", values.subcategory);
+      if (categoryId == null)
         throw new Error(
           `Unknown category "${values.category}" — pick one that exists in Categories & Attributes.`,
         );
@@ -154,7 +159,7 @@ export function useFlowSubmitHandlers(): Record<
         barcode: values.barcode || null,
         nameEn: values.nameEn,
         nameAr: values.nameAr || null,
-        categoryId: category.id,
+        categoryId,
         brand: values.brand || null,
         costPrice: Number(values.cost || 0),
         sellingPrice: Number(values.price || 0),
@@ -181,10 +186,8 @@ export function useFlowSubmitHandlers(): Record<
       // Parent is optional — an unrecognized name just creates a top-level category instead of
       // blocking the whole form, unlike category-on-product which is required.
       const parentName =
-        values.parent && values.parent !== "— None (top level) —" ? values.parent : null;
-      const parent = parentName
-        ? categories?.find((c) => c.nameEn.toLowerCase() === parentName.toLowerCase())
-        : undefined;
+        values.parent && values.parent !== "— This is a Main Category —" ? values.parent : null;
+      const parent = parentName ? resolveParentCategory(categories, parentName) : undefined;
       const vatRate = values.vat === "Exempt" ? 0 : values.vat?.startsWith("0%") ? 0 : 15;
 
       await createCategory.mutateAsync({

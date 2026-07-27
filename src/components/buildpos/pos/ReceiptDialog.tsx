@@ -85,6 +85,7 @@ export function ReceiptDialog({ order, terminalId, onClose }: { order: OrderDto 
                 <span className="truncate">
                   {l.productName} x{l.qty}{l.uom ? ` ${l.uom}` : ""}
                   {l.lengthM != null && l.widthM != null ? ` (${l.lengthM}×${l.widthM}m)` : ""}
+                  {l.discountPct > 0 && <span className="text-warning"> (-{l.discountPct}%)</span>}
                 </span>
                 <span className="flex-none">{money(l.lineTotal)}</span>
               </div>

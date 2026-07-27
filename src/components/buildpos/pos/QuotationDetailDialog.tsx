@@ -1,4 +1,5 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/buildpos/sections";
 import { statusTone } from "./shared";
 import type { QuotationDto } from "@/lib/api/pos";
@@ -7,7 +8,17 @@ function fmtSar(n: number): string {
   return `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} ر.س`;
 }
 
-export function QuotationDetailDialog({ quotation, onClose }: { quotation: QuotationDto | null; onClose: () => void }) {
+export function QuotationDetailDialog({
+  quotation, onClose, onEdit, onCancel,
+}: {
+  quotation: QuotationDto | null;
+  onClose: () => void;
+  onEdit: (q: QuotationDto) => void;
+  onCancel: (q: QuotationDto) => void;
+}) {
+  const editable = quotation != null && (quotation.status === "Draft" || quotation.status === "Sent");
+  const cancellable = quotation != null && quotation.status !== "Converted" && quotation.status !== "Cancelled";
+
   return (
     <Dialog open={quotation !== null} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-2xl">
@@ -16,12 +27,10 @@ export function QuotationDetailDialog({ quotation, onClose }: { quotation: Quota
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 font-mono text-base">
                 {quotation.quoteNo}
-                <Pill tone={statusTone(quotation.status)}>
-                  {quotation.status}
-                  {quotation.convertedOrderNo ? ` → ${quotation.convertedOrderNo}` : ""}
-                </Pill>
+                <Pill tone={statusTone(quotation.status)}>{quotation.status}</Pill>
               </DialogTitle>
             </DialogHeader>
+
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</p>
@@ -32,16 +41,24 @@ export function QuotationDetailDialog({ quotation, onClose }: { quotation: Quota
                 <p className="mt-0.5 font-medium">{quotation.createdByName}</p>
               </div>
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Valid Until</p>
-                <p className="mt-0.5 font-medium">
-                  {new Date(quotation.validUntil).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
-                </p>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Project Code</p>
+                <p className="mt-0.5 font-medium">{quotation.projectCode || "—"}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Customer Reference</p>
+                <p className="mt-0.5 font-medium">{quotation.customerReference || "—"}</p>
               </div>
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Created</p>
-                <p className="mt-0.5 font-medium">
-                  {new Date(quotation.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
-                </p>
+                <p className="mt-0.5 font-medium">{new Date(quotation.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Valid Until</p>
+                <p className="mt-0.5 font-medium">{new Date(quotation.validUntil).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Discount</p>
+                <p className="mt-0.5 font-medium">{quotation.discountPct}%</p>
               </div>
             </div>
 
@@ -53,6 +70,7 @@ export function QuotationDetailDialog({ quotation, onClose }: { quotation: Quota
                     <th className="px-3 py-2 text-left">Product</th>
                     <th className="px-3 py-2 text-right">Qty</th>
                     <th className="px-3 py-2 text-right">Unit Price</th>
+                    <th className="px-3 py-2 text-right">Discount</th>
                     <th className="px-3 py-2 text-right">Line Total</th>
                   </tr>
                 </thead>
@@ -63,6 +81,7 @@ export function QuotationDetailDialog({ quotation, onClose }: { quotation: Quota
                       <td className="px-3 py-2">{l.productName}</td>
                       <td className="px-3 py-2 text-right">{l.qty}</td>
                       <td className="px-3 py-2 text-right">{fmtSar(l.unitPrice)}</td>
+                      <td className="px-3 py-2 text-right text-muted-foreground">{l.discountPct > 0 ? `${l.discountPct}%` : "—"}</td>
                       <td className="px-3 py-2 text-right font-medium">{fmtSar(l.lineTotal)}</td>
                     </tr>
                   ))}
@@ -83,10 +102,33 @@ export function QuotationDetailDialog({ quotation, onClose }: { quotation: Quota
 
             {quotation.notes && (
               <div>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Notes</p>
-                <p className="text-sm text-muted-foreground">{quotation.notes}</p>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Notes</p>
+                <p className="mt-0.5 text-sm">{quotation.notes}</p>
               </div>
             )}
+
+            {quotation.convertedOrderNo && (
+              <div className="rounded-lg border border-black/5 bg-canvas px-3 py-2 text-sm">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Converted To</p>
+                <p className="mt-0.5 font-mono text-xs font-medium">{quotation.convertedOrderNo}</p>
+              </div>
+            )}
+
+            <DialogFooter className="flex-row justify-between sm:justify-between">
+              <div>
+                {cancellable && (
+                  <Button variant="ghost" size="sm" className="text-critical hover:text-critical" onClick={() => onCancel(quotation)}>
+                    Cancel Quotation
+                  </Button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {editable && (
+                  <Button size="sm" variant="outline" onClick={() => onEdit(quotation)}>Edit</Button>
+                )}
+                <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
+              </div>
+            </DialogFooter>
           </>
         )}
       </DialogContent>

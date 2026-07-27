@@ -19,7 +19,7 @@ import { PaymentDialog } from "./PaymentDialog";
 import { ReceiptDialog } from "./ReceiptDialog";
 import {
   useOrders, useQuotations, useSendQuotation, useAcceptQuotation, useRejectQuotation, useConvertQuotation,
-  usePayOrder, type OrderDto, type QuotationDto, type PaymentInput,
+  useCancelQuotation, usePayOrder, type OrderDto, type QuotationDto, type PaymentInput,
 } from "@/lib/api/pos";
 import { useAuth } from "@/lib/api/auth";
 import { useBranches, useTerminals } from "@/lib/api/admin";
@@ -68,13 +68,15 @@ export function OrdersPage() {
   const acceptQuotation = useAcceptQuotation();
   const rejectQuotation = useRejectQuotation();
   const convertQuotation = useConvertQuotation();
+  const cancelQuotation = useCancelQuotation();
 
   const [tab, setTab] = useState<Tab>("All Orders");
   const [detailOrder, setDetailOrder] = useState<OrderDto | null>(null);
-  const [detailQuotation, setDetailQuotation] = useState<QuotationDto | null>(null);
   const [voidTarget, setVoidTarget] = useState<OrderDto | null>(null);
   const [returnTarget, setReturnTarget] = useState<OrderDto | null>(null);
   const [creatingQuote, setCreatingQuote] = useState(false);
+  const [editingQuote, setEditingQuote] = useState<QuotationDto | null>(null);
+  const [detailQuote, setDetailQuote] = useState<QuotationDto | null>(null);
   const [reprintTarget, setReprintTarget] = useState<OrderDto | null>(null);
   // Pending/Unpaid orders (converted quotations) get settled right here — without this the list is
   // a dead end: "Awaiting payment" with no way to ever take the payment.
@@ -183,6 +185,17 @@ export function OrdersPage() {
     }
   }
 
+  async function handleCancelQuotation(q: QuotationDto) {
+    if (!window.confirm(`Cancel ${q.quoteNo}? This can't be undone.`)) return;
+    try {
+      await cancelQuotation.mutateAsync(q.id);
+      toast.success(`${q.quoteNo} cancelled`);
+      setDetailQuote(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not cancel the quotation.");
+    }
+  }
+
   function handleExport() {
     if (tab === "Quotations") {
       exportToCsv("quotations.csv", ["Quote #", "Customer", "Created By", "Valid Until", "Amount", "Status"],
@@ -254,7 +267,7 @@ export function OrdersPage() {
               </TableHeader>
               <TableBody>
                 {quotationsPagination.pageRows.map((q) => (
-                  <TableRow key={q.id} onClick={() => setDetailQuotation(q)} className="cursor-pointer">
+                  <TableRow key={q.id} onClick={() => setDetailQuote(q)} className="cursor-pointer">
                     <TableCell className="font-mono text-xs">{q.quoteNo}</TableCell>
                     <TableCell>{q.customerName}</TableCell>
                     <TableCell className="text-muted-foreground">{q.createdByName}</TableCell>
@@ -264,11 +277,15 @@ export function OrdersPage() {
                     <TableCell>
                       <RowActionsMenu
                         actions={[
+                          { label: "View", onClick: () => setDetailQuote(q) },
+                          { label: "Edit", onClick: () => setEditingQuote(q), disabled: q.status !== "Draft" && q.status !== "Sent" },
+                          "separator",
                           { label: "Send to Customer", onClick: () => handleQuotationAction(q, "send"), disabled: q.status !== "Draft" },
                           { label: "Mark Accepted", onClick: () => handleQuotationAction(q, "accept"), disabled: q.status !== "Sent" },
                           { label: "Mark Rejected", onClick: () => handleQuotationAction(q, "reject"), disabled: q.status !== "Sent" },
-                          "separator",
                           { label: "Convert to Order", onClick: () => handleQuotationAction(q, "convert"), disabled: !["Sent", "Accepted"].includes(q.status) },
+                          "separator",
+                          { label: "Cancel Quotation", onClick: () => handleCancelQuotation(q), destructive: true, disabled: q.status === "Converted" || q.status === "Cancelled" },
                         ]}
                       />
                     </TableCell>
@@ -305,7 +322,7 @@ export function OrdersPage() {
               </TableHeader>
               <TableBody>
                 {ordersPagination.pageRows.map((o) => (
-                  <TableRow key={o.id}>
+                  <TableRow key={o.id} onClick={() => setDetailOrder(o)} className="cursor-pointer">
                     <TableCell className="font-mono text-xs">{o.orderNo}</TableCell>
                     <TableCell className="text-muted-foreground">{fmtTime(o.createdAt)}</TableCell>
                     <TableCell>{o.customerName}</TableCell>
@@ -350,7 +367,18 @@ export function OrdersPage() {
       <VoidOrderDialog order={voidTarget} onClose={() => setVoidTarget(null)} />
       <CreateReturnDialog order={returnTarget} onClose={() => setReturnTarget(null)} />
       <QuotationFormDialog open={creatingQuote} onOpenChange={setCreatingQuote} branchId={effectiveBranchId} />
-      <QuotationDetailDialog quotation={detailQuotation} onClose={() => setDetailQuotation(null)} />
+      <QuotationFormDialog
+        open={editingQuote !== null}
+        onOpenChange={(v) => !v && setEditingQuote(null)}
+        branchId={effectiveBranchId}
+        editing={editingQuote}
+      />
+      <QuotationDetailDialog
+        quotation={detailQuote}
+        onClose={() => setDetailQuote(null)}
+        onEdit={(q) => { setDetailQuote(null); setEditingQuote(q); }}
+        onCancel={handleCancelQuotation}
+      />
       <PaymentDialog
         open={payTarget !== null}
         onOpenChange={(v) => !v && setPayTarget(null)}

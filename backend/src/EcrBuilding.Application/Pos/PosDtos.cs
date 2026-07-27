@@ -97,10 +97,14 @@ public record QuotationDto(
     int Id, string QuoteNo, int BranchId, int? CustomerId, string CustomerName, string CreatedByName, string Status,
     DateTime ValidUntil, decimal SubTotal, decimal DiscountTotal, decimal VatTotal, decimal GrandTotal, string? Notes,
     int? ConvertedOrderId, string? ConvertedOrderNo, DateTime CreatedAt, IReadOnlyList<QuotationLineDto> Lines,
-    // BRD §3.4: mandatory on every quotation (Module 16).
-    string ProjectCode = "", string CustomerReference = "");
+    // BRD §3.4: project code is mandatory (Module 16); customer reference is optional.
+    string ProjectCode = "", string CustomerReference = "",
+    // Manual discount override rate, echoed back so the edit form can re-show the number the user picked.
+    decimal DiscountPct = 0m);
 public record CreateQuotationRequest(int BranchId, int? CustomerId, List<CartLineInput> Lines, DateTime? ValidUntil, string? Notes,
-    string? ProjectCode = null, string? CustomerReference = null);
+    string? ProjectCode = null, string? CustomerReference = null, decimal? DiscountPct = null);
+public record UpdateQuotationRequest(int? CustomerId, List<CartLineInput> Lines, DateTime? ValidUntil, string? Notes,
+    string ProjectCode, string? CustomerReference, decimal? DiscountPct = null);
 
 public record ApprovalRequestDto(
     int Id, string Type, int BranchId, string RequestedByName, string? ApproverName, decimal Amount, string Reason,

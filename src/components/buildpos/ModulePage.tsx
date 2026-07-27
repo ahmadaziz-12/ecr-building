@@ -19,6 +19,7 @@ import type { Severity } from "@/lib/buildpos/format";
 import { getFlow, type Field, type Flow } from "@/lib/buildpos/flows";
 import { FlowDialog } from "@/components/buildpos/FlowDialog";
 import { CreatePricingRuleDialog } from "@/components/buildpos/CreatePricingRuleDialog";
+import type { PricingRuleDto } from "@/lib/api/pos";
 import { ReturnPolicySettingsDialog } from "@/components/buildpos/pos/ReturnPolicySettingsDialog";
 import { useReturnPolicyConfig, type ReturnPolicyConfigDto } from "@/lib/api/finance";
 import { useModuleLiveData } from "@/lib/api/module-live-data";
@@ -118,6 +119,9 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
   // generic free-text FlowDialog — Trade Tier/Quantity/Coupon rules need structured fields (branch,
   // SKU, quantity threshold) the generic flow's plain-text Condition/Action strings can't drive.
   const [pricingRuleDialogOpen, setPricingRuleDialogOpen] = useState(false);
+  // Set by the "Edit" row action below to reopen the same dialog pre-filled for an existing rule
+  // instead of a blank Create form — null means the dialog (if open) is in create mode.
+  const [editingPricingRule, setEditingPricingRule] = useState<PricingRuleDto | null>(null);
   // Finance > Customer Returns' "Return Policy" gets a bespoke settings dialog for the dual-auth
   // cash threshold + return windows — same pattern as Pricing's rule dialog above.
   const [returnPolicyDialogOpen, setReturnPolicyDialogOpen] = useState(false);
@@ -146,7 +150,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
     setActiveFlow({ flow: f, initialValues, onSubmit, fieldOverrides });
   }
 
-  const rowActionsFor = useRowActions(pathname, openFlow, onOpenKioskPairing);
+  const rowActionsFor = useRowActions(pathname, openFlow, onOpenKioskPairing, setEditingPricingRule);
   const rowDetailFor = useRowDetails(pathname, detailRow?.id);
   const showDetail = (id: number, row: (string | number)[]) => setDetailRow({ id, row });
   const bulkActions = useBulkActions(pathname, openFlow, showDetail);
@@ -710,7 +714,11 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
         initialValues={activeFlow?.initialValues}
         fieldOverrides={activeFlow?.fieldOverrides}
       />
-      <CreatePricingRuleDialog open={pricingRuleDialogOpen} onOpenChange={setPricingRuleDialogOpen} />
+      <CreatePricingRuleDialog
+        open={pricingRuleDialogOpen || !!editingPricingRule}
+        onOpenChange={(v) => { if (!v) { setPricingRuleDialogOpen(false); setEditingPricingRule(null); } }}
+        editingRule={editingPricingRule}
+      />
       <ReturnPolicySettingsDialog
         open={returnPolicyDialogOpen}
         onOpenChange={setReturnPolicyDialogOpen}

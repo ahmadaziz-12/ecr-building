@@ -201,10 +201,15 @@ public class PricingRulesController(AppDbContext db, IAuditService audit) : Cont
         // A rule needing sign-off ("PendingApproval → Active") must be activated by someone other
         // than whoever created it — otherwise the "needs a manager sign-off" comment above is purely
         // decorative: the same user creates it and immediately activates their own discount/coupon.
+        // Exception: a Full-access Finance user (e.g. Owner) already has standing authority to
+        // approve anyone else's rule, so requiring a second such user to sign off their own is just
+        // friction, not a real control — self-approval is allowed only at that access tier.
         if (rule.Status == PricingRuleStatus.PendingApproval && newStatus == PricingRuleStatus.Active && rule.CreatedByUserId is not null)
         {
             var userId = int.Parse(User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier)!);
-            if (userId == rule.CreatedByUserId)
+            var financeClaim = User.FindFirst($"perm:{ModuleArea.Finance}")?.Value;
+            var financeLevel = Enum.TryParse<AccessLevel>(financeClaim, out var parsed) ? parsed : AccessLevel.None;
+            if (userId == rule.CreatedByUserId && financeLevel < AccessLevel.Full)
             {
                 return BadRequest(new { error = "You cannot approve your own pricing rule — a different user must activate it." });
             }
@@ -214,6 +219,48 @@ public class PricingRulesController(AppDbContext db, IAuditService audit) : Cont
         await db.SaveChangesAsync(ct);
         await audit.LogAsync("finance", $"PRICING_RULE_{rule.Status.ToString().ToUpperInvariant()}", id.ToString(), cancellationToken: ct);
         return Ok(Map(rule));
+    }
+
+    [HttpPut("{id:int}")]
+    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    public async Task<ActionResult<PricingRuleDto>> Update(int id, UpsertPricingRuleRequest request, CancellationToken ct)
+    {
+        var rule = await db.PricingRules.Include(r => r.Branch).FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (rule is null) return NotFound();
+        if (request.BranchId is not null && !await db.Branches.AnyAsync(b => b.Id == request.BranchId, ct))
+        {
+            return BadRequest(new { error = "Unknown branch." });
+        }
+
+        var before = new { rule.Name, rule.Scope, rule.Condition, rule.Action, rule.Value, rule.Status };
+        rule.Name = request.Name; rule.Type = request.Type; rule.BranchId = request.BranchId; rule.Scope = request.Scope;
+        rule.Condition = request.Condition; rule.Action = request.Action; rule.Priority = request.Priority; rule.ValidUntil = request.ValidUntil;
+        rule.Code = request.Code?.ToUpperInvariant(); rule.DiscountType = Enum.Parse<RuleDiscountType>(request.DiscountType); rule.Value = request.Value;
+        rule.MinQuantity = request.MinQuantity; rule.Sku = request.Sku?.ToUpperInvariant();
+        // Editing a live rule's terms (discount %, threshold, code…) re-opens the same manager
+        // sign-off the rule needed to go live in the first place — otherwise "Edit" would be a
+        // silent side door around the self/cross-approval control on the status endpoint above.
+        if (rule.Status == PricingRuleStatus.Active) rule.Status = PricingRuleStatus.PendingApproval;
+
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("finance", "PRICING_RULE_UPDATED", id.ToString(), oldValue: before, newValue: request, cancellationToken: ct);
+        if (rule.BranchId is not null) await db.Entry(rule).Reference(r => r.Branch).LoadAsync(ct);
+        return Ok(Map(rule));
+    }
+
+    [HttpDelete("{id:int}")]
+    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    {
+        var rule = await db.PricingRules.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (rule is null) return NotFound();
+        // Safe as a hard delete, unlike most other entities in this app: nothing references a
+        // PricingRule by id (OrderLine/QuotationLine only ever copy its Value onto DiscountPct at
+        // the moment of sale), so removing it can't orphan a foreign key or corrupt sales history.
+        db.PricingRules.Remove(rule);
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("finance", "PRICING_RULE_DELETED", id.ToString(), oldValue: new { rule.Name, rule.Type, rule.Scope }, cancellationToken: ct);
+        return NoContent();
     }
 
     private static PricingRuleDto Map(PricingRule r) => new(

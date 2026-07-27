@@ -4,6 +4,7 @@ using EcrBuilding.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EcrBuilding.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260727081749_AddQuotationEditingDiscount")]
+    partial class AddQuotationEditingDiscount
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -3465,129 +3468,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.ToTable("StockBatches");
                 });
 
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.StockCount", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int?>("ApprovedByUserId")
-                        .HasColumnType("int");
-
-                    b.Property<bool>("AutoFillUncounted")
-                        .HasColumnType("tinyint(1)");
-
-                    b.Property<bool>("BlindCount")
-                        .HasColumnType("tinyint(1)");
-
-                    b.Property<int?>("CategoryId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("CountNo")
-                        .IsRequired()
-                        .HasColumnType("varchar(255)");
-
-                    b.Property<int?>("CountedByUserId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("longtext");
-
-                    b.Property<DateTime>("ScheduledFor")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("Scope")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
-
-                    b.Property<DateTime?>("StartedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
-
-                    b.Property<int?>("StockAdjustmentId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<int>("WarehouseId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ApprovedByUserId");
-
-                    b.HasIndex("CategoryId");
-
-                    b.HasIndex("CountNo")
-                        .IsUnique();
-
-                    b.HasIndex("CountedByUserId");
-
-                    b.HasIndex("StockAdjustmentId");
-
-                    b.HasIndex("WarehouseId");
-
-                    b.ToTable("StockCounts");
-                });
-
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.StockCountLine", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime?>("CountedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<int?>("CountedByUserId")
-                        .HasColumnType("int");
-
-                    b.Property<decimal?>("CountedQty")
-                        .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<string>("Note")
-                        .HasColumnType("longtext");
-
-                    b.Property<int>("ProductId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("StockCountId")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("SystemQty")
-                        .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal>("UnitCost")
-                        .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProductId");
-
-                    b.HasIndex("StockCountId");
-
-                    b.ToTable("StockCountLines");
-                });
-
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockLevel", b =>
                 {
                     b.Property<int>("Id")
@@ -5389,64 +5269,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Warehouse");
                 });
 
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.StockCount", b =>
-                {
-                    b.HasOne("EcrBuilding.Domain.Entities.User", "ApprovedBy")
-                        .WithMany()
-                        .HasForeignKey("ApprovedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("EcrBuilding.Domain.Entities.Category", "Category")
-                        .WithMany()
-                        .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("EcrBuilding.Domain.Entities.User", "CountedBy")
-                        .WithMany()
-                        .HasForeignKey("CountedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("EcrBuilding.Domain.Entities.StockAdjustment", "StockAdjustment")
-                        .WithMany()
-                        .HasForeignKey("StockAdjustmentId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("EcrBuilding.Domain.Entities.Warehouse", "Warehouse")
-                        .WithMany()
-                        .HasForeignKey("WarehouseId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("ApprovedBy");
-
-                    b.Navigation("Category");
-
-                    b.Navigation("CountedBy");
-
-                    b.Navigation("StockAdjustment");
-
-                    b.Navigation("Warehouse");
-                });
-
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.StockCountLine", b =>
-                {
-                    b.HasOne("EcrBuilding.Domain.Entities.Product", "Product")
-                        .WithMany()
-                        .HasForeignKey("ProductId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("EcrBuilding.Domain.Entities.StockCount", "StockCount")
-                        .WithMany("Lines")
-                        .HasForeignKey("StockCountId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Product");
-
-                    b.Navigation("StockCount");
-                });
-
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockLevel", b =>
                 {
                     b.HasOne("EcrBuilding.Domain.Entities.Product", "Product")
@@ -5733,11 +5555,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockAdjustment", b =>
-                {
-                    b.Navigation("Lines");
-                });
-
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.StockCount", b =>
                 {
                     b.Navigation("Lines");
                 });

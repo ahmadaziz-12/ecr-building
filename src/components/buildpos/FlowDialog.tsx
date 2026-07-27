@@ -282,7 +282,7 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
   if (field.type === "select") {
     return (
       <select className={base} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Select…</option>
+        <option value="">{field.placeholder ?? "Select…"}</option>
         {field.options?.map((o) => (
           <option key={o} value={o}>
             {o}
@@ -398,13 +398,15 @@ export function FlowDialog({
   }, [steps]);
   const { data: liveBranches } = useBranches(open && optionsSources.has("branches"));
   const { data: liveTerminals } = useTerminals(open && optionsSources.has("terminals"));
-  const { data: liveCategories } = useCategories(open && optionsSources.has("categories"));
+  const { data: liveCategories } = useCategories(
+    open && (optionsSources.has("topCategories") || optionsSources.has("subcategories")),
+  );
   const { data: liveUsers } = useUsers(open && optionsSources.has("users"));
   const { data: liveRoles } = useRoles(open && optionsSources.has("roles"));
-  const liveOptions: Record<NonNullable<Field["optionsSource"]>, string[] | undefined> = {
+  const liveOptions: Record<Exclude<NonNullable<Field["optionsSource"]>, "subcategories">, string[] | undefined> = {
     branches: liveBranches?.map((b) => b.nameEn),
     terminals: liveTerminals?.map((t) => t.code),
-    categories: liveCategories?.map((c) => c.nameEn),
+    topCategories: liveCategories?.filter((c) => c.parentId == null).map((c) => c.nameEn),
     users: liveUsers?.map((u) => u.name),
     roles: liveRoles?.map((r) => r.name),
   };
@@ -412,11 +414,27 @@ export function FlowDialog({
   function resolveField(f: Field): Field {
     const override = fieldOverrides?.[f.name];
     let merged = override ? { ...f, ...override } : f;
-    if (merged.optionsSource) {
+    if (merged.optionsSource === "subcategories") {
+      // Narrowed live by whichever top-level category is currently picked in the sibling
+      // `dependsOn` field — e.g. picking "Electric" lists only Electric's own subcategories.
+      const parentName = merged.dependsOn ? values[merged.dependsOn] : undefined;
+      const parent = parentName
+        ? liveCategories?.find((c) => c.parentId == null && c.nameEn.toLowerCase() === parentName.toLowerCase())
+        : undefined;
+      const children = parent ? (liveCategories?.filter((c) => c.parentId === parent.id).map((c) => c.nameEn) ?? []) : [];
+      const placeholder = !parentName
+        ? "Pick a category first"
+        : children.length === 0
+          ? `No subcategories for "${parentName}" — leave blank`
+          : merged.placeholder;
+      merged = { ...merged, options: [...(merged.options ?? []), ...children], placeholder };
+    } else if (merged.optionsSource) {
       // Static options on an optionsSource field are special leading entries ("Unassigned",
-      // "— None (top level) —"); the real choices come from the live list.
+      // "— This is a Main Category —"); the real choices come from the live list.
       merged = { ...merged, options: [...(merged.options ?? []), ...(liveOptions[merged.optionsSource] ?? [])] };
     }
+    // Applies to every source (static, live, or subcategory-narrowed): a field that must not
+    // offer whatever a sibling already holds — e.g. Stock Transfer's "to" can't be the "from".
     if (merged.excludeValueOf && merged.options) {
       const excluded = values[merged.excludeValueOf];
       if (excluded) merged = { ...merged, options: merged.options.filter((o) => o !== excluded) };
@@ -454,18 +472,20 @@ export function FlowDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [steps, values, fieldOverrides]);
 
-  // Setting a field's value also clears any OTHER field whose excludeValueOf points at it and
-  // currently holds the same value — e.g. changing Stock Transfer's "from" away from what "to"
-  // was already set to would otherwise leave "to" showing a stale selection its own option list
-  // no longer contains.
+  // Setting a field's value cascades to the two kinds of field that depend on it, because both
+  // can be left holding a selection their own option list no longer offers:
+  //  • excludeValueOf — e.g. changing Stock Transfer's "from" to whatever "to" already held would
+  //    leave "to" showing a value it now excludes.
+  //  • dependsOn — e.g. Subcategory is narrowed by Category, so changing Category strands a
+  //    subcategory that doesn't belong under the new parent.
+  // Both sweep every step, not just the current one, since a dependent field can live further on.
   function handleFieldChange(fieldName: string, v: string) {
     setValues((s) => {
       const next = { ...s, [fieldName]: v };
       for (const step of steps) {
         for (const field of step.fields) {
-          if (field.excludeValueOf === fieldName && next[field.name] === v) {
-            next[field.name] = "";
-          }
+          if (field.excludeValueOf === fieldName && next[field.name] === v) next[field.name] = "";
+          if (field.dependsOn === fieldName) next[field.name] = "";
         }
       }
       return next;

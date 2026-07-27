@@ -54,9 +54,14 @@ export type Field = {
   placeholder?: string;
   options?: string[];
   /** Pull this select's options live inside FlowDialog (branches → nameEn, terminals → code,
-   *  categories → nameEn, users → name, roles → name). Any static `options` are kept as leading
-   *  entries, so restrict them to special placeholders like "Unassigned" / "— None (top level) —". */
-  optionsSource?: "branches" | "terminals" | "categories" | "users" | "roles";
+   *  topCategories → top-level category names only, subcategories → children of whichever
+   *  top-level category is currently picked in `dependsOn`, users → name, roles → name). Any
+   *  static `options` are kept as leading entries, so restrict them to special placeholders like
+   *  "Unassigned" / "— This is a Main Category —". */
+  optionsSource?: "branches" | "terminals" | "topCategories" | "subcategories" | "users" | "roles";
+  /** For optionsSource "subcategories": the name of the sibling field whose live value (a
+   *  top-level category name) narrows this select's options to that category's children. */
+  dependsOn?: string;
   hint?: string;
   required?: boolean;
   full?: boolean;
@@ -280,7 +285,16 @@ export const flows: Record<string, Flow> = {
             name: "category",
             label: "Category",
             type: "select",
-            optionsSource: "categories",
+            optionsSource: "topCategories",
+            required: true,
+          },
+          {
+            name: "subcategory",
+            label: "Subcategory (optional)",
+            type: "select",
+            optionsSource: "subcategories",
+            dependsOn: "category",
+            hint: "Pick one if this product belongs to a specific subcategory, e.g. \"Pipe\" under \"Electric\".",
           },
           { name: "brand", label: "Brand", type: "text", placeholder: "e.g. Al Noor" },
         ],
@@ -341,7 +355,16 @@ export const flows: Record<string, Flow> = {
             name: "category",
             label: "Category",
             type: "select",
-            optionsSource: "categories",
+            optionsSource: "topCategories",
+            required: true,
+          },
+          {
+            name: "subcategory",
+            label: "Subcategory (optional)",
+            type: "select",
+            optionsSource: "subcategories",
+            dependsOn: "category",
+            hint: "Pick one if this product belongs to a specific subcategory, e.g. \"Pipe\" under \"Electric\".",
           },
           { name: "brand", label: "Brand", type: "text" },
         ],
@@ -398,10 +421,11 @@ export const flows: Record<string, Flow> = {
           { name: "nameAr", label: "Name (Arabic)", type: "text" },
           {
             name: "parent",
-            label: "Parent Category",
+            label: "Belongs Under (optional)",
             type: "select",
-            options: ["— None (top level) —"],
-            optionsSource: "categories",
+            options: ["— This is a Main Category —"],
+            optionsSource: "topCategories",
+            hint: "Pick an existing category to make this a subcategory of it — e.g. pick \"Electric\" to create \"Pipe\" as Electric → Pipe.",
           },
           {
             name: "attributes",
@@ -451,10 +475,11 @@ export const flows: Record<string, Flow> = {
           { name: "nameAr", label: "Name (Arabic)", type: "text" },
           {
             name: "parent",
-            label: "Parent Category",
+            label: "Belongs Under (optional)",
             type: "select",
-            options: ["— None (top level) —"],
-            optionsSource: "categories",
+            options: ["— This is a Main Category —"],
+            optionsSource: "topCategories",
+            hint: "Pick an existing category to make this a subcategory of it — e.g. pick \"Electric\" to create \"Pipe\" as Electric → Pipe.",
           },
           {
             name: "attributes",
