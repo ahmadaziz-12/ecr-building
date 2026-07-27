@@ -31,17 +31,21 @@ public class SettingsController(AppDbContext db, IAuditService audit) : Controll
     public async Task<ActionResult<SettingDto>> Upsert(UpsertSettingRequest request, CancellationToken ct)
     {
         var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var setting = await db.Settings.FirstOrDefaultAsync(s => s.Category == request.Category && s.Group == request.Group && s.Key == request.Key, ct);
+        // BranchId is part of the identity of a setting row, not just a value on it — leaving it out
+        // of the lookup meant saving a SECOND branch's override for the same Category/Group/Key
+        // overwrote the first branch's row in place instead of creating an independent one (verified:
+        // Riyadh's ReturnWindow.StandardDays=10 was silently replaced by Jeddah's =77 on the same row).
+        var setting = await db.Settings.FirstOrDefaultAsync(
+            s => s.Category == request.Category && s.Group == request.Group && s.Key == request.Key && s.BranchId == request.BranchId, ct);
 
         if (setting is null)
         {
-            setting = new Setting { Category = request.Category, Group = request.Group, Key = request.Key };
+            setting = new Setting { Category = request.Category, Group = request.Group, Key = request.Key, BranchId = request.BranchId };
             db.Settings.Add(setting);
         }
 
         setting.Value = request.Value;
         setting.Scope = Enum.Parse<SettingScope>(request.Scope);
-        setting.BranchId = request.BranchId;
         setting.EffectiveFrom = request.EffectiveFrom ?? DateTime.UtcNow;
         setting.ChangedByUserId = userId;
         await db.SaveChangesAsync(ct);

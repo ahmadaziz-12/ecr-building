@@ -23,9 +23,12 @@ const highlights = [
 
 function LandingPage() {
   const navigate = useNavigate();
-  const { login, user } = useAuth();
+  const { login, pinLogin, user } = useAuth();
   const [email, setEmail] = useState("owner@ecr-building.local");
   const [password, setPassword] = useState("Passw0rd!");
+  // BRD §10.2 (Module 15): PIN quick sign-in for register staff — same account, faster credential.
+  const [mode, setMode] = useState<"password" | "pin">("password");
+  const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
 
   // Navigate only once the auth context has actually picked up the new session —
@@ -37,13 +40,13 @@ function LandingPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!email || !password) {
-      toast.error("Enter your email and password");
+    if (!email || (mode === "password" ? !password : !pin)) {
+      toast.error(mode === "password" ? "Enter your email and password" : "Enter your email and PIN");
       return;
     }
     setLoading(true);
     try {
-      const loggedInUser = await login(email, password);
+      const loggedInUser = mode === "password" ? await login(email, password) : await pinLogin(email, pin);
       toast.success("Welcome back", { description: `Signed in as ${loggedInUser.name} (${loggedInUser.role})` });
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Unable to sign in");
@@ -153,32 +156,74 @@ function LandingPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password" className="text-xs font-medium">
-                    Password
-                  </Label>
-                  <button
-                    type="button"
-                    className="text-[11px] font-medium text-brand hover:underline"
-                    onClick={() => toast.info("Contact your admin to reset your password.")}
-                  >
-                    Forgot?
-                  </button>
-                </div>
-                <div className="relative">
-                  <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    id="password"
-                    type="password"
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="h-11 pl-9"
-                    placeholder="••••••••"
-                  />
-                </div>
+              {/* BRD §10.2: register staff sign in with their PIN; back-office keeps password. */}
+              <div className="grid grid-cols-2 gap-1 rounded-lg bg-canvas p-1 text-xs font-medium">
+                <button
+                  type="button"
+                  onClick={() => setMode("password")}
+                  className={`rounded-md px-2 py-1.5 transition ${mode === "password" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  Password
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode("pin")}
+                  className={`rounded-md px-2 py-1.5 transition ${mode === "pin" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  PIN (register staff)
+                </button>
               </div>
+
+              {mode === "password" ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password" className="text-xs font-medium">
+                      Password
+                    </Label>
+                    <button
+                      type="button"
+                      className="text-[11px] font-medium text-brand hover:underline"
+                      onClick={() => toast.info("Contact your admin to reset your password.")}
+                    >
+                      Forgot?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="h-11 pl-9"
+                      placeholder="••••••••"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="pin" className="text-xs font-medium">
+                      PIN
+                    </Label>
+                    <span className="text-[11px] text-muted-foreground">Set it under your profile menu → Set PIN</span>
+                  </div>
+                  <div className="relative">
+                    <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="pin"
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      value={pin}
+                      onChange={(e) => setPin(e.target.value)}
+                      className="h-11 pl-9 font-mono tracking-[0.3em]"
+                      placeholder="••••••"
+                    />
+                  </div>
+                </div>
+              )}
 
               <label className="flex items-center gap-2 text-xs text-muted-foreground">
                 <input type="checkbox" defaultChecked className="h-3.5 w-3.5 rounded border-black/20 text-brand" />

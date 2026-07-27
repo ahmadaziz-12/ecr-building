@@ -38,3 +38,7 @@ public record StockAdjustmentLineDto(int ProductId, string Sku, decimal SystemQt
 public record StockAdjustmentDto(int Id, string Reason, int WarehouseId, string WarehouseName, DateTime Date, string? ApproverName, bool EvidenceAttached, string Status, IReadOnlyList<StockAdjustmentLineDto> Lines);
 public record CreateStockAdjustmentRequest(string Reason, int WarehouseId, DateTime Date, int? ApproverUserId, bool EvidenceAttached, List<AdjustmentLineInput> Lines);
 public record AdjustmentLineInput(int ProductId, decimal SystemQty, decimal CountedQty, string? Note);
+
+public record StockMovementDto(
+    int Id, DateTime Date, string Type, int ProductId, string Sku, string ProductName,
+    int BranchId, string BranchName, decimal Qty, string Direction, string? RefTable, string? RefId, string? UserName);

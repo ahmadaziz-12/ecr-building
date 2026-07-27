@@ -21,7 +21,8 @@ export function SessionLogsPanel() {
     terminalId: terminalId !== "all" ? Number(terminalId) : undefined,
     status: status !== "all" ? status : undefined,
     dateFrom: dateFrom || undefined,
-    dateTo: dateTo || undefined,
+    // the backend compares OpenedAt <= dateTo, so send end-of-day to include the chosen day
+    dateTo: dateTo ? `${dateTo}T23:59:59` : undefined,
   });
 
   return (

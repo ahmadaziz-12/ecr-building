@@ -82,7 +82,10 @@ export function ReceiptDialog({ order, terminalId, onClose }: { order: OrderDto 
           <div className="mt-2 space-y-1 border-b border-dashed border-black/20 pb-2">
             {order.lines.map((l) => (
               <div key={l.productId} className="flex justify-between gap-2">
-                <span className="truncate">{l.productName} x{l.qty}</span>
+                <span className="truncate">
+                  {l.productName} x{l.qty}{l.uom ? ` ${l.uom}` : ""}
+                  {l.lengthM != null && l.widthM != null ? ` (${l.lengthM}×${l.widthM}m)` : ""}
+                </span>
                 <span className="flex-none">{money(l.lineTotal)}</span>
               </div>
             ))}
@@ -103,6 +106,21 @@ export function ReceiptDialog({ order, terminalId, onClose }: { order: OrderDto 
               <div key={i} className="flex justify-between"><span>{p.method}</span><span>{money(p.amount)}</span></div>
             ))}
           </div>
+
+          {order.loyaltyPointsBalance !== null && (
+            <div className="mt-2 space-y-0.5 border-b border-dashed border-black/20 pb-2">
+              {order.loyaltyPointsRedeemed !== null && order.loyaltyPointsRedeemed > 0 && (
+                <div className="flex justify-between"><span>Points redeemed</span><span>-{order.loyaltyPointsRedeemed}</span></div>
+              )}
+              <div className="flex justify-between"><span>Points earned</span><span>+{order.loyaltyPointsEarned ?? 0}</span></div>
+              <div className="flex justify-between font-semibold"><span>Points balance</span><span>{order.loyaltyPointsBalance}</span></div>
+              {order.loyaltyNextTierThreshold !== null && (
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Next tier at</span><span>{order.loyaltyNextTierThreshold} pts</span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="mt-3 flex flex-col items-center gap-1">
             {invoice?.qrCodeBase64 ? (

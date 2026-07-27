@@ -88,9 +88,15 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
+                    b.Property<string>("Payload")
+                        .HasColumnType("longtext");
+
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasColumnType("longtext");
+
+                    b.Property<int?>("RelatedDeliveryOrderId")
+                        .HasColumnType("int");
 
                     b.Property<int?>("RelatedOrderId")
                         .HasColumnType("int");
@@ -119,6 +125,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("ApproverUserId");
 
                     b.HasIndex("BranchId");
+
+                    b.HasIndex("RelatedDeliveryOrderId");
 
                     b.HasIndex("RelatedOrderId");
 
@@ -507,6 +515,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("longtext");
 
+                    b.Property<decimal>("LoyaltyAccrualMultiplier")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<string>("NameAr")
                         .HasColumnType("longtext");
 
@@ -528,6 +540,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("varchar(64)");
+
+                    b.Property<decimal>("SurplusRestockingFeePct")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
@@ -719,6 +735,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AccountManagerUserId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Address")
                         .HasColumnType("longtext");
 
@@ -735,6 +754,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<int?>("CreditTermDays")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("DateOfBirth")
+                        .HasColumnType("datetime(6)");
+
                     b.Property<string>("District")
                         .HasColumnType("longtext");
 
@@ -749,6 +771,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("LoyaltyLifetimePoints")
                         .HasColumnType("int");
+
+                    b.Property<decimal>("LoyaltyLifetimeSpend")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<int>("LoyaltyPoints")
                         .HasColumnType("int");
@@ -772,6 +798,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<string>("Phone")
                         .HasColumnType("longtext");
 
+                    b.Property<bool>("PriorityBilling")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<string>("ProjectName")
                         .HasColumnType("longtext");
 
@@ -792,6 +821,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasColumnType("longtext");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AccountManagerUserId");
 
                     b.ToTable("Customers");
                 });
@@ -1801,6 +1832,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<int>("CashierUserId")
                         .HasColumnType("int");
 
+                    b.Property<string>("ClientRequestId")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
@@ -1826,6 +1861,12 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("varchar(64)");
+
+                    b.Property<string>("PoReference")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("ProjectCode")
+                        .HasColumnType("longtext");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -1856,6 +1897,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("BranchId");
 
                     b.HasIndex("CashierUserId");
+
+                    b.HasIndex("ClientRequestId")
+                        .IsUnique();
 
                     b.HasIndex("CustomerId");
 
@@ -1901,7 +1945,14 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("BundleId")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("DiscountPct")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("LengthM")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
@@ -1919,15 +1970,29 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<decimal>("StockQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<decimal>("UnitPrice")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Uom")
+                        .IsRequired()
+                        .HasColumnType("longtext");
 
                     b.Property<decimal>("VatRate")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<decimal?>("WidthM")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("BundleId");
 
                     b.HasIndex("OrderId");
 
@@ -2155,6 +2220,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("longtext");
 
+                    b.Property<int?>("BranchId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Code")
                         .HasColumnType("longtext");
 
@@ -2165,10 +2233,17 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<string>("DiscountType")
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("varchar(64)");
+
+                    b.Property<decimal?>("MinQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -2179,6 +2254,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Scope")
                         .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Sku")
                         .HasColumnType("longtext");
 
                     b.Property<string>("Status")
@@ -2201,6 +2279,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasColumnType("decimal(18,4)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BranchId");
 
                     b.ToTable("PricingRules");
                 });
@@ -2260,6 +2340,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<string>("Barcode")
                         .HasColumnType("longtext");
 
+                    b.Property<string>("BinLocation")
+                        .HasColumnType("longtext");
+
                     b.Property<string>("Brand")
                         .HasColumnType("longtext");
 
@@ -2275,6 +2358,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("ImageUrl")
                         .HasColumnType("longtext");
+
+                    b.Property<bool>("IsCutToSize")
+                        .HasColumnType("tinyint(1)");
 
                     b.Property<string>("NameAr")
                         .HasColumnType("longtext");
@@ -2313,6 +2399,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("longtext");
 
+                    b.Property<int?>("SupplierId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
 
@@ -2331,7 +2420,36 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("Sku")
                         .IsUnique();
 
+                    b.HasIndex("SupplierId");
+
                     b.ToTable("Products");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductAttribute", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("ProductAttributes");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductBundle", b =>
@@ -2365,6 +2483,11 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("varchar(64)");
 
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
 
@@ -2374,6 +2497,33 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("ProductBundles");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductUomConversion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("FactorToStock")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Uom")
+                        .IsRequired()
+                        .HasColumnType("varchar(255)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId", "Uom")
+                        .IsUnique();
+
+                    b.ToTable("ProductUomConversions");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.PurchaseOrder", b =>
@@ -2470,7 +2620,11 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
-                    b.Property<int>("WarehouseId")
+                    b.Property<string>("Uom")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<int?>("WarehouseId")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
@@ -2509,6 +2663,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<int?>("CustomerId")
                         .HasColumnType("int");
 
+                    b.Property<string>("CustomerReference")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
                     b.Property<decimal>("DiscountTotal")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
@@ -2518,6 +2676,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<string>("Notes")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("ProjectCode")
+                        .IsRequired()
                         .HasColumnType("longtext");
 
                     b.Property<string>("QuoteNo")
@@ -2731,12 +2893,48 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<int?>("CustomerId")
                         .HasColumnType("int");
 
+                    b.Property<string>("DamageReason")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<string>("DgrnNo")
+                        .HasColumnType("longtext");
+
+                    b.Property<int?>("ExchangeOrderId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("GrossRefund")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("NetCashback")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<int?>("OrderId")
                         .HasColumnType("int");
+
+                    b.Property<string>("PhotoReference")
+                        .HasColumnType("longtext");
 
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasColumnType("longtext");
+
+                    b.Property<string>("RefundMethod")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("RefundSplitJson")
+                        .HasColumnType("longtext");
+
+                    b.Property<decimal>("RestockingFeeAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("RestockingFeePct")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<string>("ReturnNo")
                         .IsRequired()
@@ -2755,11 +2953,17 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
 
+                    b.Property<decimal>("VatReversal")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ApprovedByUserId");
 
                     b.HasIndex("CustomerId");
+
+                    b.HasIndex("ExchangeOrderId");
 
                     b.HasIndex("OrderId");
 
@@ -2781,6 +2985,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<int?>("OrderLineId")
+                        .HasColumnType("int");
+
                     b.Property<int>("ProductId")
                         .HasColumnType("int");
 
@@ -2791,7 +2998,21 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<int>("ReturnId")
                         .HasColumnType("int");
 
+                    b.Property<decimal>("StockQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("UnitPricePaid")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("VatRate")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("OrderLineId");
 
                     b.HasIndex("ProductId");
 
@@ -2910,11 +3131,42 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<bool>("CanAuthorizeDamagedReturns")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("CanAuthorizeStandardReturnWithoutReceipt")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("CanConfigureReturnRulesAndFees")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("CanManagePriceListAndUsers")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("CanManageSystemConfiguration")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("CanOverrideItemPrice")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("CanViewXReport")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("CanViewZReport")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("CanVoidTransactions")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
                     b.Property<string>("Description")
                         .HasColumnType("longtext");
+
+                    b.Property<decimal?>("DiscountCeilingPercent")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<bool>("IsSystem")
                         .HasColumnType("tinyint(1)");
@@ -2927,6 +3179,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("varchar(64)");
+
+                    b.Property<decimal?>("SurplusReturnCeilingAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
@@ -3243,6 +3499,53 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.ToTable("StockLevels");
                 });
 
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.StockMovement", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BranchId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Qty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("RefId")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("RefTable")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("ProductId");
+
+                    b.ToTable("StockMovements");
+                });
+
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockTransfer", b =>
                 {
                     b.Property<int>("Id")
@@ -3428,6 +3731,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("longtext");
 
+                    b.Property<int?>("BranchId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasColumnType("varchar(255)");
@@ -3462,6 +3768,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetime(6)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BranchId");
 
                     b.HasIndex("Code")
                         .IsUnique();
@@ -4049,6 +4357,11 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("EcrBuilding.Domain.Entities.DeliveryOrder", "RelatedDeliveryOrder")
+                        .WithMany()
+                        .HasForeignKey("RelatedDeliveryOrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("EcrBuilding.Domain.Entities.Order", "RelatedOrder")
                         .WithMany()
                         .HasForeignKey("RelatedOrderId");
@@ -4062,6 +4375,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Approver");
 
                     b.Navigation("Branch");
+
+                    b.Navigation("RelatedDeliveryOrder");
 
                     b.Navigation("RelatedOrder");
 
@@ -4193,6 +4508,16 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Employee");
 
                     b.Navigation("SupersededBy");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.Customer", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.User", "AccountManager")
+                        .WithMany()
+                        .HasForeignKey("AccountManagerUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AccountManager");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.DeliveryHistory", b =>
@@ -4515,6 +4840,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.OrderLine", b =>
                 {
+                    b.HasOne("EcrBuilding.Domain.Entities.ProductBundle", "Bundle")
+                        .WithMany()
+                        .HasForeignKey("BundleId");
+
                     b.HasOne("EcrBuilding.Domain.Entities.Order", "Order")
                         .WithMany("Lines")
                         .HasForeignKey("OrderId")
@@ -4526,6 +4855,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ProductId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Bundle");
 
                     b.Navigation("Order");
 
@@ -4604,6 +4935,15 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Subscription");
                 });
 
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.PricingRule", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId");
+
+                    b.Navigation("Branch");
+                });
+
             modelBuilder.Entity("EcrBuilding.Domain.Entities.PrintJob", b =>
                 {
                     b.HasOne("EcrBuilding.Domain.Entities.Order", "Order")
@@ -4627,7 +4967,35 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("EcrBuilding.Domain.Entities.Supplier", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId");
+
                     b.Navigation("Category");
+
+                    b.Navigation("Supplier");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductAttribute", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.Product", "Product")
+                        .WithMany("Attributes")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Product");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductUomConversion", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.Product", "Product")
+                        .WithMany("UomConversions")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Product");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.PurchaseOrder", b =>
@@ -4664,8 +5032,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasOne("EcrBuilding.Domain.Entities.Warehouse", "Warehouse")
                         .WithMany()
                         .HasForeignKey("WarehouseId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Branch");
 
@@ -4747,6 +5114,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("CustomerId");
 
+                    b.HasOne("EcrBuilding.Domain.Entities.Order", "ExchangeOrder")
+                        .WithMany()
+                        .HasForeignKey("ExchangeOrderId");
+
                     b.HasOne("EcrBuilding.Domain.Entities.Order", "Order")
                         .WithMany()
                         .HasForeignKey("OrderId");
@@ -4754,6 +5125,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("ApprovedBy");
 
                     b.Navigation("Customer");
+
+                    b.Navigation("ExchangeOrder");
 
                     b.Navigation("Order");
                 });
@@ -4908,6 +5281,25 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Warehouse");
                 });
 
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.StockMovement", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EcrBuilding.Domain.Entities.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("Product");
+                });
+
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockTransfer", b =>
                 {
                     b.HasOne("EcrBuilding.Domain.Entities.Branch", "FromBranch")
@@ -4960,9 +5352,15 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.TaxCode", b =>
                 {
+                    b.HasOne("EcrBuilding.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId");
+
                     b.HasOne("EcrBuilding.Domain.Entities.Account", "GlAccount")
                         .WithMany()
                         .HasForeignKey("GlAccountId");
+
+                    b.Navigation("Branch");
 
                     b.Navigation("GlAccount");
                 });
@@ -5108,9 +5506,13 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Product", b =>
                 {
+                    b.Navigation("Attributes");
+
                     b.Navigation("BranchStockLevels");
 
                     b.Navigation("StockLevels");
+
+                    b.Navigation("UomConversions");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductBundle", b =>

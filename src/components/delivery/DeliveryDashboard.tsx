@@ -16,8 +16,9 @@ export function DeliveryDashboard() {
 
   const kpis = useMemo(() => {
     const byStage = (s: Stage) => orders.filter((o) => o.stage === s);
-    const feesCollected = orders
-      .filter((o) => o.stage === "Delivered")
+    const todayStr = new Date().toDateString();
+    const deliveredToday = orders.filter((o) => o.stage === "Delivered" && o.deliveredAt !== undefined && new Date(o.deliveredAt).toDateString() === todayStr);
+    const feesCollected = deliveredToday
       .reduce((s, o) => s + o.charges.fee + o.charges.handling + o.charges.heavy + o.charges.vat - o.charges.discount, 0);
     const delivered = byStage("Delivered").length;
     const attempts = orders.filter((o) => ["Delivered", "Failed", "Returned to Branch", "Partially Delivered"].includes(o.stage)).length;
@@ -26,7 +27,7 @@ export function DeliveryDashboard() {
       assigned: byStage("Assigned").length,
       loading: byStage("Loading").length + byStage("Ready to Dispatch").length,
       dispatched: byStage("Dispatched").length,
-      delivered,
+      delivered: deliveredToday.length,
       failed: byStage("Failed").length + byStage("Returned to Branch").length,
       fees: feesCollected,
       onTime: attempts === 0 ? 100 : Math.round((delivered / attempts) * 100),

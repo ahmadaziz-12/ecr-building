@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Download } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader, KpiGrid } from "@/components/buildpos/PageHeader";
@@ -13,8 +13,9 @@ import { RequestApprovalDialog } from "./RequestApprovalDialog";
 import { PriceCheckDialog } from "./PriceCheckDialog";
 import { StockEnquiryDialog } from "./StockEnquiryDialog";
 import {
-  useApprovalRequests, useApproveApproval, useCashierShifts, useParkedSales, useRejectApproval, useResumeSale,
+  useApprovalRequests, useApproveApproval, useCashierShifts, useParkedSales, useRejectApproval,
 } from "@/lib/api/pos";
+import { RESUME_HOLD_KEY } from "@/components/buildpos/PosCheckout";
 import { useAuth } from "@/lib/api/auth";
 import { useBranches } from "@/lib/api/admin";
 
@@ -28,7 +29,7 @@ const FIELDS: FilterFieldDef[] = [
 ];
 
 function fmtSar(n: number): string {
-  return `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س`;
+  return `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
 }
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
@@ -54,7 +55,7 @@ export function CashierWorkspacePage() {
   const { data: shifts, refetch: refetchShifts } = useCashierShifts(true);
   const { data: parkedSales, refetch: refetchParked } = useParkedSales(effectiveBranchId ?? undefined);
   const { data: approvals, refetch: refetchApprovals } = useApprovalRequests(true);
-  const resumeSale = useResumeSale();
+  const navigate = useNavigate();
   const approveApproval = useApproveApproval();
   const rejectApproval = useRejectApproval();
 
@@ -99,13 +100,13 @@ export function CashierWorkspacePage() {
     { label: "Pending Approvals", value: pendingApprovals.length, sub: "Awaiting supervisor", tone: pendingApprovals.length > 0 ? ("warning" as const) : ("success" as const) },
   ];
 
-  async function resume(id: number, ticketNo: string) {
-    try {
-      await resumeSale.mutateAsync(id);
-      toast.success(`${ticketNo} released`, { description: "Re-add items in the checkout screen." });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not resume this sale.");
-    }
+  // Resume must LOAD the ticket into the register, never just release it — releasing deletes the
+  // parked lines server-side, so doing it here would destroy the ticket's contents. Hand the id to
+  // the checkout screen, which loads the cart and then releases the hold.
+  function resume(id: number, ticketNo: string) {
+    sessionStorage.setItem(RESUME_HOLD_KEY, String(id));
+    toast.success(`Resuming ${ticketNo}…`);
+    void navigate({ to: "/operate/pos-checkout" });
   }
 
   async function resolveApproval(id: number, approve: boolean) {

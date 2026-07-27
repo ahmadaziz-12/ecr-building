@@ -160,6 +160,30 @@ export function useCreateStockTransfer() {
   });
 }
 
+export type StockMovementDto = {
+  id: number; date: string; type: string; productId: number; sku: string; productName: string;
+  branchId: number; branchName: string; qty: number; direction: string; refTable: string | null; refId: string | null; userName: string | null;
+};
+export const useStockMovements = (enabled = true) => useQuery({ queryKey: ["inventory", "stock-movements"], queryFn: () => apiGet<StockMovementDto[]>("/api/inventory/stock-movements"), enabled });
+
+export function mapStockMovements(rows: StockMovementDto[]): LiveTable {
+  const totalByType = (type: string) => rows.filter((r) => r.type === type).reduce((sum, r) => sum + Math.abs(r.qty), 0);
+  return {
+    columns: ["Date", "Type", "SKU", "Product", "Branch", "Qty", "Direction", "Reference"],
+    statusCol: 6,
+    rows: rows.map((m) => [
+      new Date(m.date).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+      m.type, m.sku, m.productName, m.branchName, m.qty, m.direction, m.refTable && m.refId ? `${m.refTable} #${m.refId}` : "—",
+    ]),
+    kpis: [
+      { label: "Sold", value: totalByType("Sale").toLocaleString("en-US"), sub: "All branches", tone: "info" },
+      { label: "Returned", value: totalByType("Return (Restock)").toLocaleString("en-US"), sub: "Restocked to sellable", tone: "success" },
+      { label: "Damaged", value: totalByType("Return (Damage)").toLocaleString("en-US"), sub: "Quarantined", tone: "critical" },
+      { label: "Adjusted", value: totalByType("Adjustment").toLocaleString("en-US"), sub: "Stocktake variance", tone: "warning" },
+    ],
+  };
+}
+
 export type CreateStockAdjustmentLineInput = { productId: number; systemQty: number; countedQty: number; note?: string | null };
 export type CreateStockAdjustmentRequest = {
   reason: string; warehouseId: number; date: string; approverUserId?: number | null; evidenceAttached: boolean;
@@ -176,6 +200,7 @@ export function useCreateStockAdjustment() {
     mutationFn: (request: CreateStockAdjustmentRequest) => apiPost<StockAdjustmentDto>("/api/inventory/adjustments", request),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["inventory", "stock-levels"] });
+      queryClient.invalidateQueries({ queryKey: ["inventory", "branch-stock-levels"] });
       queryClient.invalidateQueries({ queryKey: ["catalog", "products"] });
     },
   });
@@ -192,13 +217,13 @@ export function mapStockLevels(rows: StockLevelDto[]): LiveTable {
     statusCol: 9,
     rows: rows.map((s) => [
       s.sku, s.productName, s.categoryName, s.warehouseName, s.onHand, s.reserved, s.available, s.reorderLevel,
-      s.value.toLocaleString("en-US", { maximumFractionDigits: 0 }), s.status,
+      s.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), s.status,
     ]),
     kpis: [
       { label: "Healthy", value: String(rows.filter((s) => s.status === "Healthy").length), sub: `${rows.length} lines`, tone: "success" },
       { label: "Low Stock", value: String(rows.filter((s) => s.status === "Low").length), sub: "Approaching reorder", tone: "warning" },
       { label: "Critical / Out", value: String(rows.filter((s) => s.status === "Critical").length), sub: "Reorder now", tone: "critical" },
-      { label: "Stock Value", value: `${rows.reduce((sum, s) => sum + s.value, 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س`, sub: "At cost, all warehouses", tone: "info" },
+      { label: "Stock Value", value: `${rows.reduce((sum, s) => sum + s.value, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`, sub: "At cost, all warehouses", tone: "info" },
     ],
   };
 }
@@ -209,13 +234,13 @@ export function mapBranchStockLevels(rows: BranchStockLevelDto[]): LiveTable {
     statusCol: 9,
     rows: rows.map((s) => [
       s.sku, s.productName, s.categoryName, s.branchName, s.onHand, s.reserved, s.available, s.reorderLevel,
-      s.value.toLocaleString("en-US", { maximumFractionDigits: 0 }), s.status,
+      s.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), s.status,
     ]),
     kpis: [
       { label: "Healthy", value: String(rows.filter((s) => s.status === "Healthy").length), sub: `${rows.length} lines`, tone: "success" },
       { label: "Low Stock", value: String(rows.filter((s) => s.status === "Low").length), sub: "Approaching reorder", tone: "warning" },
       { label: "Critical / Out", value: String(rows.filter((s) => s.status === "Critical").length), sub: "Can't be sold right now", tone: "critical" },
-      { label: "Stock Value", value: `${rows.reduce((sum, s) => sum + s.value, 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س`, sub: "At cost, all branches", tone: "info" },
+      { label: "Stock Value", value: `${rows.reduce((sum, s) => sum + s.value, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`, sub: "At cost, all branches", tone: "info" },
     ],
   };
 }
@@ -249,13 +274,13 @@ export function mapWarehouses(rows: WarehouseDto[]): LiveTable {
       const utilization = capacity > 0 ? `${Math.round((filled / capacity) * 100)}%` : "—";
       return [
         w.code, w.name, w.branchName, w.type, w.bins.length, utilization,
-        w.stockValue.toLocaleString("en-US", { maximumFractionDigits: 0 }), w.skuCount, w.lowStockCount,
+        w.stockValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), w.skuCount, w.lowStockCount,
         w.activeBatchCount, w.openTransfersOut, w.openTransfersIn, w.status,
       ];
     }),
     kpis: [
       { label: "Warehouses", value: String(rows.length), sub: `${rows.filter((w) => w.status === "Active").length} active`, tone: "info" },
-      { label: "Total Stock Value", value: `${rows.reduce((s, w) => s + w.stockValue, 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س`, sub: "At cost, all warehouses", tone: "info" },
+      { label: "Total Stock Value", value: `${rows.reduce((s, w) => s + w.stockValue, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`, sub: "At cost, all warehouses", tone: "info" },
       { label: "Low Stock Lines", value: String(rows.reduce((s, w) => s + w.lowStockCount, 0)), sub: "Across all warehouses", tone: "warning" },
       { label: "Open Transfers", value: String(rows.reduce((s, w) => s + w.openTransfersOut + w.openTransfersIn, 0)), sub: "In + out, not yet received", tone: "info" },
     ],
@@ -269,13 +294,13 @@ export function mapStockTransfers(rows: StockTransferDto[]): LiveTable {
     ids: rows.map((t) => t.id),
     rows: rows.map((t) => [
       t.transferNo, t.sourceLabel, t.destLabel, t.lines.length, t.lines.reduce((s, l) => s + l.qty, 0),
-      t.totalValue.toLocaleString("en-US", { maximumFractionDigits: 0 }), t.approverName ?? "—", fmtDate(t.eta), t.status,
+      t.totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), t.approverName ?? "—", fmtDate(t.eta), t.status,
     ]),
     kpis: [
       { label: "Open Transfers", value: String(rows.filter((t) => t.status !== "Received" && t.status !== "Cancelled").length), sub: `${rows.filter((t) => t.status === "InTransit").length} in transit`, tone: "info" },
       { label: "Awaiting Approval", value: String(rows.filter((t) => t.status === "PendingApproval").length), sub: "Manager sign-off", tone: "warning" },
       { label: "Discrepancies", value: String(rows.filter((t) => t.status === "Received" && t.lines.some((l) => l.discrepancy !== 0)).length), sub: "Short or over-received", tone: "critical" },
-      { label: "Value In Transit", value: `${rows.filter((t) => t.status === "InTransit").reduce((s, t) => s + t.totalValue, 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س`, sub: "Currently moving", tone: "info" },
+      { label: "Value In Transit", value: `${rows.filter((t) => t.status === "InTransit").reduce((s, t) => s + t.totalValue, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`, sub: "Currently moving", tone: "info" },
     ],
   };
 }

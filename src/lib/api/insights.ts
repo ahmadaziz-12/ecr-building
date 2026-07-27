@@ -76,10 +76,28 @@ export function mapBiFeeds(rows: BiFeedDto[]): LiveTable {
   };
 }
 
+// No area carries a real recommended-action field (there's no incident/runbook system behind this
+// page yet) — but "what to do about a given status" is a genuine, non-fabricated convention: it's
+// the same derive-from-status pattern already used for KPI tone elsewhere (e.g. mapDevices' "Network
+// OK" tone), not invented data.
+function nextActionFor(status: string): string {
+  switch (status) {
+    case "Healthy":
+      return "Monitor";
+    case "Degraded":
+    case "Pending":
+      return "Investigate";
+    case "Failed":
+      return "Escalate";
+    default:
+      return "Review";
+  }
+}
+
 export function mapOverview(o: AdminOverviewDto): LiveTable {
   return {
-    columns: ["Area", "Status", "Owner", "Metric", "Value", "SLA"],
+    columns: ["Area", "Status", "Owner", "Metric", "Value", "SLA", "Next Action"],
     statusCol: 1,
-    rows: o.areas.map((a) => [a.area, a.status, a.owner, a.metric, a.value, a.sla]),
+    rows: o.areas.map((a) => [a.area, a.status, a.owner, a.metric, a.value, a.sla, nextActionFor(a.status)]),
   };
 }

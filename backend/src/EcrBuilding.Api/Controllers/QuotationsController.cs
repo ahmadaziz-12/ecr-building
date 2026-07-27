@@ -46,6 +46,9 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
     public async Task<ActionResult<QuotationDto>> Create(CreateQuotationRequest request, CancellationToken ct)
     {
         if (request.Lines.Count == 0) return BadRequest(new { error = "A quotation needs at least one line." });
+        // BRD §3.4: project code and customer reference are MANDATORY on quotations.
+        if (string.IsNullOrWhiteSpace(request.ProjectCode)) return BadRequest(new { error = "A project code is required on every quotation." });
+        if (string.IsNullOrWhiteSpace(request.CustomerReference)) return BadRequest(new { error = "A customer reference is required on every quotation." });
 
         var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         var customer = request.CustomerId is null ? null : await db.Customers.FindAsync([request.CustomerId], ct);
@@ -57,7 +60,9 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
             BranchId = request.BranchId,
             CustomerId = request.CustomerId,
             CreatedByUserId = cashierId,
-            ValidUntil = request.ValidUntil ?? DateTime.UtcNow.AddDays(14),
+            ValidUntil = request.ValidUntil ?? DateTime.UtcNow.AddDays(15), // BRD §3.4 default
+            ProjectCode = request.ProjectCode.Trim(),
+            CustomerReference = request.CustomerReference.Trim(),
             Notes = request.Notes,
         };
 
@@ -123,16 +128,22 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         foreach (var line in quotation.Lines)
         {
+            // double cast: same Sqlite decimal-parameter-in-WHERE-comparison gotcha as
+            // OrdersController.Checkout's stock deduction — see the comment there / docs/TESTING.md.
+            var qty = (double)line.Qty;
             var rowsAffected = await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE BranchStockLevels SET OnHand = OnHand - {line.Qty} WHERE ProductId = {line.ProductId} AND BranchId = {quotation.BranchId} AND (OnHand - Reserved) >= {line.Qty}",
+                $"UPDATE BranchStockLevels SET OnHand = OnHand - {qty} WHERE ProductId = {line.ProductId} AND BranchId = {quotation.BranchId} AND (OnHand - Reserved) >= {qty}",
                 ct);
             if (rowsAffected == 0)
             {
                 return BadRequest(new { error = $"Insufficient stock for {line.Product?.Sku}." });
             }
+            // Quotation lines are always priced in stock UOM (the quotation builder has no UOM
+            // selector), so selling qty and stock qty are the same number here.
             order.Lines.Add(new OrderLine
             {
-                ProductId = line.ProductId, Qty = line.Qty, UnitPrice = line.UnitPrice,
+                ProductId = line.ProductId, Qty = line.Qty, Uom = line.Product?.StockUom ?? "",
+                StockQty = line.Qty, UnitPrice = line.UnitPrice,
                 DiscountPct = line.DiscountPct, VatRate = line.VatRate, LineTotal = line.LineTotal,
             });
         }
@@ -178,5 +189,6 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
         q.Id, q.QuoteNo, q.BranchId, q.CustomerId, q.Customer?.NameEn ?? "Walk-in Customer", q.CreatedBy?.Name ?? "",
         q.Status.ToString(), q.ValidUntil, q.SubTotal, q.DiscountTotal, q.VatTotal, q.GrandTotal, q.Notes,
         q.ConvertedOrderId, q.ConvertedOrder?.OrderNo, q.CreatedAt,
-        q.Lines.Select(l => new QuotationLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.UnitPrice, l.DiscountPct, l.VatRate, l.LineTotal)).ToList());
+        q.Lines.Select(l => new QuotationLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.UnitPrice, l.DiscountPct, l.VatRate, l.LineTotal)).ToList(),
+        q.ProjectCode, q.CustomerReference);
 }

@@ -13,9 +13,11 @@ import { OrderDetailDialog } from "./OrderDetailDialog";
 import { VoidOrderDialog } from "./VoidOrderDialog";
 import { CreateReturnDialog } from "./CreateReturnDialog";
 import { QuotationFormDialog } from "./QuotationFormDialog";
+import { PaymentDialog } from "./PaymentDialog";
+import { ReceiptDialog } from "./ReceiptDialog";
 import {
   useOrders, useQuotations, useSendQuotation, useAcceptQuotation, useRejectQuotation, useConvertQuotation,
-  type OrderDto, type QuotationDto,
+  usePayOrder, type OrderDto, type QuotationDto, type PaymentInput,
 } from "@/lib/api/pos";
 import { useAuth } from "@/lib/api/auth";
 import { useBranches, useTerminals } from "@/lib/api/admin";
@@ -24,12 +26,15 @@ const TABS = ["All Orders", "Completed", "Pending", "Delivery", "Returned", "Voi
 type Tab = (typeof TABS)[number];
 
 const ORDER_STATUSES = ["Pending", "Completed", "Dispatched", "Delivered", "Returned", "Voided"];
-const ORDER_TYPES = ["Retail", "Contractor", "Delivery", "Quotation"];
+// "Delivery" isn't a real order Type (Checkout only ever sets Retail/Contractor) — whether an order
+// has a delivery component is tracked separately via deliveryOrderId (BRD §3.5), surfaced by the
+// "Delivery" TAB below and the Delivery column, not this Type filter.
+const ORDER_TYPES = ["Retail", "Contractor", "Quotation"];
 const PAYMENT_METHODS = ["Cash", "Mada", "ApplePay", "StcPay", "Transfer", "Loyalty"];
 const PAYMENT_LABELS: Record<string, string> = { ApplePay: "Apple Pay", StcPay: "STC Pay" };
 
 function fmtSar(n: number): string {
-  return `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س`;
+  return `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
 }
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleString("en-US", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" });
@@ -45,6 +50,8 @@ function inDateRange(iso: string, from: string, to: string): boolean {
 }
 
 const PAGE_SIZE = 10;
+
+const QUOTATION_FIELDS: FilterFieldDef[] = [{ kind: "search", key: "search", placeholder: "Search quote #, customer…" }];
 
 export function OrdersPage() {
   const { user, hasAccess } = useAuth();
@@ -65,6 +72,23 @@ export function OrdersPage() {
   const [voidTarget, setVoidTarget] = useState<OrderDto | null>(null);
   const [returnTarget, setReturnTarget] = useState<OrderDto | null>(null);
   const [creatingQuote, setCreatingQuote] = useState(false);
+  const [reprintTarget, setReprintTarget] = useState<OrderDto | null>(null);
+  // Pending/Unpaid orders (converted quotations) get settled right here — without this the list is
+  // a dead end: "Awaiting payment" with no way to ever take the payment.
+  const [payTarget, setPayTarget] = useState<OrderDto | null>(null);
+  const payOrder = usePayOrder();
+
+  const payOutstanding = payTarget
+    ? payTarget.grandTotal - payTarget.payments.filter((p) => p.status === "Completed").reduce((s, p) => s + p.amount, 0)
+    : 0;
+
+  async function handleTakePayment(payments: PaymentInput[]) {
+    if (!payTarget) return;
+    const terminalId = terminals?.find((t) => t.branchId === payTarget.branchId)?.id ?? null;
+    const paid = await payOrder.mutateAsync({ id: payTarget.id, payments, terminalId });
+    toast.success(`Payment accepted · ${paid.orderNo}`, { description: fmtSar(paid.grandTotal) });
+    setPayTarget(null);
+  }
 
   const orderFields: FilterFieldDef[] = useMemo(() => [
     { kind: "date", key: "dateFrom", placeholder: "From Date" },
@@ -77,10 +101,9 @@ export function OrdersPage() {
     { kind: "select", key: "paymentMethod", placeholder: "Payment Method", options: PAYMENT_METHODS, labels: PAYMENT_LABELS },
     { kind: "search", key: "search", placeholder: "Search order #, customer…" },
   ], [branches, terminals, orders]);
-  const quotationFields: FilterFieldDef[] = [{ kind: "search", key: "search", placeholder: "Search quote #, customer…" }];
-  const fields = tab === "Quotations" ? quotationFields : orderFields;
+  const fields = tab === "Quotations" ? QUOTATION_FIELDS : orderFields;
 
-  const allFilterKeys = useMemo(() => Array.from(new Set([...orderFields, ...quotationFields].map((f) => f.key))), [orderFields]);
+  const allFilterKeys = useMemo(() => Array.from(new Set([...orderFields, ...QUOTATION_FIELDS].map((f) => f.key))), [orderFields]);
   const [draft, setDraft] = useState<Record<string, string>>(() => Object.fromEntries(allFilterKeys.map((k) => [k, ""])));
   const [applied, setApplied] = useState<Record<string, string>>(draft);
 
@@ -89,7 +112,7 @@ export function OrdersPage() {
     return allOrders.filter((o) => {
       if (tab === "Completed" && o.status !== "Completed") return false;
       if (tab === "Pending" && o.status !== "Pending") return false;
-      if (tab === "Delivery" && o.type !== "Delivery") return false;
+      if (tab === "Delivery" && o.deliveryOrderId === null) return false;
       if (tab === "Returned" && o.status !== "Returned") return false;
       if (tab === "Voided" && o.status !== "Voided") return false;
       if (applied.status && o.status !== applied.status) return false;
@@ -264,6 +287,7 @@ export function OrdersPage() {
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Cashier</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Delivery</TableHead>
                   <TableHead className="w-8" />
                 </TableRow>
               </TableHeader>
@@ -280,20 +304,26 @@ export function OrdersPage() {
                     <TableCell className="text-muted-foreground">{o.cashierName}</TableCell>
                     <TableCell><Pill tone={statusTone(o.status)}>{o.status}</Pill></TableCell>
                     <TableCell>
+                      {o.deliveryOrderNo ? <Pill tone={statusTone(o.deliveryStage ?? "")}>{o.deliveryStage}</Pill> : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell>
                       <RowActionsMenu
                         actions={[
                           { label: "View", onClick: () => setDetailOrder(o) },
-                          { label: "Reprint Receipt", onClick: () => { setDetailOrder(o); setTimeout(() => window.print(), 150); } },
+                          { label: "Reprint Receipt", onClick: () => setReprintTarget(o) },
+                          ...(o.status === "Pending" && o.paymentStatus !== "Paid"
+                            ? [{ label: "Take Payment", onClick: () => setPayTarget(o) }]
+                            : []),
                           "separator",
-                          ...(canReturn ? [{ label: "Create Return", onClick: () => setReturnTarget(o), disabled: o.status === "Voided" }] : []),
-                          { label: "Void Order", onClick: () => setVoidTarget(o), destructive: true, disabled: o.status === "Voided" },
+                          ...(canReturn ? [{ label: "Create Return", onClick: () => setReturnTarget(o), disabled: o.status === "Voided" || o.status === "Returned" }] : []),
+                          { label: "Void Order", onClick: () => setVoidTarget(o), destructive: true, disabled: o.status === "Voided" || o.status === "Returned" },
                         ]}
                       />
                     </TableCell>
                   </TableRow>
                 ))}
                 {filteredOrders.length === 0 && (
-                  <TableRow><TableCell colSpan={10} className="py-8 text-center text-sm text-muted-foreground">No orders match those filters.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={11} className="py-8 text-center text-sm text-muted-foreground">No orders match those filters.</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
@@ -308,6 +338,13 @@ export function OrdersPage() {
       <VoidOrderDialog order={voidTarget} onClose={() => setVoidTarget(null)} />
       <CreateReturnDialog order={returnTarget} onClose={() => setReturnTarget(null)} />
       <QuotationFormDialog open={creatingQuote} onOpenChange={setCreatingQuote} branchId={effectiveBranchId} />
+      <PaymentDialog
+        open={payTarget !== null}
+        onOpenChange={(v) => !v && setPayTarget(null)}
+        total={payOutstanding}
+        onCharge={handleTakePayment}
+      />
+      <ReceiptDialog order={reprintTarget} terminalId={reprintTarget?.terminalId ?? null} onClose={() => setReprintTarget(null)} />
     </div>
   );
 }

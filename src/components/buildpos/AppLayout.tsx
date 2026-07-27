@@ -50,12 +50,15 @@ import {
   Globe,
   QrCode,
   Warehouse,
+  Wrench,
+  History,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import logoAsset from "@/assets/mimony-logo.png.asset.json";
 import { statusBar } from "@/lib/buildpos/data";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useAuth, type ModulePermission } from "@/lib/api/auth";
+import { SetPinDialog } from "@/components/buildpos/SetPinDialog";
 import { DeliverySync } from "@/lib/api/delivery-sync";
 import { HrSync } from "@/lib/api/hr-sync";
 import { useNotifications } from "@/lib/api/notifications";
@@ -88,6 +91,9 @@ const nav: Group[] = [
       { to: "/operate/customers", label: "Customers & Contractors", icon: Users, module: "Orders" },
       { to: "/operate/cashier-workspace", label: "Cashier Workspace", icon: UserSquare2, module: "Pos" },
       { to: "/operate/cashier-shift", label: "Cashier Shifts", icon: ClipboardList, module: "Pos" },
+      // Control Tower is still fully mock/static data with no backend behind it — hidden from
+      // nav until it's wired, rather than shipping a dead link (see /operate/control-tower).
+      // { to: "/operate/control-tower", label: "Control Tower", icon: Activity, module: "Pos" },
     ],
   },
   {
@@ -96,8 +102,9 @@ const nav: Group[] = [
       { to: "/stock/inventory", label: "Product Catalog", icon: Package, module: "Inventory" },
       { to: "/admin/categories", label: "Categories & Attributes", icon: Layers, module: "Inventory" },
       { to: "/stock/warehouses", label: "Warehouses", icon: Warehouse, module: "Inventory" },
-      { to: "/stock/stocks", label: "Inventory & Stock", icon: Boxes, module: "Inventory" },
+      { to: "/stock/stocks", label: "Warehouse Stock", icon: Boxes, module: "Inventory" },
       { to: "/stock/branch-stock", label: "Branch Stock", icon: Store, module: "Inventory" },
+      { to: "/stock/movements", label: "Stock Movements", icon: History, module: "Inventory" },
       { to: "/stock/expiry", label: "Material Validity", icon: CalendarClock, module: "Inventory" },
       { to: "/stock/transfers", label: "Stock Transfers", icon: ArrowLeftRight, module: "Inventory" },
       { to: "/stock/bundles", label: "Bundles & Systems", icon: Blocks, module: "Inventory" },
@@ -168,6 +175,8 @@ const nav: Group[] = [
       { to: "/admin/users", label: "Registered Users", icon: UserCog, module: "Admin" },
       { to: "/admin/roles", label: "Roles & Permissions", icon: KeyRound, module: "Admin" },
       { to: "/admin/rules", label: "Rules Engine", icon: Sliders, module: "Admin" },
+      { to: "/admin/compliance", label: "Compliance", icon: ShieldCheck, module: "Admin" },
+      { to: "/admin/maintenance", label: "Maintenance", icon: Wrench, module: "Admin" },
       { to: "/admin/pos-settings", label: "POS Settings", icon: Cog, module: "Admin" },
       { to: "/admin/zatca-invoices", label: "ZATCA Invoices", icon: QrCode, module: "Finance" },
       { to: "/admin/zatca-settings", label: "ZATCA Phase 2 Settings", icon: ShieldCheck, module: "Finance" },
@@ -185,6 +194,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const [search, setSearch] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+  const [pinDialogOpen, setPinDialogOpen] = useState(false);
   const canSearchProducts = hasAccess("Inventory");
   const canSearchCustomers = hasAccess("Orders");
   const { data: searchProducts } = useProducts(canSearchProducts && search.trim().length > 0);
@@ -472,11 +482,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
                   <p className="truncate text-xs font-normal text-muted-foreground">{user?.role ?? ""}</p>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                {/* BRD §10.2: self-service PIN for register sign-in / idle unlock / authorizations. */}
+                <DropdownMenuItem onClick={() => setPinDialogOpen(true)}>
+                  Set PIN…
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout} className="text-critical focus:text-critical">
                   Sign out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <SetPinDialog open={pinDialogOpen} onOpenChange={setPinDialogOpen} />
           </div>
         </header>
 

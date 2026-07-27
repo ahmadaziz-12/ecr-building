@@ -17,6 +17,9 @@ import { getModule } from "@/lib/buildpos/modules";
 import type { Severity } from "@/lib/buildpos/format";
 import { getFlow, type Field, type Flow } from "@/lib/buildpos/flows";
 import { FlowDialog } from "@/components/buildpos/FlowDialog";
+import { CreatePricingRuleDialog } from "@/components/buildpos/CreatePricingRuleDialog";
+import { ReturnPolicySettingsDialog } from "@/components/buildpos/pos/ReturnPolicySettingsDialog";
+import { useReturnPolicyConfig, type ReturnPolicyConfigDto } from "@/lib/api/finance";
 import { useModuleLiveData } from "@/lib/api/module-live-data";
 import { useFlowSubmitHandlers } from "@/lib/api/flow-submit-handlers";
 import { useRowActions, type RowAction } from "@/lib/api/row-actions";
@@ -28,10 +31,16 @@ function tone(status: string): Severity {
   const k = status.toLowerCase();
   if (/critical|failed|overdue|rejected|expired|offline|breach|writtenoff|written off/.test(k)) return "critical";
   if (/warn|pending|queued|idle|needs|quarantine|delayed|degraded|draft|low|expiring|monitor|partial|awaiting/.test(k)) return "warning";
+  // Negated words must be checked before the success regex substring-matches inside them
+  // ("Inactive" contains "active", "Invalid" contains "valid").
+  if (/inactive|in-active|disabled|deactivated|suspended|invalid/.test(k)) return "muted";
   if (/active|healthy|cleared|completed|reconciled|received|resolved|delivered|submitted|valid|ok|compliant|paid|approved/.test(k)) return "success";
   if (/dispatched|posted|open|in transit|intransit|in progress|assigned|onpromo|on promo/.test(k)) return "info";
   return "muted";
 }
+
+// BRD §3.2.1/§3.2.4 defaults — only used before /api/finance/returns/policy-config has loaded.
+const DEFAULT_RETURN_POLICY_CONFIG: ReturnPolicyConfigDto = { dualAuthCashThreshold: 500, standardWindowDays: 15, surplusWindowDays: 90 };
 
 const toneKpi: Record<Severity, string> = {
   critical: "bg-critical/10 text-critical border-critical/20",
@@ -72,6 +81,7 @@ const REFRESH_KEYS: Record<string, string[][]> = {
   "/admin/categories": [["catalog", "categories"]],
   "/stock/stocks": [["inventory", "stock-levels"]],
   "/stock/branch-stock": [["inventory", "branch-stock-levels"]],
+  "/stock/movements": [["inventory", "stock-movements"]],
   "/stock/expiry": [["inventory", "stock-batches"]],
   "/stock/transfers": [["inventory", "transfers"]],
   "/stock/bundles": [["catalog", "bundles"]],
@@ -95,6 +105,14 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
   const navigate = useNavigate();
   const m = getModule(pathname);
   const [activeFlow, setActiveFlow] = useState<ActiveFlow | null>(null);
+  // Finance > Pricing's "Create Pricing Rule" gets a bespoke, type-aware dialog instead of the
+  // generic free-text FlowDialog — Trade Tier/Quantity/Coupon rules need structured fields (branch,
+  // SKU, quantity threshold) the generic flow's plain-text Condition/Action strings can't drive.
+  const [pricingRuleDialogOpen, setPricingRuleDialogOpen] = useState(false);
+  // Finance > Customer Returns' "Return Policy" gets a bespoke settings dialog for the dual-auth
+  // cash threshold + return windows — same pattern as Pricing's rule dialog above.
+  const [returnPolicyDialogOpen, setReturnPolicyDialogOpen] = useState(false);
+  const { data: returnPolicyConfig } = useReturnPolicyConfig(pathname === "/finance/returns");
   const [activeTab, setActiveTab] = useState(0);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [dateRangeFilters, setDateRangeFilters] = useState<Record<string, { from: string; to: string }>>({});
@@ -168,7 +186,9 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
 
   const columns = live?.columns ?? m?.columns ?? [];
   const statusCol = live?.statusCol ?? m?.statusCol;
-  const kpis = live?.kpis ?? m?.kpis ?? [];
+  // A live page whose mapper supplies no kpis renders NO kpi grid — falling back to the static
+  // catalog numbers would show fake figures next to real rows. Pure-demo pages keep theirs.
+  const kpis = live ? live.kpis ?? [] : m?.kpis ?? [];
   const baseRows = live?.rows ?? m?.rows ?? [];
   const ids = live?.ids;
 
@@ -176,13 +196,17 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
 
   const filtered = useMemo(() => {
     let rows = indexed;
-    if (m?.tabs && activeTab > 0 && !/^all/i.test(m.tabs[activeTab] ?? "") && statusCol !== undefined) {
-      const tabLabel = m.tabs[activeTab];
-      rows = rows.filter(({ row }) => {
-        const cell = norm(String(row[statusCol] ?? ""));
-        const tab = norm(tabLabel);
-        return cell.includes(tab) || tab.includes(cell);
-      });
+    // Tabs match against tabFilterCols when set (e.g. /finance/returns tabs are return TYPES,
+    // not statuses); a row matches if ANY listed column matches. Defaults to the status column.
+    const tabCols = m?.tabFilterCols ?? (statusCol !== undefined ? [statusCol] : []);
+    if (m?.tabs && activeTab > 0 && !/^all/i.test(m.tabs[activeTab] ?? "") && tabCols.length > 0) {
+      const tab = norm(m.tabs[activeTab]);
+      rows = rows.filter(({ row }) =>
+        tabCols.some((col) => {
+          const cell = norm(String(row[col] ?? ""));
+          return cell !== "" && (cell.includes(tab) || tab.includes(cell));
+        }),
+      );
     }
     for (const [label, value] of Object.entries(columnFilters)) {
       if (!value) continue;
@@ -206,11 +230,18 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
       rows = rows.filter(({ row }) => row.some((cell) => String(cell).toLowerCase().includes(needle)));
     }
     return rows;
-  }, [indexed, m?.tabs, activeTab, statusCol, columnFilters, dateRangeFilters, searchText, columns]);
+  }, [indexed, m?.tabs, m?.tabFilterCols, activeTab, statusCol, columnFilters, dateRangeFilters, searchText, columns]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const clampedPage = Math.min(page, pageCount);
   const pageRows = filtered.slice((clampedPage - 1) * PAGE_SIZE, clampedPage * PAGE_SIZE);
+  // Some pages (e.g. read-only ledgers like Stock Movements) have no row actions wired at all —
+  // an always-disabled "..." menu on every row is dead UI, so the column only renders when at
+  // least one visible row actually has something to do.
+  const hasRowActions = pageRows.some(({ id, row }) => {
+    const statusText = statusCol !== undefined ? String(row[statusCol] ?? "") : "";
+    return rowActionsFor(id, row, statusText).length > 0;
+  });
 
   function clearFilters() {
     setColumnFilters({});
@@ -222,8 +253,10 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
 
   function handleRefresh() {
     const keys = REFRESH_KEYS[pathname];
-    if (!keys) return;
-    keys.forEach((key) => queryClient.invalidateQueries({ queryKey: key }));
+    // Routes without a registered key set invalidate everything so Refresh always refetches
+    // instead of silently no-opping.
+    if (keys) keys.forEach((key) => queryClient.invalidateQueries({ queryKey: key }));
+    else queryClient.invalidateQueries();
     toast.success("Refreshed");
   }
 
@@ -256,6 +289,8 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
       return;
     }
     if (label === "Download Invoice") { handleExport(); return; }
+    if (pathname === "/finance/pricing" && label === "Create Pricing Rule") { setPricingRuleDialogOpen(true); return; }
+    if (pathname === "/finance/returns" && label === "Return Policy") { setReturnPolicyDialogOpen(true); return; }
     if (label === m?.primaryAction && flow) { openFlow(label, {}, submitHandlers[flow.key]); return; }
     // A row-scoped action (Approve, Dispatch, Activate…) with no single row selected here opens a
     // picker over the live-eligible records instead of silently no-opping.
@@ -294,7 +329,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
           {m.primaryAction && (
             <Button
               size="sm"
-              onClick={() => flow && openFlow(m.primaryAction!, {}, submitHandlers[flow.key])}
+              onClick={() => handleBarAction(m.primaryAction!)}
               className="h-9 gap-1.5 bg-brand text-brand-foreground hover:bg-brand/90"
             >
               <Plus className="h-4 w-4" /> {m.primaryAction}
@@ -396,6 +431,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
       </div>
 
       {/* KPI grid */}
+      {kpis.length > 0 && (
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {kpis.map((k) => (
           <div
@@ -414,6 +450,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
           </div>
         ))}
       </div>
+      )}
 
       {/* Progress stats (Devices-style health/sync/connectivity bars) */}
       {live?.progressStats && live.progressStats.length > 0 && (
@@ -511,7 +548,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
             </span>
             <div className="flex items-center gap-1">
               <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                onClick={() => setPage(Math.max(1, clampedPage - 1))}
                 disabled={clampedPage <= 1}
                 className="rounded-md border border-black/10 px-2 py-1 hover:border-brand/40 disabled:opacity-40"
               >
@@ -529,7 +566,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
                   </button>
                 ))}
               <button
-                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                onClick={() => setPage(Math.min(pageCount, clampedPage + 1))}
                 disabled={clampedPage >= pageCount}
                 className="rounded-md border border-black/10 px-2 py-1 hover:border-brand/40 disabled:opacity-40"
               >
@@ -567,7 +604,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
                     {c}
                   </TableHead>
                 ))}
-                <TableHead className="w-8" />
+                {hasRowActions && <TableHead className="w-8" />}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -594,37 +631,39 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
                         </TableCell>
                       );
                     })}
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            disabled={actions.length === 0}
-                            className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-black/5 hover:text-foreground disabled:opacity-40"
-                          >
-                            <MoreHorizontal className="h-4 w-4" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        {actions.length > 0 && (
-                          <DropdownMenuContent align="end">
-                            {actions.map((a) => (
-                              <DropdownMenuItem
-                                key={a.label}
-                                onClick={a.onClick}
-                                className={a.tone === "critical" ? "text-critical focus:text-critical" : undefined}
-                              >
-                                {a.label}
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        )}
-                      </DropdownMenu>
-                    </TableCell>
+                    {hasRowActions && (
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              disabled={actions.length === 0}
+                              className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-black/5 hover:text-foreground disabled:opacity-40"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          {actions.length > 0 && (
+                            <DropdownMenuContent align="end">
+                              {actions.map((a) => (
+                                <DropdownMenuItem
+                                  key={a.label}
+                                  onClick={a.onClick}
+                                  className={a.tone === "critical" ? "text-critical focus:text-critical" : undefined}
+                                >
+                                  {a.label}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          )}
+                        </DropdownMenu>
+                      </TableCell>
+                    )}
                   </TableRow>
                 );
               })}
               {pageRows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={columns.length + 1} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={columns.length + (hasRowActions ? 1 : 0)} className="py-8 text-center text-sm text-muted-foreground">
                     No records match the current filters.
                   </TableCell>
                 </TableRow>
@@ -638,7 +677,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
           </span>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => setPage(Math.max(1, clampedPage - 1))}
               disabled={clampedPage <= 1}
               className="rounded-md border border-black/10 px-2 py-1 hover:border-brand/40 disabled:opacity-40"
             >
@@ -656,7 +695,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
                 </button>
               ))}
             <button
-              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              onClick={() => setPage(Math.min(pageCount, clampedPage + 1))}
               disabled={clampedPage >= pageCount}
               className="rounded-md border border-black/10 px-2 py-1 hover:border-brand/40 disabled:opacity-40"
             >
@@ -673,6 +712,12 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
         onSubmit={activeFlow?.onSubmit}
         initialValues={activeFlow?.initialValues}
         fieldOverrides={activeFlow?.fieldOverrides}
+      />
+      <CreatePricingRuleDialog open={pricingRuleDialogOpen} onOpenChange={setPricingRuleDialogOpen} />
+      <ReturnPolicySettingsDialog
+        open={returnPolicyDialogOpen}
+        onOpenChange={setReturnPolicyDialogOpen}
+        config={returnPolicyConfig ?? DEFAULT_RETURN_POLICY_CONFIG}
       />
       <BulkActionSheet
         config={activeBulkLabel ? bulkActions?.[activeBulkLabel] ?? null : null}

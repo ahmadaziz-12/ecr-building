@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { API_BASE, apiPost, apiPut, ApiError } from "./client";
+import { API_BASE, apiPost, apiPut, ApiError, refreshSession } from "./client";
 
 // Proactively renews the access token well before its 15-minute lifetime is up, so an active
 // session extends seamlessly for as long as the 14-day refresh token stays valid — the user
@@ -8,6 +8,22 @@ import { API_BASE, apiPost, apiPut, ApiError } from "./client";
 const PROACTIVE_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
 export type ModulePermission = { module: string; level: "None" | "View" | "Edit" | "Full" };
+
+// Mirrors backend PosCeilingsDto (BRD §10.1 Cashier→Senior Cashier→Supervisor→Store Manager→System
+// Admin ladder) — null on a decimal ceiling means "no cap".
+export type PosCeilings = {
+  discountCeilingPercent: number | null;
+  surplusReturnCeilingAmount: number | null;
+  canAuthorizeStandardReturnWithoutReceipt: boolean;
+  canOverrideItemPrice: boolean;
+  canAuthorizeDamagedReturns: boolean;
+  canVoidTransactions: boolean;
+  canViewXReport: boolean;
+  canViewZReport: boolean;
+  canConfigureReturnRulesAndFees: boolean;
+  canManagePriceListAndUsers: boolean;
+  canManageSystemConfiguration: boolean;
+};
 
 export type CurrentUser = {
   id: number;
@@ -19,6 +35,7 @@ export type CurrentUser = {
   branchName: string | null;
   preferredLocale: string;
   permissions: ModulePermission[];
+  posCeilings: PosCeilings;
 };
 
 const LEVEL_RANK: Record<ModulePermission["level"], number> = { None: 0, View: 1, Edit: 2, Full: 3 };
@@ -27,6 +44,8 @@ type AuthContextValue = {
   user: CurrentUser | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<CurrentUser>;
+  // BRD §10.2 (Module 15): PIN quick-login for POS terminals — same session as password login.
+  pinLogin: (email: string, pin: string) => Promise<CurrentUser>;
   logout: () => Promise<void>;
   hasAccess: (module: string, minLevel?: ModulePermission["level"]) => boolean;
 };
@@ -38,10 +57,14 @@ async function getMe(): Promise<CurrentUser | null> {
   try {
     let res = await fetchMe();
     // A page load/reopen can land here with an already-expired 15-minute access token but a
-    // still-valid 14-day refresh token — silently renew once instead of forcing a re-login.
+    // still-valid 14-day refresh token — silently renew once instead of forcing a re-login. Must go
+    // through the shared single-flight refreshSession(), not its own fetch: the backend revokes the
+    // old refresh token the instant any caller redeems it, so this bootstrap check racing another
+    // query's own 401-triggered refresh (client.ts) would otherwise have one of them lose and log a
+    // perfectly valid session out.
     if (res.status === 401) {
-      const refreshRes = await fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" });
-      if (refreshRes.ok) res = await fetchMe();
+      const refreshed = await refreshSession();
+      if (refreshed) res = await fetchMe();
     }
     if (!res.ok) return null;
     return (await res.json()) as CurrentUser;
@@ -74,6 +97,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
   });
 
+  const pinLoginMutation = useMutation({
+    mutationFn: async ({ email, pin }: { email: string; pin: string }) => {
+      try {
+        return await apiPost<CurrentUser>("/api/auth/pin-login", { email, pin });
+      } catch (err) {
+        if (err instanceof ApiError) throw err;
+        throw new ApiError(0, "Unable to reach the server.");
+      }
+    },
+    onSuccess: (user) => {
+      queryClient.setQueryData(["auth", "me"], user);
+    },
+  });
+
   const logoutMutation = useMutation({
     mutationFn: () => apiPost<void>("/api/auth/logout"),
     onSuccess: () => {
@@ -94,8 +131,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user) return;
+    // Same single-flight refreshSession() as everywhere else — a raw fetch here would race any
+    // 401-triggered refresh happening at the same moment and could log the user out (see getMe above).
     const id = window.setInterval(() => {
-      fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" }).catch(() => {});
+      void refreshSession();
     }, PROACTIVE_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, [user]);
@@ -105,13 +144,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       isLoading: meQuery.isLoading,
       login: (email, password) => loginMutation.mutateAsync({ email, password }),
+      pinLogin: (email, pin) => pinLoginMutation.mutateAsync({ email, pin }),
       logout: () => logoutMutation.mutateAsync(),
       hasAccess: (module, minLevel = "View") => {
         const perm = user?.permissions.find((p) => p.module === module);
         return (LEVEL_RANK[perm?.level ?? "None"] ?? 0) >= LEVEL_RANK[minLevel];
       },
     }),
-    [user, meQuery.isLoading, loginMutation, logoutMutation],
+    [user, meQuery.isLoading, loginMutation, pinLoginMutation, logoutMutation],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

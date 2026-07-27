@@ -3,6 +3,7 @@ using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
 using EcrBuilding.Application.Catalog;
 using EcrBuilding.Application.Procurement;
+using EcrBuilding.Domain.Common;
 using EcrBuilding.Domain.Entities;
 using EcrBuilding.Domain.Enums;
 using EcrBuilding.Infrastructure.Persistence;
@@ -106,10 +107,10 @@ public class SuppliersController(AppDbContext db, IAuditService audit) : Control
 [Route("api/procurement/purchase-orders")]
 [Authorize]
 [RequireModule(ModuleArea.Suppliers, AccessLevel.View)]
-public class PurchaseOrdersController(AppDbContext db, IAuditService audit, IGlPostingService gl) : ControllerBase
+public class PurchaseOrdersController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements, IGlPostingService gl) : ControllerBase
 {
     private IQueryable<PurchaseOrder> WithIncludes() => db.PurchaseOrders.Include(p => p.Supplier)
-        .Include(p => p.Lines).ThenInclude(l => l.Product)
+        .Include(p => p.Lines).ThenInclude(l => l.Product).ThenInclude(pr => pr!.UomConversions)
         .Include(p => p.Lines).ThenInclude(l => l.Branch)
         .Include(p => p.Lines).ThenInclude(l => l.Warehouse);
 
@@ -124,6 +125,50 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, IGlP
     [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
     public async Task<ActionResult<PurchaseOrderDto>> Create(CreatePurchaseOrderRequest request, CancellationToken ct)
     {
+        if (request.Lines.Count == 0) return BadRequest(new { error = "At least one PO line is required." });
+
+        // When a line does name a warehouse, it must belong to that line's branch — a mismatched pair
+        // would silently receive goods into a warehouse that can never feed that branch's sellable
+        // stock. A branch with no warehouse linked yet is still orderable: Receive credits its
+        // sellable stock directly and just skips the warehouse-side bin/batch/expiry bookkeeping.
+        var warehouseIds = request.Lines.Where(l => l.WarehouseId is not null).Select(l => l.WarehouseId!.Value).Distinct().ToList();
+        var warehouseBranch = await db.Warehouses.Where(w => warehouseIds.Contains(w.Id))
+            .ToDictionaryAsync(w => w.Id, w => w.BranchId, ct);
+        var productIds = request.Lines.Select(l => l.ProductId).Distinct().ToList();
+        var products = await db.Products.Include(p => p.UomConversions).Where(p => productIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, ct);
+
+        foreach (var line in request.Lines)
+        {
+            if (line.WarehouseId is not null)
+            {
+                if (!warehouseBranch.TryGetValue(line.WarehouseId.Value, out var warehouseBranchId))
+                {
+                    return BadRequest(new { error = $"Unknown warehouse #{line.WarehouseId}." });
+                }
+                if (warehouseBranchId != line.BranchId)
+                {
+                    return BadRequest(new { error = "The selected warehouse must belong to the selected branch." });
+                }
+            }
+            if (!products.TryGetValue(line.ProductId, out var product))
+            {
+                return BadRequest(new { error = $"Unknown product #{line.ProductId}." });
+            }
+            if (line.Qty <= 0)
+            {
+                return BadRequest(new { error = $"Quantity for {product.Sku} must be greater than zero." });
+            }
+            // Same rule the POS cart enforces at checkout — an unconfigured UOM is a hard error, never
+            // silently treated as 1:1 (see UomMath.FactorToStock's contract).
+            var uom = string.IsNullOrWhiteSpace(line.Uom) ? product.StockUom : line.Uom;
+            var factor = UomMath.FactorToStock(uom, product.StockUom, product.UomConversions.Select(c => (c.Uom, c.FactorToStock)));
+            if (factor is null)
+            {
+                return BadRequest(new { error = $"\"{uom}\" is not a configured unit for {product.Sku} (stock unit: {product.StockUom})." });
+            }
+        }
+
         var poNo = $"PO-{DateTime.UtcNow:yyyy}-{await db.PurchaseOrders.CountAsync(ct) + 1:D4}";
         var po = new PurchaseOrder
         {
@@ -133,6 +178,7 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, IGlP
             Lines = request.Lines.Select(l => new PurchaseOrderLine
             {
                 ProductId = l.ProductId, BranchId = l.BranchId, WarehouseId = l.WarehouseId,
+                Uom = string.IsNullOrWhiteSpace(l.Uom) ? products[l.ProductId].StockUom : l.Uom!,
                 Qty = l.Qty, UnitCost = l.UnitCost, BatchNo = l.BatchNo, ExpiryDate = l.ExpiryDate,
             }).ToList(),
         };
@@ -203,38 +249,83 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, IGlP
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         decimal receivedValue = 0;
+        var movements = new List<(int ProductId, int BranchId, decimal Qty)>();
         foreach (var receiveLine in request.Lines)
         {
             var line = po.Lines.FirstOrDefault(l => l.Id == receiveLine.LineId);
-            if (line is null) continue;
+            if (line is null || line.Product is null) continue;
+            if (receiveLine.Qty <= 0) continue;
 
-            line.ReceivedQty = Math.Min(line.Qty, line.ReceivedQty + receiveLine.Qty);
-            receivedValue += receiveLine.Qty * line.UnitCost;
-
-            var level = await db.StockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.WarehouseId == line.WarehouseId, ct);
-            if (level is null)
+            var remaining = line.Qty - line.ReceivedQty;
+            if (receiveLine.Qty > remaining)
             {
-                level = new StockLevel { ProductId = line.ProductId, WarehouseId = line.WarehouseId };
-                db.StockLevels.Add(level);
+                return BadRequest(new { error = $"{line.Product.Sku}: cannot receive {receiveLine.Qty} {line.Uom} — only {remaining} {line.Uom} outstanding." });
             }
-            level.OnHand += receiveLine.Qty;
 
-            var batchNo = receiveLine.BatchNo ?? line.BatchNo;
-            var expiryDate = receiveLine.ExpiryDate ?? line.ExpiryDate;
-            if (!string.IsNullOrWhiteSpace(batchNo) && expiryDate is not null)
+            // Goods received against a PO land on the receiving BRANCH's own yard — this business has
+            // one warehouse per branch (Warehouse.BranchId), never a separate central DC — so the stock
+            // must become sellable at the till immediately, not sit invisible until a manual internal
+            // transfer "arrives". Convert from the PO's purchasing UOM (e.g. Pallet) to stock UOM (e.g.
+            // Bag) and credit BOTH pools with that same stock-UOM amount: BranchStockLevel (what POS
+            // checkout reads/deducts) and StockLevel (warehouse-side bin/batch/expiry tracking) — kept
+            // in lockstep so neither pool can drift from the other.
+            var factor = UomMath.FactorToStock(line.Uom, line.Product.StockUom,
+                line.Product.UomConversions.Select(c => (c.Uom, c.FactorToStock)));
+            if (factor is null)
             {
-                var batch = await db.StockBatches.FirstOrDefaultAsync(
-                    b => b.ProductId == line.ProductId && b.WarehouseId == line.WarehouseId && b.BatchNo == batchNo, ct);
-                if (batch is null)
+                return BadRequest(new { error = $"{line.Product.Sku}: \"{line.Uom}\" is no longer a configured unit for this product — fix the product's UOM conversions before receiving." });
+            }
+            // Round the CUMULATIVE received quantity, not each call's own increment, and credit only
+            // the difference from what was already credited — otherwise splitting one delivery across
+            // several partial receives (normal for a part-shipped truck) can credit a different total
+            // stock quantity than receiving it in one call, purely from 3dp rounding on each fragment
+            // (e.g. 1+1+1 Piece receipts of a 0.0192-factor product credit 0.001 less than one 3-Piece
+            // receipt of the same physical goods).
+            var previousStockQty = UomMath.ToStockQty(line.ReceivedQty, factor.Value);
+            line.ReceivedQty += receiveLine.Qty;
+            receivedValue += receiveLine.Qty * line.UnitCost;
+            var newStockQty = UomMath.ToStockQty(line.ReceivedQty, factor.Value);
+            var stockQty = newStockQty - previousStockQty;
+
+            var branchLevel = await db.BranchStockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.BranchId == line.BranchId, ct);
+            if (branchLevel is null)
+            {
+                branchLevel = new BranchStockLevel { ProductId = line.ProductId, BranchId = line.BranchId };
+                db.BranchStockLevels.Add(branchLevel);
+            }
+            branchLevel.OnHand += stockQty;
+            movements.Add((line.ProductId, line.BranchId, stockQty));
+
+            // No warehouse linked to this line's branch — the branch's sellable stock above is already
+            // credited, so there's nothing warehouse-side (bin/batch/expiry) left to track.
+            if (line.WarehouseId is not null)
+            {
+                var warehouseId = line.WarehouseId.Value;
+                var level = await db.StockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.WarehouseId == warehouseId, ct);
+                if (level is null)
                 {
-                    batch = new StockBatch
-                    {
-                        ProductId = line.ProductId, WarehouseId = line.WarehouseId, BatchNo = batchNo,
-                        ReceivedDate = DateTime.UtcNow, ExpiryDate = expiryDate.Value,
-                    };
-                    db.StockBatches.Add(batch);
+                    level = new StockLevel { ProductId = line.ProductId, WarehouseId = warehouseId };
+                    db.StockLevels.Add(level);
                 }
-                batch.Qty += receiveLine.Qty;
+                level.OnHand += stockQty;
+
+                var batchNo = receiveLine.BatchNo ?? line.BatchNo;
+                var expiryDate = receiveLine.ExpiryDate ?? line.ExpiryDate;
+                if (!string.IsNullOrWhiteSpace(batchNo) && expiryDate is not null)
+                {
+                    var batch = await db.StockBatches.FirstOrDefaultAsync(
+                        b => b.ProductId == line.ProductId && b.WarehouseId == warehouseId && b.BatchNo == batchNo, ct);
+                    if (batch is null)
+                    {
+                        batch = new StockBatch
+                        {
+                            ProductId = line.ProductId, WarehouseId = warehouseId, BatchNo = batchNo,
+                            ReceivedDate = DateTime.UtcNow, ExpiryDate = expiryDate.Value,
+                        };
+                        db.StockBatches.Add(batch);
+                    }
+                    batch.Qty += stockQty;
+                }
             }
         }
 
@@ -244,6 +335,11 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, IGlP
         await tx.CommitAsync(ct);
 
         await audit.LogAsync("suppliers", "PO_RECEIVED", po.Id.ToString(), newValue: request, cancellationToken: ct);
+        foreach (var m in movements)
+        {
+            await stockMovements.RecordAsync(m.ProductId, m.BranchId, StockMovementType.PoReceipt, m.Qty,
+                refTable: "PurchaseOrder", refId: po.Id.ToString(), cancellationToken: ct);
+        }
 
         if (receivedValue > 0)
         {
@@ -263,8 +359,12 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, IGlP
 
     private static PurchaseOrderDto Map(PurchaseOrder p)
     {
-        var expectedTotalQty = p.Lines.Sum(l => l.Qty);
-        var receivedPct = expectedTotalQty == 0 ? 0 : Math.Round(p.Lines.Sum(l => l.ReceivedQty) / expectedTotalQty * 100, 1);
+        // Lines can mix UOMs (one ordered by the Pallet, another by the Bag) — summing raw Qty across
+        // them isn't dimensionally meaningful, so progress is tracked by VALUE (Qty×UnitCost) instead,
+        // which is unit-agnostic and doubles as "how much of the PO's spend has actually landed".
+        var expectedValue = p.Lines.Sum(l => l.Qty * l.UnitCost);
+        var receivedValue = p.Lines.Sum(l => l.ReceivedQty * l.UnitCost);
+        var receivedPct = expectedValue == 0 ? 0 : Math.Round(receivedValue / expectedValue * 100, 1);
         var isDelayed = p.ExpectedDate < DateTime.UtcNow &&
             p.Status is PurchaseOrderStatus.Sent or PurchaseOrderStatus.InTransit or PurchaseOrderStatus.PartialReceive;
         var status = isDelayed ? "Delayed" : p.Status.ToString();
@@ -273,11 +373,11 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, IGlP
             p.Id, p.PoNo, p.SupplierId, p.Supplier?.NameEn ?? "",
             p.Lines.Select(l => l.Branch?.NameEn ?? "").Where(n => n != "").Distinct().ToArray(),
             p.Currency, p.ExpectedDate, status, p.Shipping, p.Incoterm, p.Carrier, p.TrackingRef,
-            p.Lines.Sum(l => l.Qty * l.UnitCost) + p.Shipping, receivedPct,
+            expectedValue + p.Shipping, receivedPct,
             p.Lines.Select(l => new PurchaseOrderLineDto(
                 l.Id, l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "",
                 l.BranchId, l.Branch?.NameEn ?? "", l.WarehouseId, l.Warehouse?.Name ?? "",
-                l.Qty, l.UnitCost, l.ReceivedQty, l.BatchNo, l.ExpiryDate)).ToList());
+                l.Uom, l.Product?.StockUom ?? "", l.Qty, l.UnitCost, l.ReceivedQty, l.BatchNo, l.ExpiryDate)).ToList());
     }
 }
 
@@ -285,7 +385,7 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, IGlP
 [Route("api/procurement/rts")]
 [Authorize]
 [RequireModule(ModuleArea.Suppliers, AccessLevel.View)]
-public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IGlPostingService gl) : ControllerBase
+public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements, IGlPostingService gl) : ControllerBase
 {
     private IQueryable<ReturnToSupplier> WithIncludes() => db.ReturnToSuppliers.Include(r => r.Supplier)
         .Include(r => r.PurchaseOrder).Include(r => r.Branch).Include(r => r.Warehouse)
@@ -302,6 +402,32 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IG
     [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
     public async Task<ActionResult<ReturnToSupplierDto>> Create(CreateRtsRequest request, CancellationToken ct)
     {
+        if (request.Lines.Count == 0) return BadRequest(new { error = "At least one return line is required." });
+
+        var warehouse = await db.Warehouses.FindAsync([request.WarehouseId], ct);
+        if (warehouse is null) return BadRequest(new { error = "Unknown warehouse." });
+        if (warehouse.BranchId != request.BranchId)
+        {
+            return BadRequest(new { error = "The selected warehouse must belong to the selected branch." });
+        }
+
+        var productIds = request.Lines.Select(l => l.ProductId).Distinct().ToList();
+        var products = await db.Products.Where(p => productIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Sku, ct);
+        foreach (var line in request.Lines)
+        {
+            if (!products.TryGetValue(line.ProductId, out var sku))
+            {
+                return BadRequest(new { error = $"Unknown product #{line.ProductId}." });
+            }
+            // A non-positive quantity would let Dispatch's stock decrement run BACKWARDS — crediting
+            // stock into the branch's sellable pool for goods that were never received, with no
+            // supplier shipment and no GL trail behind it.
+            if (line.Qty <= 0)
+            {
+                return BadRequest(new { error = $"Quantity for {sku} must be greater than zero." });
+            }
+        }
+
         var rtsNo = $"RTS-{DateTime.UtcNow:yyyy}-{await db.ReturnToSuppliers.CountAsync(ct) + 1:D4}";
         var rts = new ReturnToSupplier
         {
@@ -332,11 +458,17 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IG
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         foreach (var line in rts.Lines)
         {
+            // Stock a PO receipt puts into a branch's sellable pool must come back out of that SAME
+            // pool when it's shipped back to the supplier — debiting only the warehouse-side StockLevel
+            // (as before) would leave BranchStockLevel overstated, letting the POS keep selling units
+            // that already left the building.
+            var branchLevel = await db.BranchStockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.BranchId == rts.BranchId, ct);
             var level = await db.StockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.WarehouseId == rts.WarehouseId, ct);
-            if (level is null || level.Available < line.Qty)
+            if (branchLevel is null || branchLevel.Available < line.Qty || level is null || level.Available < line.Qty)
             {
-                return BadRequest(new { error = $"Insufficient available stock for product {line.ProductId} at the selected warehouse." });
+                return BadRequest(new { error = $"Insufficient available stock for product {line.ProductId} at the selected branch/warehouse." });
             }
+            branchLevel.OnHand -= line.Qty;
             level.OnHand -= line.Qty;
 
             if (!string.IsNullOrWhiteSpace(line.BatchNo))
@@ -350,6 +482,11 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IG
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         await audit.LogAsync("suppliers", "RTS_DISPATCHED", rts.Id.ToString(), cancellationToken: ct);
+        foreach (var line in rts.Lines)
+        {
+            await stockMovements.RecordAsync(line.ProductId, rts.BranchId, StockMovementType.RtsDispatch, -line.Qty,
+                refTable: "ReturnToSupplier", refId: rts.Id.ToString(), cancellationToken: ct);
+        }
         return Ok(Map(rts));
     }
 
@@ -390,10 +527,21 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IG
         }
 
         // The supplier refused a dispatched return — restore what Dispatch removed, since the
-        // goods never actually left (or came back into) our stock.
+        // goods never actually left (or came back into) our stock. Must credit the SAME two pools
+        // Dispatch debited (BranchStockLevel + StockLevel) — crediting only the warehouse side, as
+        // this used to, leaves BranchStockLevel permanently short by the rejected quantity even
+        // though the goods physically never left the building.
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         foreach (var line in rts.Lines)
         {
+            var branchLevel = await db.BranchStockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.BranchId == rts.BranchId, ct);
+            if (branchLevel is null)
+            {
+                branchLevel = new BranchStockLevel { ProductId = line.ProductId, BranchId = rts.BranchId };
+                db.BranchStockLevels.Add(branchLevel);
+            }
+            branchLevel.OnHand += line.Qty;
+
             var level = await db.StockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.WarehouseId == rts.WarehouseId, ct);
             if (level is not null) level.OnHand += line.Qty;
 
@@ -408,6 +556,11 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IG
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         await audit.LogAsync("suppliers", "RTS_REJECTED", rts.Id.ToString(), cancellationToken: ct);
+        foreach (var line in rts.Lines)
+        {
+            await stockMovements.RecordAsync(line.ProductId, rts.BranchId, StockMovementType.RtsRestore, line.Qty,
+                refTable: "ReturnToSupplier", refId: rts.Id.ToString(), cancellationToken: ct);
+        }
         return Ok(Map(rts));
     }
 

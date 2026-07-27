@@ -5,13 +5,88 @@ import type { CashierShiftDto } from "./pos";
 export type UserDto = {
   id: number; name: string; email: string; roleId: number; roleName: string;
   branchId: number | null; branchName: string | null; status: string; preferredLocale: string; lastLoginAt: string | null;
-  hasPin: boolean;
+  hasPin: boolean; biometricEnabled: boolean;
 };
 export type ModulePermissionEntry = { module: string; level: string };
+
+// Mirrors BRD §10.1's Cashier→Senior Cashier→Supervisor→Store Manager→System Admin ladder — see
+// backend Role.cs / PosTier presets in DbSeeder.cs. A null ceiling means "no cap".
+export type PosCeilingsDto = {
+  discountCeilingPercent: number | null;
+  surplusReturnCeilingAmount: number | null;
+  canAuthorizeStandardReturnWithoutReceipt: boolean;
+  canOverrideItemPrice: boolean;
+  canAuthorizeDamagedReturns: boolean;
+  canVoidTransactions: boolean;
+  canViewXReport: boolean;
+  canViewZReport: boolean;
+  canConfigureReturnRulesAndFees: boolean;
+  canManagePriceListAndUsers: boolean;
+  canManageSystemConfiguration: boolean;
+};
+
 export type RoleDto = {
   id: number; name: string; description: string | null; approvalCap: number; isSystem: boolean;
-  status: string; userCount: number; permissions: ModulePermissionEntry[];
+  status: string; userCount: number; permissions: ModulePermissionEntry[]; posCeilings: PosCeilingsDto;
 };
+
+const NO_POS_CEILINGS: PosCeilingsDto = {
+  discountCeilingPercent: 0, surplusReturnCeilingAmount: 0, canAuthorizeStandardReturnWithoutReceipt: false,
+  canOverrideItemPrice: false, canAuthorizeDamagedReturns: false, canVoidTransactions: false, canViewXReport: false,
+  canViewZReport: false, canConfigureReturnRulesAndFees: false, canManagePriceListAndUsers: false, canManageSystemConfiguration: false,
+};
+
+export const POS_TIER_PRESETS: Record<string, PosCeilingsDto> = {
+  "None (no POS authorization)": NO_POS_CEILINGS,
+  Cashier: { ...NO_POS_CEILINGS, discountCeilingPercent: 5, surplusReturnCeilingAmount: 500 },
+  "Senior Cashier": {
+    ...NO_POS_CEILINGS, discountCeilingPercent: 10, surplusReturnCeilingAmount: 1_000,
+    canAuthorizeStandardReturnWithoutReceipt: true, canOverrideItemPrice: true,
+  },
+  Supervisor: {
+    ...NO_POS_CEILINGS, discountCeilingPercent: 15, surplusReturnCeilingAmount: null,
+    canAuthorizeStandardReturnWithoutReceipt: true, canOverrideItemPrice: true, canAuthorizeDamagedReturns: true,
+    canVoidTransactions: true, canViewXReport: true,
+  },
+  "Store Manager": {
+    ...NO_POS_CEILINGS, discountCeilingPercent: null, surplusReturnCeilingAmount: null,
+    canAuthorizeStandardReturnWithoutReceipt: true, canOverrideItemPrice: true, canAuthorizeDamagedReturns: true,
+    canVoidTransactions: true, canViewXReport: true, canViewZReport: true, canConfigureReturnRulesAndFees: true,
+    canManagePriceListAndUsers: true,
+  },
+  "System Admin": {
+    ...NO_POS_CEILINGS, discountCeilingPercent: null, surplusReturnCeilingAmount: null,
+    canAuthorizeStandardReturnWithoutReceipt: true, canOverrideItemPrice: true, canAuthorizeDamagedReturns: true,
+    canVoidTransactions: true, canViewXReport: true, canViewZReport: true, canConfigureReturnRulesAndFees: true,
+    canManagePriceListAndUsers: true, canManageSystemConfiguration: true,
+  },
+};
+
+export function posCeilingsFromTier(tier: string | undefined): PosCeilingsDto {
+  return POS_TIER_PRESETS[tier ?? ""] ?? NO_POS_CEILINGS;
+}
+
+// Best-match reverse lookup for prefilling the Edit Role form's POS Tier select from a role's stored
+// ceilings — falls back to the closest preset by shared field count rather than requiring an exact
+// match, since a role's ceilings could in principle be hand-edited away from any single preset.
+export function posTierFromCeilings(ceilings: PosCeilingsDto): string {
+  const entries = Object.entries(POS_TIER_PRESETS);
+  const exact = entries.find(([, preset]) => JSON.stringify(preset) === JSON.stringify(ceilings));
+  if (exact) return exact[0];
+
+  let best = entries[0][0];
+  let bestScore = -1;
+  for (const [tier, preset] of entries) {
+    const score = Object.keys(preset).filter(
+      (key) => preset[key as keyof PosCeilingsDto] === ceilings[key as keyof PosCeilingsDto],
+    ).length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = tier;
+    }
+  }
+  return best;
+}
 export type BranchDto = {
   id: number; code: string; nameEn: string; nameAr: string | null; city: string; address: string | null;
   businessHours: string | null; vatRegistrationNumber: string | null; managerName: string | null;
@@ -53,7 +128,7 @@ export type SubscriptionDto = {
 
 export type CreateUserRequest = { name: string; email: string; password: string; roleId: number; branchId: number | null };
 export type UpdateUserRequest = { name: string; roleId: number; branchId: number | null; status: string };
-export type UpsertRoleRequest = { name: string; description: string | null; approvalCap: number; permissions: Record<string, string> };
+export type UpsertRoleRequest = { name: string; description: string | null; approvalCap: number; permissions: Record<string, string>; posCeilings: PosCeilingsDto };
 export type UpsertBranchRequest = {
   code: string; nameEn: string; nameAr: string | null; city: string; address: string | null; businessHours: string | null;
   vatRegistrationNumber: string | null; managerName: string | null; warehouse: string | null;
@@ -88,10 +163,10 @@ export const CONNECTION_TO_FRONTEND: Record<string, string> = Object.fromEntries
 
 export const RULE_DOMAIN_TO_BACKEND: Record<string, string> = {
   "Pricing & Discount": "Finance", "Refund & Return": "Orders", "Credit & Payment": "Finance",
-  "Inventory Movement": "Inventory", Approvals: "Admin", Compliance: "Admin",
+  "Inventory Movement": "Inventory", POS: "Pos", Approvals: "Admin", Compliance: "Admin",
 };
 export const RULE_DOMAIN_TO_FRONTEND: Record<string, string> = {
-  Finance: "Pricing & Discount", Orders: "Refund & Return", Inventory: "Inventory Movement", Admin: "Approvals",
+  Finance: "Pricing & Discount", Orders: "Refund & Return", Inventory: "Inventory Movement", Pos: "POS", Admin: "Approvals",
 };
 export const RULE_PRIORITY_TO_NUMBER: Record<string, number> = { Low: 10, Normal: 20, High: 30, Critical: 40 };
 export const RULE_PRIORITY_TO_FRONTEND: Record<number, string> = { 10: "Low", 20: "Normal", 30: "High", 40: "Critical" };
@@ -395,24 +470,39 @@ export type LiveTable = {
 };
 
 export function mapUsers(users: UserDto[]): LiveTable {
+  const active = users.filter((u) => u.status === "Active").length;
+  const suspended = users.filter((u) => u.status === "Suspended").length;
+  const inactive = users.filter((u) => u.status === "Inactive").length;
+  const biometric = users.filter((u) => u.biometricEnabled).length;
+  const total = users.length || 1;
   return {
     columns: ["Employee ID", "Name", "Role", "Branch", "Email", "PIN", "Biometric", "Last Login", "Status"],
     statusCol: 8,
     ids: users.map((u) => u.id),
+    kpis: [
+      { label: "Total Users", value: String(users.length), sub: `${new Set(users.map((u) => u.roleId)).size} roles`, tone: "info" },
+      { label: "Active", value: String(active), sub: `${Math.round((active / total) * 100)}%`, tone: "success" },
+      { label: "Suspended", value: String(suspended), sub: suspended > 0 ? "Needs review" : "None", tone: suspended > 0 ? "warning" : "muted" },
+      { label: "Inactive", value: String(inactive), sub: "Left / deactivated", tone: "muted" },
+      { label: "Biometric Enabled", value: String(biometric), sub: `${Math.round((biometric / total) * 100)}% coverage`, tone: "info" },
+    ],
     rows: users.map((u) => [
       `USR-${String(u.id).padStart(3, "0")}`, u.name, u.roleName, u.branchName ?? "All Branches", u.email,
-      u.hasPin ? "Set" : "Not Set", "No", u.lastLoginAt ? fmtDate(u.lastLoginAt) : "Never", u.status,
+      u.hasPin ? "Set" : "Not Set", u.biometricEnabled ? "Yes" : "No", u.lastLoginAt ? fmtDate(u.lastLoginAt) : "Never", u.status,
     ]),
   };
 }
 
 export function mapRoles(roles: RoleDto[]): LiveTable {
   return {
-    columns: ["Role", "Users", "POS", "Orders", "Inventory", "Finance", "Admin", "Approval Cap (ر.س)", "Status"],
-    statusCol: 8,
+    columns: ["Role", "Users", "POS Tier", "Discount Ceiling", "Surplus Ceiling", "POS", "Orders", "Inventory", "Finance", "Admin", "Approval Cap (ر.س)", "Status"],
+    statusCol: 11,
     ids: roles.map((r) => r.id),
     rows: roles.map((r) => [
-      r.name, r.userCount, permLevel(r, "Pos"), permLevel(r, "Orders"), permLevel(r, "Inventory"),
+      r.name, r.userCount, posTierFromCeilings(r.posCeilings),
+      r.posCeilings.discountCeilingPercent === null ? "Unlimited" : `${r.posCeilings.discountCeilingPercent}%`,
+      r.posCeilings.surplusReturnCeilingAmount === null ? "Any value" : r.posCeilings.surplusReturnCeilingAmount.toLocaleString("en-US"),
+      permLevel(r, "Pos"), permLevel(r, "Orders"), permLevel(r, "Inventory"),
       permLevel(r, "Finance"), permLevel(r, "Admin"),
       r.approvalCap >= 999_999 ? "Unlimited" : r.approvalCap.toLocaleString("en-US"), r.status,
     ]),
@@ -551,11 +641,28 @@ export function mapAuditLogs(rows: AuditLogDto[]): LiveTable {
 }
 
 export function mapPlans(sub: SubscriptionDto): LiveTable {
+  const kpiTone = (usage: number, limit: number): LiveKpi["tone"] => {
+    if (limit <= 0) return "info";
+    if (usage > limit) return "critical";
+    return usage / limit >= 0.9 ? "warning" : "success";
+  };
   return {
     columns: ["Module / Feature", "Entitlement", "Usage", "Limit", "Overage Rate", "Next Reset", "Status"],
     statusCol: 6,
-    rows: sub.usage.map((u) => [
-      u.feature, "Included", u.usage, u.limit, `${u.overageRate.toLocaleString("en-US")} ر.س`, fmtDate(u.nextResetAt), "OK",
-    ]),
+    kpis: [
+      { label: "Current Plan", value: sub.planName, sub: `Renews ${fmtDate(sub.renewsAt)}`, tone: sub.status === "Active" ? "success" : "warning" },
+      ...sub.usage.map((u) => ({
+        label: u.feature, value: `${u.usage.toLocaleString("en-US")} / ${u.limit.toLocaleString("en-US")}`,
+        sub: u.usage > u.limit ? "Over limit" : "In plan", tone: kpiTone(u.usage, u.limit),
+      })),
+    ],
+    rows: sub.usage.map((u) => {
+      const pct = u.limit > 0 ? u.usage / u.limit : 0;
+      const status = u.usage > u.limit ? "Over Limit" : pct >= 0.9 ? "Near Limit" : "OK";
+      return [
+        u.feature, `${u.limit.toLocaleString("en-US")} included`, u.usage, u.limit,
+        `${u.overageRate.toLocaleString("en-US")} ر.س`, fmtDate(u.nextResetAt), status,
+      ];
+    }),
   };
 }

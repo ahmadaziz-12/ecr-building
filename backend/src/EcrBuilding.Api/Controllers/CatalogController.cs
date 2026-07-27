@@ -2,6 +2,7 @@ using System.Text.Json;
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
 using EcrBuilding.Application.Catalog;
+using EcrBuilding.Domain.Common;
 using EcrBuilding.Domain.Entities;
 using EcrBuilding.Domain.Enums;
 using EcrBuilding.Infrastructure.Persistence;
@@ -33,6 +34,8 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
             Code = request.Code, NameEn = request.NameEn, NameAr = request.NameAr, ParentId = request.ParentId,
             AttributesJson = JsonSerializer.Serialize(request.Attributes), ReturnRule = request.ReturnRule,
             DefaultUom = request.DefaultUom, VatRate = request.VatRate, Returnable = request.Returnable,
+            LoyaltyAccrualMultiplier = request.LoyaltyAccrualMultiplier,
+            SurplusRestockingFeePct = request.SurplusRestockingFeePct,
         };
         db.Categories.Add(category);
         await db.SaveChangesAsync(ct);
@@ -52,6 +55,8 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
         category.ParentId = request.ParentId; category.AttributesJson = JsonSerializer.Serialize(request.Attributes);
         category.ReturnRule = request.ReturnRule; category.DefaultUom = request.DefaultUom;
         category.VatRate = request.VatRate; category.Returnable = request.Returnable;
+        category.LoyaltyAccrualMultiplier = request.LoyaltyAccrualMultiplier;
+        category.SurplusRestockingFeePct = request.SurplusRestockingFeePct;
         await db.SaveChangesAsync(ct);
         await db.Entry(category).Reference(c => c.Parent).LoadAsync(ct);
         await audit.LogAsync("inventory", "CATEGORY_UPDATED", category.Id.ToString(), newValue: request, cancellationToken: ct);
@@ -75,7 +80,7 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
     private static CategoryDto Map(Category c) => new(
         c.Id, c.Code, c.NameEn, c.NameAr, c.ParentId, c.Parent?.NameEn,
         JsonSerializer.Deserialize<string[]>(c.AttributesJson) ?? [], c.ReturnRule, c.DefaultUom, c.VatRate, c.Returnable,
-        c.Status.ToString(), c.Products.Count);
+        c.LoyaltyAccrualMultiplier, c.Status.ToString(), c.Products.Count, c.SurplusRestockingFeePct);
 }
 
 [ApiController]
@@ -88,7 +93,8 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     public async Task<ActionResult<List<ProductDto>>> List([FromQuery] int? branchId, CancellationToken ct)
     {
         var products = await db.Products.Include(p => p.Category).Include(p => p.StockLevels).ThenInclude(s => s.Warehouse)
-            .Include(p => p.BranchStockLevels).OrderBy(p => p.Sku).ToListAsync(ct);
+            .Include(p => p.BranchStockLevels).Include(p => p.UomConversions).Include(p => p.Attributes).Include(p => p.Supplier)
+            .OrderBy(p => p.Sku).ToListAsync(ct);
         return Ok(products.Select(p => Map(p, branchId)).ToList());
     }
 
@@ -96,7 +102,8 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     [AllowAnonymous]
     public async Task<ActionResult<ProductDto>> Lookup([FromQuery] string barcode, CancellationToken ct)
     {
-        var product = await db.Products.Include(p => p.Category).Include(p => p.StockLevels)
+        var product = await db.Products.Include(p => p.Category).Include(p => p.StockLevels).Include(p => p.UomConversions)
+            .Include(p => p.Attributes).Include(p => p.Supplier)
             .FirstOrDefaultAsync(p => p.Barcode == barcode || p.Sku == barcode, ct);
         return product is null ? NotFound() : Ok(Map(product));
     }
@@ -109,6 +116,11 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         {
             return Conflict(new { error = "A product with this SKU already exists." });
         }
+        // BRD §2.2: 13-digit barcodes are validated as EAN-13; shorter internal codes pass through.
+        if (!Ean13.IsValidOrNotEan(request.Barcode))
+        {
+            return BadRequest(new { error = $"\"{request.Barcode}\" is not a valid EAN-13 barcode (checksum failed)." });
+        }
 
         var product = new Product
         {
@@ -117,11 +129,15 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             SellingPrice = request.SellingPrice, VatRate = request.VatRate, StockUom = request.StockUom,
             SellUomsJson = JsonSerializer.Serialize(request.SellUoms), Weight = request.Weight,
             Returnable = request.Returnable, ReorderLevel = request.ReorderLevel, ReorderQty = request.ReorderQty,
-            ImageUrl = request.ImageUrl,
+            ImageUrl = request.ImageUrl, IsCutToSize = request.IsCutToSize,
+            SupplierId = request.SupplierId, BinLocation = request.BinLocation,
         };
+        product.UomConversions = BuildUomConversions(request.UomConversions, request.StockUom);
+        product.Attributes = BuildAttributes(request.Attributes);
         db.Products.Add(product);
         await db.SaveChangesAsync(ct);
         await db.Entry(product).Reference(p => p.Category).LoadAsync(ct);
+        if (product.SupplierId is not null) await db.Entry(product).Reference(p => p.Supplier).LoadAsync(ct);
         await audit.LogAsync("inventory", "PRODUCT_CREATED", product.Id.ToString(), newValue: request, cancellationToken: ct);
         return Ok(Map(product));
     }
@@ -130,11 +146,19 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
     public async Task<ActionResult<ProductDto>> Update(int id, UpsertProductRequest request, CancellationToken ct)
     {
-        var product = await db.Products.Include(p => p.Category).Include(p => p.StockLevels).FirstOrDefaultAsync(p => p.Id == id, ct);
+        var product = await db.Products.Include(p => p.Category).Include(p => p.StockLevels).Include(p => p.UomConversions)
+            .Include(p => p.Attributes)
+            .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (product is null) return NotFound();
         if (await db.Products.AnyAsync(p => p.Sku == request.Sku && p.Id != id, ct))
         {
             return Conflict(new { error = "A product with this SKU already exists." });
+        }
+        // Validate only when the barcode CHANGED — legacy rows may carry pre-validation values that
+        // must stay editable without forcing a barcode fix first.
+        if (request.Barcode != product.Barcode && !Ean13.IsValidOrNotEan(request.Barcode))
+        {
+            return BadRequest(new { error = $"\"{request.Barcode}\" is not a valid EAN-13 barcode (checksum failed)." });
         }
 
         product.Sku = request.Sku; product.Barcode = request.Barcode; product.NameEn = request.NameEn; product.NameAr = request.NameAr;
@@ -142,9 +166,17 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         product.SellingPrice = request.SellingPrice; product.VatRate = request.VatRate; product.StockUom = request.StockUom;
         product.SellUomsJson = JsonSerializer.Serialize(request.SellUoms); product.Weight = request.Weight;
         product.Returnable = request.Returnable; product.ReorderLevel = request.ReorderLevel; product.ReorderQty = request.ReorderQty;
-        product.ImageUrl = request.ImageUrl;
+        product.ImageUrl = request.ImageUrl; product.IsCutToSize = request.IsCutToSize;
+        product.SupplierId = request.SupplierId; product.BinLocation = request.BinLocation;
+        // Replace-all, same pattern as RolePermissions in RolesController.Update — the request's list
+        // is the complete intended state, not a delta.
+        db.ProductUomConversions.RemoveRange(product.UomConversions);
+        product.UomConversions = BuildUomConversions(request.UomConversions, request.StockUom);
+        db.ProductAttributes.RemoveRange(product.Attributes);
+        product.Attributes = BuildAttributes(request.Attributes);
         await db.SaveChangesAsync(ct);
         await db.Entry(product).Reference(p => p.Category).LoadAsync(ct);
+        if (product.SupplierId is not null) await db.Entry(product).Reference(p => p.Supplier).LoadAsync(ct);
         await audit.LogAsync("inventory", "PRODUCT_UPDATED", product.Id.ToString(), newValue: request, cancellationToken: ct);
         return Ok(Map(product));
     }
@@ -163,12 +195,31 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         return Ok(Map(product));
     }
 
+    private static List<ProductAttribute> BuildAttributes(List<ProductAttributeDto>? attributes) =>
+        (attributes ?? [])
+            .Where(a => !string.IsNullOrWhiteSpace(a.Name) && !string.IsNullOrWhiteSpace(a.Value))
+            .GroupBy(a => a.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(g => new ProductAttribute { Name = g.Key, Value = g.First().Value.Trim() })
+            .ToList();
+
+    // Drops rows that are blank, non-positive, or duplicate the stock UOM itself (stock UOM is always
+    // factor 1 by definition — storing it would just create a shadowable duplicate).
+    private static List<ProductUomConversion> BuildUomConversions(List<ProductUomConversionDto>? conversions, string stockUom) =>
+        (conversions ?? [])
+            .Where(c => !string.IsNullOrWhiteSpace(c.Uom) && c.FactorToStock > 0
+                && !c.Uom.Trim().Equals(stockUom, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(c => c.Uom.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(g => new ProductUomConversion { Uom = g.Key, FactorToStock = g.First().FactorToStock })
+            .ToList();
+
     // branchId scopes On Hand/Available to that branch's OWN shop-floor stock (BranchStockLevel) —
     // what a cashier can actually sell right now — instead of the unscoped view, which reports
     // total bulk warehouse stock across the whole company (used by the general catalog page, not
     // by checkout/quotation cart-building).
     private static ProductDto Map(Product p, int? branchId = null)
     {
+        var conversions = p.UomConversions.Select(c => new ProductUomConversionDto(c.Uom, c.FactorToStock)).ToList();
+        var attributes = p.Attributes.Select(a => new ProductAttributeDto(a.Name, a.Value)).ToList();
         if (branchId is not null)
         {
             var branchLevels = p.BranchStockLevels.Where(s => s.BranchId == branchId);
@@ -176,14 +227,16 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
                 p.Id, p.Sku, p.Barcode, p.NameEn, p.NameAr, p.CategoryId, p.Category?.NameEn ?? "", p.Brand, p.CostPrice,
                 p.SellingPrice, p.VatRate, p.StockUom, JsonSerializer.Deserialize<string[]>(p.SellUomsJson) ?? [], p.Weight,
                 p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
-                branchLevels.Sum(s => s.OnHand), branchLevels.Sum(s => s.Available));
+                branchLevels.Sum(s => s.OnHand), branchLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
+                attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation);
         }
 
         return new(
             p.Id, p.Sku, p.Barcode, p.NameEn, p.NameAr, p.CategoryId, p.Category?.NameEn ?? "", p.Brand, p.CostPrice,
             p.SellingPrice, p.VatRate, p.StockUom, JsonSerializer.Deserialize<string[]>(p.SellUomsJson) ?? [], p.Weight,
             p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
-            p.StockLevels.Sum(s => s.OnHand), p.StockLevels.Sum(s => s.Available));
+            p.StockLevels.Sum(s => s.OnHand), p.StockLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
+            attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation);
     }
 }
 
@@ -214,6 +267,7 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
         var bundle = new ProductBundle
         {
             Code = request.Code, NameEn = request.NameEn, NameAr = request.NameAr, BundlePrice = request.BundlePrice,
+            Type = Enum.TryParse<BundleType>(request.Type, ignoreCase: true, out var parsedType) ? parsedType : BundleType.ProductSystem,
             Lines = request.Lines.Select(l => new BundleLine { ProductId = l.ProductId, Qty = l.Qty }).ToList(),
         };
         db.ProductBundles.Add(bundle);
@@ -236,6 +290,7 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
         }
 
         bundle.Code = request.Code; bundle.NameEn = request.NameEn; bundle.NameAr = request.NameAr; bundle.BundlePrice = request.BundlePrice;
+        if (Enum.TryParse<BundleType>(request.Type, ignoreCase: true, out var parsedType)) bundle.Type = parsedType;
         db.BundleLines.RemoveRange(bundle.Lines);
         bundle.Lines = request.Lines.Select(l => new BundleLine { BundleId = bundle.Id, ProductId = l.ProductId, Qty = l.Qty }).ToList();
         await db.SaveChangesAsync(ct);
@@ -259,7 +314,39 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
         return Ok(Map(bundle));
     }
 
+    // BRD §5.4 Bundle Sales Report: units sold, revenue at bundle vs individual pricing, and the
+    // discount value given — derived from OrderLines tagged with a BundleId at checkout.
+    [HttpGet("sales-report")]
+    public async Task<ActionResult<List<BundleSalesReportRowDto>>> SalesReport(CancellationToken ct)
+    {
+        var bundles = await db.ProductBundles.Include(b => b.Lines).ThenInclude(l => l.Product).ToListAsync(ct);
+        var soldLines = await db.OrderLines.Where(l => l.BundleId != null)
+            .GroupBy(l => new { l.BundleId, l.ProductId })
+            .Select(g => new { g.Key.BundleId, g.Key.ProductId, Qty = g.Sum(x => x.Qty), Revenue = g.Sum(x => x.LineTotal) })
+            .ToListAsync(ct);
+
+        var rows = new List<BundleSalesReportRowDto>();
+        foreach (var bundle in bundles)
+        {
+            var sold = soldLines.Where(s => s.BundleId == bundle.Id).ToList();
+            if (sold.Count == 0) continue;
+            // Units = sold quantity of the first constituent ÷ its per-bundle quantity — every
+            // constituent scales together, so any of them recovers the bundle count.
+            var reference = bundle.Lines.FirstOrDefault(l => sold.Any(s => s.ProductId == l.ProductId));
+            var unitsSold = reference is null || reference.Qty == 0 ? 0
+                : Math.Round((sold.FirstOrDefault(s => s.ProductId == reference.ProductId)?.Qty ?? 0) / reference.Qty, 2);
+            var revenueAtBundle = sold.Sum(s => s.Revenue);
+            var individualPerUnit = bundle.Lines.Sum(l => l.Qty * (l.Product?.SellingPrice ?? 0));
+            var revenueAtIndividual = Math.Round(unitsSold * individualPerUnit, 2);
+            rows.Add(new BundleSalesReportRowDto(
+                bundle.Id, bundle.Code, bundle.NameEn, bundle.Type.ToString(), unitsSold,
+                Math.Round(revenueAtBundle, 2), revenueAtIndividual, Math.Round(revenueAtIndividual - revenueAtBundle, 2)));
+        }
+        return Ok(rows.OrderByDescending(r => r.RevenueAtBundlePrice).ToList());
+    }
+
     private static BundleDto Map(ProductBundle b) => new(
         b.Id, b.Code, b.NameEn, b.NameAr, b.BundlePrice, b.Lines.Sum(l => l.Qty * (l.Product?.CostPrice ?? 0)), b.Status.ToString(),
-        b.Lines.Select(l => new BundleLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.Product?.CostPrice ?? 0)).ToList());
+        b.Lines.Select(l => new BundleLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.Product?.CostPrice ?? 0, l.Product?.SellingPrice ?? 0, l.Product?.VatRate ?? 0)).ToList(),
+        b.Type.ToString(), b.Lines.Sum(l => l.Qty * (l.Product?.SellingPrice ?? 0)));
 }

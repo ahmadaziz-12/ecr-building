@@ -38,6 +38,14 @@ public static class EscPosBuilder
 
         Raw(Esc, (byte)'@'); // init
 
+        // BRD §7.3: the cash drawer opens automatically on cash payment completion — the RJ-11
+        // drawer hangs off the printer, so the kick is an ESC p pulse at the top of the receipt job
+        // (pin 2, 100ms on / 250ms off). Non-cash sales print without the pulse.
+        if (order.Payments.Any(p => p.Method == PaymentMethod.Cash))
+        {
+            Raw(Esc, (byte)'p', 0x00, 0x32, 0x7D);
+        }
+
         // Header
         Center(); Bold(true); DoubleSize(true);
         var name = branchName.Length > 24 ? branchName[..24] : branchName.PadLeft((24 + branchName.Length) / 2);

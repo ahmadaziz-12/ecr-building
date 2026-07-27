@@ -23,6 +23,8 @@ builder.Services.AddCors(options =>
 builder.Services.AddControllers().AddJsonOptions(o =>
 {
     o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    o.JsonSerializerOptions.Converters.Add(new EcrBuilding.Api.Json.UtcDateTimeConverter());
+    o.JsonSerializerOptions.Converters.Add(new EcrBuilding.Api.Json.UtcNullableDateTimeConverter());
 });
 builder.Services.AddOpenApi();
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -63,10 +65,21 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
+// BRD §4.3.4: daily loyalty-points expiry sweep — not in Testing, where tests drive
+// LoyaltyPointsExpiryService.ExpireAsync directly instead of racing a background timer.
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddHostedService<EcrBuilding.Infrastructure.Services.LoyaltyPointsExpiryService>();
+}
+
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
+// Skipped under the "Testing" environment: EcrBuilding.Tests' CustomWebApplicationFactory swaps in a
+// private in-memory SQLite database per test run and seeds only the minimal fixture each test needs,
+// via TestDataSeeder, rather than this full production dataset.
+if (!app.Environment.IsEnvironment("Testing"))
 {
+    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var hasher = scope.ServiceProvider.GetRequiredService<EcrBuilding.Application.Abstractions.IPasswordHasher>();
     await DbSeeder.SeedAsync(db, hasher);
@@ -86,3 +99,6 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+// Exposes the top-level Program for WebApplicationFactory<Program> in EcrBuilding.Tests.
+public partial class Program { }

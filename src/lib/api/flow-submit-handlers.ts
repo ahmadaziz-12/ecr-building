@@ -1,4 +1,5 @@
 import { useCategories, useCreateCategory, useCreateProduct, useProducts } from "./catalog";
+import { parseUomConversions } from "@/lib/buildpos/uom";
 import { useCreateBundle } from "./bundles";
 import {
   useCreateStockAdjustment,
@@ -13,7 +14,7 @@ import {
   useCreateUser, useCreateRole, useCreateBranch, useCreateTerminal, useCreateDevice,
   useCreateRule, useCreateCompliance, useCreateMaintenance,
   TERMINAL_TYPE_TO_BACKEND, DEVICE_TYPE_TO_BACKEND, CONNECTION_TO_BACKEND,
-  RULE_DOMAIN_TO_BACKEND, RULE_PRIORITY_TO_NUMBER,
+  RULE_DOMAIN_TO_BACKEND, RULE_PRIORITY_TO_NUMBER, posCeilingsFromTier,
 } from "./admin";
 import {
   useCreatePurchaseOrder,
@@ -23,7 +24,7 @@ import {
   useSuppliers,
 } from "./procurement";
 import { useCreateExpense, useCreateReturn, useCreateTaxCode } from "./finance";
-import { useCreatePricingRule, useCustomers, useOrders } from "./pos";
+import { useCustomers, useOrders } from "./pos";
 
 export function parseSkuQtyLines(raw: string): { sku: string; qty: number }[] {
   return raw.split(",").map((token) => {
@@ -96,7 +97,6 @@ export function useFlowSubmitHandlers(): Record<
   const createExpense = useCreateExpense();
   const createTaxCode = useCreateTaxCode();
   const createReturn = useCreateReturn();
-  const createPricingRule = useCreatePricingRule();
   const { data: orders } = useOrders();
   const { data: customers } = useCustomers();
 
@@ -124,6 +124,16 @@ export function useFlowSubmitHandlers(): Record<
     if (!branch) throw new Error(`Unknown branch "${branchName}".`);
     const warehouse = warehouses?.find((w) => w.branchId === branch.id);
     if (!warehouse) throw new Error(`No warehouse configured for branch "${branchName}".`);
+    return { branch, warehouse };
+  }
+
+  // A branch without a linked warehouse can still be ordered for on a PO — goods land straight on the
+  // branch's sellable stock at Receive time, the warehouse-side bin/batch/expiry tracking is just
+  // skipped for that line. Unlike findWarehouseForBranch, this never throws for a missing warehouse.
+  function resolveBranchAndOptionalWarehouse(branchName: string) {
+    const branch = branches?.find((b) => b.nameEn.toLowerCase() === branchName.toLowerCase());
+    if (!branch) throw new Error(`Unknown branch "${branchName}".`);
+    const warehouse = warehouses?.find((w) => w.branchId === branch.id) ?? null;
     return { branch, warehouse };
   }
 
@@ -161,6 +171,8 @@ export function useFlowSubmitHandlers(): Record<
         reorderLevel: Number(values.reorder || 0),
         reorderQty: Number(values.reorderQty || 0),
         imageUrl: null,
+        uomConversions: parseUomConversions(values.uomConversions),
+        isCutToSize: values.cutToSize === "on",
       });
     },
 
@@ -373,11 +385,14 @@ export function useFlowSubmitHandlers(): Record<
         if (!product) throw new Error(`Unknown SKU "${row.sku}".`);
         const branchNames = row.branch.split(",").map((s) => s.trim()).filter(Boolean);
         return branchNames.map((branchName) => {
-          const { branch, warehouse } = findWarehouseForBranch(branchName);
+          const { branch, warehouse } = resolveBranchAndOptionalWarehouse(branchName);
           return {
             productId: product.id,
             branchId: branch.id,
-            warehouseId: warehouse.id,
+            warehouseId: warehouse?.id ?? null,
+            // "" / unset → the server orders in the product's own stock UOM; a picked UOM (e.g.
+            // "Pallet") is validated server-side against the product's configured conversions.
+            uom: row.uom || null,
             qty: Number(row.qty),
             unitCost: Number(row.unitCost || product.costPrice),
             batchNo: row.batchNo || null,
@@ -454,48 +469,31 @@ export function useFlowSubmitHandlers(): Record<
       });
     },
 
-    "create-pricing-rule": async (values) => {
-      if (!values.name || !values.type || !values.scope || !values.action) {
-        throw new Error("Name, type, scope and action are required.");
-      }
-      await createPricingRule.mutateAsync({
-        name: values.name,
-        type: values.type,
-        scope: values.scope,
-        condition: values.condition || "Any",
-        action: values.action,
-        priority: Number(values.priority || 10),
-        validUntil: values.validUntil || null,
-        code: values.type === "Coupon" && values.code ? values.code.toUpperCase() : null,
-        discountType: values.discountType || "Percentage",
-        value: Number(values.value || 0),
-      });
-    },
-
     "new-return": async (values) => {
       if (!values.type || !values.reason) throw new Error("Return type and reason are required.");
       if (!values.items)
-        throw new Error("At least one return line (SKU x Qty @ Amount) is required.");
+        throw new Error("At least one return line (SKU x Qty) is required.");
+      if (!values.invoice) throw new Error("The original order number is required — returns always reference the original transaction.");
 
-      const order = values.invoice
-        ? orders?.find((o) => o.orderNo.toLowerCase() === values.invoice.toLowerCase())
-        : undefined;
-      const customer = values.customer
-        ? customers?.find((c) => c.nameEn.toLowerCase() === values.customer.toLowerCase())
-        : undefined;
+      // Module 6: returns are anchored to the ORIGINAL ORDER's lines, so the SKUs entered here are
+      // resolved against that order and quantities validated/priced server-side.
+      const order = orders?.find((o) => o.orderNo.toLowerCase() === values.invoice.toLowerCase());
+      if (!order) throw new Error(`Unknown order "${values.invoice}".`);
 
-      const lines = parseReturnLines(values.items).map(({ sku, qty, amount }) => {
-        const product = products?.find((p) => p.sku.toLowerCase() === sku.toLowerCase());
-        if (!product) throw new Error(`Unknown SKU "${sku}".`);
-        return { productId: product.id, qty, amount };
+      const lines = parseReturnLines(values.items).map(({ sku, qty }) => {
+        const orderLine = order.lines.find((l) => l.sku.toLowerCase() === sku.toLowerCase());
+        if (!orderLine) throw new Error(`"${sku}" was not sold on ${order.orderNo}.`);
+        return { orderLineId: orderLine.id, qty };
       });
 
       await createReturn.mutateAsync({
-        orderId: order?.id ?? null,
-        customerId: customer?.id ?? null,
+        orderId: order.id,
         type: values.type,
         reason: values.reason,
         lines,
+        // The generic admin flow has no damage-code field; the POS CreateReturnDialog captures the
+        // specific code — here damaged entries default to Other with the detail in the reason text.
+        damageReasonCode: values.type === "Damaged" ? "Other" : undefined,
       });
     },
 
@@ -534,6 +532,7 @@ export function useFlowSubmitHandlers(): Record<
         description: values.description || null,
         approvalCap: Number(values.approvalCap || 0),
         permissions,
+        posCeilings: posCeilingsFromTier(values.posTier),
       });
     },
 
@@ -592,6 +591,10 @@ export function useFlowSubmitHandlers(): Record<
       if (!values.code || !values.name || !values.rate || !values.appliesTo) {
         throw new Error("Code, name, rate and applies-to are required.");
       }
+      const branch =
+        values.branch && values.branch !== "All Branches"
+          ? branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase())
+          : undefined;
       await createTaxCode.mutateAsync({
         code: values.code,
         name: values.name,
@@ -600,6 +603,7 @@ export function useFlowSubmitHandlers(): Record<
         appliesTo: values.appliesTo,
         effectiveFrom: values.effectiveFrom || new Date().toISOString().slice(0, 10),
         glAccountCode: values.glAccount || null,
+        branchId: branch?.id ?? null,
       });
     },
 

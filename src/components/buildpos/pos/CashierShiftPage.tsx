@@ -20,7 +20,7 @@ const STATUS_LABELS: Record<string, string> = { NeedsReview: "Needs Review" };
 const PAGE_SIZE = 10;
 
 function fmtSar(n: number): string {
-  return `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س`;
+  return `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
 }
 function fmtTime(iso: string | null): string {
   if (!iso) return "—";

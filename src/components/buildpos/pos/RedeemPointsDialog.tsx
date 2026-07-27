@@ -18,10 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useCustomerLoyalty, useRedeemPoints } from "@/lib/api/loyalty";
+import { useCustomerLoyalty, useLoyaltyProgramConfig, useRedeemPoints } from "@/lib/api/loyalty";
 import type { CustomerDto } from "@/lib/api/pos";
-
-const SAR_PER_POINT = 0.1;
 
 export function RedeemPointsDialog({
   open,
@@ -45,6 +43,8 @@ export function RedeemPointsDialog({
 
   const selectedId = customerId ? Number(customerId) : null;
   const { data: summary } = useCustomerLoyalty(selectedId);
+  const { data: config } = useLoyaltyProgramConfig();
+  const sarPerPoint = config ? 1 / config.pointsPerSarRedeemed : 0.01;
   const pointsNum = Number(points) || 0;
   const insufficientBalance = summary !== undefined && pointsNum > summary.points;
 
@@ -103,11 +103,10 @@ export function RedeemPointsDialog({
             <p
               className={`mt-1 text-xs ${insufficientBalance ? "text-critical" : "text-muted-foreground"}`}
             >
-              {summary.points} points available (≈ {(summary.points * SAR_PER_POINT).toFixed(2)}{" "}
-              ر.س)
+              {summary.points} points available (≈ {summary.pointsValue.toFixed(2)} ر.س)
               {pointsNum > 0 &&
                 !insufficientBalance &&
-                ` · redeems for ${(pointsNum * SAR_PER_POINT).toFixed(2)} ر.س`}
+                ` · redeems for ${(pointsNum * sarPerPoint).toFixed(2)} ر.س`}
             </p>
           )}
         </div>

@@ -50,6 +50,7 @@ import {
 import type { ComponentType, ReactNode } from "react";
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -112,6 +113,9 @@ import {
   primaryFilterGroups,
   useFilters,
 } from "@/lib/buildpos/filter-context";
+import { useAuth } from "@/lib/api/auth";
+import { useCategories } from "@/lib/api/catalog";
+import { useBranches } from "@/lib/api/admin";
 import cementImg from "@/assets/cat-cement.jpg";
 import steelImg from "@/assets/cat-steel.jpg";
 import tilesImg from "@/assets/cat-tiles.jpg";
@@ -148,6 +152,8 @@ function toneForStatus(s: string): Severity {
   if (["critical", "failed", "offline"].some((x) => k.includes(x))) return "critical";
   if (["low", "warning", "pending", "queued", "idle", "needs", "quarantine"].some((x) => k.includes(x)))
     return "warning";
+  // Negated words checked before the success list substring-matches inside them ("Inactive" contains "active").
+  if (["inactive", "in-active", "disabled", "deactivated", "suspended"].some((x) => k.includes(x))) return "muted";
   if (["active", "cleared", "delivered", "completed", "reconciled", "healthy", "submitted"].some((x) =>
     k.includes(x)
   ))
@@ -208,9 +214,25 @@ const iconMap: Record<string, ComponentType<{ className?: string }>> = {
 
 /* ---------------- Filter Bar ---------------- */
 
+// Filters actually consumed by live dashboard data (Category → InventoryHealth,
+// Branch → order-derived KPIs in dashboard.tsx). Everything else is display-only.
+const LIVE_FILTER_LABELS = ["Branch", "Category"];
+
 export function FilterBar({ compact = false }: { compact?: boolean }) {
   const { values, setValue, reset } = useFilters();
+  const queryClient = useQueryClient();
+  const { hasAccess } = useAuth();
   const [moreOpen, setMoreOpen] = useState(false);
+  // The static blueprint option names ("Cement & Binders", "Riyadh Main Branch") don't match the
+  // live category/branch names, so wired consumers would filter everything to nothing — swap in
+  // the real names once loaded.
+  const { data: liveCategories } = useCategories(hasAccess("Inventory"));
+  const { data: liveBranches } = useBranches(hasAccess("Network"));
+  const liveOptions = (g: { label: string; options: string[] }): string[] => {
+    if (g.label === "Category" && liveCategories?.length) return ["All Categories", ...liveCategories.map((c) => c.nameEn)];
+    if (g.label === "Branch" && liveBranches?.length) return ["All Permitted Branches", ...liveBranches.map((b) => b.nameEn)];
+    return g.options;
+  };
   const shown = compact ? primaryFilterGroups.slice(0, 4) : primaryFilterGroups;
   const allGroups = [...primaryFilterGroups, ...moreFilterGroups];
   const activeChips = allGroups
@@ -225,7 +247,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             <Filter className="h-3.5 w-3.5" />
           </span>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/80">Filters</h3>
-          <span className="hidden text-[11px] text-muted-foreground sm:inline">Controls all cards, charts & tables below</span>
+          <span className="hidden text-[11px] text-muted-foreground sm:inline">Branch & Category filter the live data · other filters are demo-only</span>
           {activeChips.length > 0 && (
             <span className="ml-1 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-semibold text-[oklch(0.4_0.13_70)]">
               {activeChips.length} active
@@ -248,7 +270,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             size="sm"
             variant="ghost"
             className="h-8 gap-1 text-xs text-muted-foreground hover:text-brand"
-            onClick={() => toast.info("View saved", { description: "This filter set has been saved." })}
+            onClick={() => toast.info("Saved views aren't wired on the dashboard yet.")}
           >
             <Bookmark className="h-3.5 w-3.5" /> Save View
           </Button>
@@ -256,7 +278,10 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             size="sm"
             variant="ghost"
             className="h-8 gap-1 text-xs text-muted-foreground hover:text-brand"
-            onClick={() => toast.success("Data refreshed", { description: "Latest POS feed pulled." })}
+            onClick={() => {
+              queryClient.invalidateQueries();
+              toast.success("Refreshed", { description: "Live queries refetching." });
+            }}
           >
             <RefreshCw className="h-3.5 w-3.5" /> Refresh
           </Button>
@@ -264,7 +289,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             size="sm"
             variant="ghost"
             className="h-8 gap-1 text-xs text-muted-foreground hover:text-brand"
-            onClick={() => toast.success("Export queued", { description: "CSV export will be emailed." })}
+            onClick={() => toast.info("Export isn't wired on the dashboard yet.")}
           >
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
@@ -272,11 +297,23 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             size="sm"
             className="h-8 bg-brand text-brand-foreground hover:bg-brand/90"
             onClick={() => {
-              toast.success("Filters applied", {
-                description: activeChips.length
-                  ? activeChips.map((c) => `${c.label}: ${c.value}`).join(" · ")
-                  : "Default view.",
-              });
+              // Filters apply live as they change — this button only reports what's active, and
+              // never claims controls that aren't wired to live data were "applied".
+              const wired = activeChips.filter((c) => LIVE_FILTER_LABELS.includes(c.label));
+              const unwired = activeChips.filter((c) => !LIVE_FILTER_LABELS.includes(c.label));
+              if (unwired.length > 0) {
+                toast.warning(`Not wired to live data yet: ${unwired.map((c) => c.label).join(", ")}`, {
+                  description: wired.length
+                    ? `Applied — ${wired.map((c) => `${c.label}: ${c.value}`).join(" · ")}`
+                    : "Only Branch & Category filter the live data.",
+                });
+              } else {
+                toast.success(wired.length ? "Filters applied" : "Default view", {
+                  description: wired.length
+                    ? wired.map((c) => `${c.label}: ${c.value}`).join(" · ")
+                    : "Filters apply as you change them.",
+                });
+              }
             }}
           >
             Apply Filters
@@ -293,7 +330,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
                 <SelectValue placeholder={g.label} />
               </SelectTrigger>
               <SelectContent>
-                {g.options.map((o) => (
+                {liveOptions(g).map((o) => (
                   <SelectItem key={o} value={o}>{o}</SelectItem>
                 ))}
               </SelectContent>

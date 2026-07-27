@@ -23,7 +23,11 @@ public class InsightsController(AppDbContext db, IAuditService audit) : Controll
         var lines = await db.OrderLines.Include(l => l.Product).ThenInclude(p => p!.Category).Include(l => l.Order)
             .Where(l => l.Order!.Status == OrderStatus.Completed).ToListAsync(ct);
         var totalValue = lines.Sum(l => l.LineTotal);
-        var returnsByCategory = await db.ReturnLines.Include(l => l.Product).ThenInclude(p => p!.Category).ToListAsync(ct);
+        // Only a Completed return actually paid cash back out — a PendingApproval or Quarantine
+        // return hasn't happened yet and might still be rejected (same rule ReportsController's
+        // RefundMethods/Vat already apply; this endpoint had drifted from that convention).
+        var returnsByCategory = await db.ReturnLines.Include(l => l.Product).ThenInclude(p => p!.Category)
+            .Include(l => l.Return).Where(l => l.Return!.Status == ReturnStatus.Completed).ToListAsync(ct);
 
         var segments = lines.GroupBy(l => l.Product?.Category?.NameEn ?? "Uncategorized").Select(g =>
         {
@@ -49,7 +53,8 @@ public class InsightsController(AppDbContext db, IAuditService audit) : Controll
         var cost = await db.OrderLines.Include(l => l.Order).Include(l => l.Product)
             .Where(l => l.Order!.Status == OrderStatus.Completed && l.Order!.CreatedAt >= monthStart).SumAsync(l => l.Qty * l.Product!.CostPrice, ct);
         var grossMarginPct = revenue == 0 ? 0 : Math.Round((revenue - cost) / revenue * 100, 1);
-        var returnsValue = await db.ReturnLines.Include(l => l.Return).Where(l => l.Return!.CreatedAt >= monthStart).SumAsync(l => l.Amount, ct);
+        var returnsValue = await db.ReturnLines.Include(l => l.Return)
+            .Where(l => l.Return!.CreatedAt >= monthStart && l.Return!.Status == ReturnStatus.Completed).SumAsync(l => l.Amount, ct);
         var returnRatePct = netSales == 0 ? 0 : Math.Round(returnsValue / netSales * 100, 1);
         var totalInvoices = await db.ZatcaInvoices.CountAsync(ct);
         var clearedInvoices = await db.ZatcaInvoices.CountAsync(i => i.Status == ZatcaInvoiceStatus.Cleared, ct);
@@ -63,11 +68,21 @@ public class InsightsController(AppDbContext db, IAuditService audit) : Controll
             "ZatcaSuccessPct" => zatcaSuccessPct,
             _ => 0,
         };
+        // Most KPIs here are "higher is better" (Sales, Margin, ZATCA Success), but a rate KPI like
+        // Return Rate is a CEILING — its target reads "≤ 5%", and being further under it is good, not
+        // bad. Applying the higher-is-better formula uniformly showed a 1.5% return rate (well inside
+        // a 5% ceiling) as "Critical". Metric keys ending "Pct" that describe a rate-of-a-bad-thing
+        // are the ceiling ones; today that's exactly ReturnRatePct.
+        bool IsCeilingMetric(string key) => key == "ReturnRatePct";
 
         return Ok(kpis.Select(k =>
         {
             var actual = Actual(k.MetricKey);
-            var variance = k.Target == 0 ? 0 : Math.Round((actual - k.Target) / k.Target * 100, 1);
+            var isCeiling = IsCeilingMetric(k.MetricKey);
+            var rawVariance = k.Target == 0 ? 0 : Math.Round((actual - k.Target) / k.Target * 100, 1);
+            // For a ceiling metric, "over target" (positive rawVariance) is the bad direction — flip
+            // the sign so "variance >= 0" still means "meeting the goal" for every KPI uniformly.
+            var variance = isCeiling ? -rawVariance : rawVariance;
             var status = variance >= 0 ? "On Target" : variance >= -5 ? "Below Target" : "Critical";
             return new KpiDto(k.Id, k.Name, k.Category, k.Owner, k.Target, actual, variance, status, k.Period);
         }).ToList());
@@ -140,7 +155,12 @@ public class AdminOverviewController(AppDbContext db) : ControllerBase
     public async Task<ActionResult<AdminOverviewDto>> Get(CancellationToken ct)
     {
         var activeUsers = await db.Users.CountAsync(u => u.Status == UserStatus.Active, ct);
-        var pendingApprovals = await db.Leaves.CountAsync(l => l.Status == LeaveStatus.Submitted || l.Status == LeaveStatus.PendingManager || l.Status == LeaveStatus.PendingHr, ct);
+        // HR leave requests AND POS/finance approval requests (discount overrides, refund-window
+        // overrides, voids, credit overrides) are both legitimately "something needs a manager's
+        // sign-off" — this KPI is the company-wide backlog, not HR-only, so both must count.
+        var pendingLeaveApprovals = await db.Leaves.CountAsync(l => l.Status == LeaveStatus.Submitted || l.Status == LeaveStatus.PendingManager || l.Status == LeaveStatus.PendingHr, ct);
+        var pendingRequestApprovals = await db.ApprovalRequests.CountAsync(a => a.Status == ApprovalStatus.Pending, ct);
+        var pendingApprovals = pendingLeaveApprovals + pendingRequestApprovals;
         var openMaintenance = await db.MaintenanceTickets.CountAsync(t => t.Status == MaintenanceStatus.Open || t.Status == MaintenanceStatus.InProgress, ct);
         var yesterday = DateTime.UtcNow.AddHours(-24);
         var criticalEvents = await db.AuditLogs.CountAsync(a => a.Severity == AuditSeverity.Critical && a.CreatedAt >= yesterday, ct);
@@ -149,7 +169,17 @@ public class AdminOverviewController(AppDbContext db) : ControllerBase
         var totalInvoices = await db.ZatcaInvoices.CountAsync(ct);
         var clearedInvoices = await db.ZatcaInvoices.CountAsync(i => i.Status == ZatcaInvoiceStatus.Cleared, ct);
         var zatcaRate = totalInvoices == 0 ? 100m : Math.Round((decimal)clearedInvoices / totalInvoices * 100, 1);
-        var identity = await db.ZatcaIdentities.FirstOrDefaultAsync(ct);
+        // Onboarding is per-branch (ZATCA Model B) — picking one arbitrary identity to represent
+        // company-wide status could report "Healthy" while a branch that legally cannot issue
+        // e-invoices yet sits unnoticed. Healthy only when EVERY branch has reached ProductionReady;
+        // otherwise show how many have and the least-advanced status still outstanding.
+        var identities = await db.ZatcaIdentities.ToListAsync(ct);
+        var readyCount = identities.Count(i => i.OnboardingStatus == ZatcaOnboardingStatus.ProductionReady);
+        var allReady = identities.Count > 0 && readyCount == identities.Count;
+        var leastReadyStatus = identities.Count == 0
+            ? ZatcaOnboardingStatus.NotStarted
+            : identities.Min(i => i.OnboardingStatus);
+        var onboardingValue = identities.Count == 0 ? "NotStarted" : $"{readyCount}/{identities.Count} branches ({leastReadyStatus})";
 
         var areas = new List<OverviewAreaDto>
         {
@@ -157,7 +187,7 @@ public class AdminOverviewController(AppDbContext db) : ControllerBase
             new("ZATCA Integration", zatcaRate >= 99 ? "Healthy" : "Degraded", "Finance", "Success Rate", $"{zatcaRate}%", "≥ 99.5%"),
             new("Payment Gateway", "Healthy", "Finance", "Mode", "Simulated (happy-path)", "N/A"),
             new("Database", "Healthy", "IT", "Provider", "MariaDB", "N/A"),
-            new("ZATCA Onboarding", identity?.OnboardingStatus == ZatcaOnboardingStatus.ProductionReady ? "Healthy" : "Pending", "Finance", "Status", identity?.OnboardingStatus.ToString() ?? "NotStarted", "ProductionReady"),
+            new("ZATCA Onboarding", allReady ? "Healthy" : "Pending", "Finance", "Status", onboardingValue, "All branches ProductionReady"),
         };
 
         return Ok(new AdminOverviewDto(activeUsers, pendingApprovals, openMaintenance, criticalEvents, complianceOverdue, areas));

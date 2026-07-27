@@ -1,6 +1,7 @@
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
 using EcrBuilding.Application.Pos;
+using EcrBuilding.Domain.Common;
 using EcrBuilding.Domain.Entities;
 using EcrBuilding.Domain.Enums;
 using EcrBuilding.Infrastructure.Persistence;
@@ -19,7 +20,7 @@ public class CustomersController(AppDbContext db, IAuditService audit) : Control
     [HttpGet]
     public async Task<ActionResult<List<CustomerDto>>> List([FromQuery] string? type, [FromQuery] string? search, CancellationToken ct)
     {
-        var query = db.Customers.AsQueryable();
+        var query = db.Customers.Include(c => c.AccountManager).AsQueryable();
         if (!string.IsNullOrWhiteSpace(type) && Enum.TryParse<CustomerType>(type, ignoreCase: true, out var parsedType))
         {
             query = query.Where(c => c.Type == parsedType);
@@ -31,14 +32,17 @@ public class CustomersController(AppDbContext db, IAuditService audit) : Control
                 (c.Phone != null && c.Phone.Contains(term)) || (c.VatNo != null && c.VatNo.Contains(term)));
         }
         var customers = await query.OrderByDescending(c => c.LastPurchaseAt).ToListAsync(ct);
-        return Ok(customers.Select(Map).ToList());
+        var expiryMonths = (await db.GetLoyaltyConfigAsync(ct)).PointsExpiryMonths;
+        return Ok(customers.Select(c => Map(c, expiryMonths)).ToList());
     }
 
     [HttpGet("by-phone")]
     public async Task<ActionResult<CustomerDto>> ByPhone([FromQuery] string phone, CancellationToken ct)
     {
         var customer = await db.Customers.FirstOrDefaultAsync(c => c.Phone == phone, ct);
-        return customer is null ? NotFound() : Ok(Map(customer));
+        if (customer is null) return NotFound();
+        var expiryMonths = (await db.GetLoyaltyConfigAsync(ct)).PointsExpiryMonths;
+        return Ok(Map(customer, expiryMonths));
     }
 
     [HttpGet("{id:int}/statement")]
@@ -53,7 +57,7 @@ public class CustomersController(AppDbContext db, IAuditService audit) : Control
             .Where(o => o.CustomerId == id).OrderByDescending(o => o.CreatedAt).ToListAsync(ct);
 
         return Ok(new CustomerStatementDto(customer.Id, customer.NameEn, customer.CreditLimit, customer.Outstanding,
-            orders.Select(OrdersController.MapOrder).ToList()));
+            orders.Select(o => OrdersController.MapOrder(o)).ToList()));
     }
 
     [HttpPost]
@@ -66,11 +70,14 @@ public class CustomersController(AppDbContext db, IAuditService audit) : Control
             Phone = request.Phone, Email = request.Email, VatNo = request.VatNo, CreditLimit = request.CreditLimit,
             City = request.City, District = request.District, Address = request.Address, LoyaltyEnrolled = request.LoyaltyEnrolled,
             ProjectName = request.ProjectName, CreditTermDays = request.CreditTermDays,
+            AccountManagerUserId = request.AccountManagerUserId, PriorityBilling = request.PriorityBilling,
+            DateOfBirth = request.DateOfBirth,
         };
         db.Customers.Add(customer);
         await db.SaveChangesAsync(ct);
         await audit.LogAsync("orders", "CUSTOMER_CREATED", customer.Id.ToString(), newValue: request, cancellationToken: ct);
-        return Ok(Map(customer));
+        var expiryMonths = (await db.GetLoyaltyConfigAsync(ct)).PointsExpiryMonths;
+        return Ok(Map(customer, expiryMonths));
     }
 
     [HttpPut("{id:int}")]
@@ -84,10 +91,13 @@ public class CustomersController(AppDbContext db, IAuditService audit) : Control
         customer.Phone = request.Phone; customer.Email = request.Email; customer.VatNo = request.VatNo; customer.CreditLimit = request.CreditLimit;
         customer.City = request.City; customer.District = request.District; customer.Address = request.Address;
         customer.LoyaltyEnrolled = request.LoyaltyEnrolled; customer.ProjectName = request.ProjectName; customer.CreditTermDays = request.CreditTermDays;
+        customer.AccountManagerUserId = request.AccountManagerUserId; customer.PriorityBilling = request.PriorityBilling;
+        customer.DateOfBirth = request.DateOfBirth;
 
         await db.SaveChangesAsync(ct);
         await audit.LogAsync("orders", "CUSTOMER_UPDATED", id.ToString(), newValue: request, cancellationToken: ct);
-        return Ok(Map(customer));
+        var expiryMonths = (await db.GetLoyaltyConfigAsync(ct)).PointsExpiryMonths;
+        return Ok(Map(customer, expiryMonths));
     }
 
     [HttpPut("{id:int}/archive")]
@@ -100,11 +110,14 @@ public class CustomersController(AppDbContext db, IAuditService audit) : Control
         customer.Status = customer.Status == EntityStatus.Active ? EntityStatus.Inactive : EntityStatus.Active;
         await db.SaveChangesAsync(ct);
         await audit.LogAsync("orders", customer.Status == EntityStatus.Inactive ? "CUSTOMER_ARCHIVED" : "CUSTOMER_REACTIVATED", id.ToString(), cancellationToken: ct);
-        return Ok(Map(customer));
+        var expiryMonths = (await db.GetLoyaltyConfigAsync(ct)).PointsExpiryMonths;
+        return Ok(Map(customer, expiryMonths));
     }
 
-    private static CustomerDto Map(Customer c) => new(
+    private static CustomerDto Map(Customer c, int expiryMonths) => new(
         c.Id, c.NameEn, c.NameAr, c.Type.ToString(), c.Phone, c.Email, c.VatNo, c.CreditLimit, c.Outstanding,
         c.City, c.District, c.Address, c.LoyaltyEnrolled, c.LoyaltyPoints, c.LoyaltyLifetimePoints, c.LoyaltyTier.ToString(),
-        c.Status.ToString(), c.LastPurchaseAt, c.ProjectName, c.CreditTermDays, c.CreatedAt);
+        c.Status.ToString(), c.LastPurchaseAt, c.ProjectName, c.CreditTermDays, c.CreatedAt,
+        c.LoyaltyLifetimeSpend, c.AccountManagerUserId, c.AccountManager?.Name, c.PriorityBilling,
+        c.DateOfBirth, LoyaltyRules.PointsExpiringSoon(c.LastPurchaseAt, DateTime.UtcNow, expiryMonths));
 }

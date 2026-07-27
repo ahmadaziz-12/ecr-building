@@ -101,6 +101,29 @@ function fmtDateTime(iso: string): string {
   return new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+// "Numbering" is the real per-branch ZATCA Invoice Counter Value (ICV) — a plain monotonic integer,
+// not a formatted series like "INV-2026-#####"; ZATCA's spec doesn't have a prefix/series concept.
+// "Last Test" / "Next Renewal" / certificate-expiry tracking have no backing anywhere in the ZATCA
+// schema (ZatcaIdentity stores no expiry timestamp at all) — omitted rather than shown as a
+// permanently-empty column; a real implementation needs the CSID's certificate expiry persisted.
+export function mapZatcaConfiguration(identities: ZatcaIdentityDto[], settings: ZatcaSettingsDto[]): LiveTable {
+  const settingsByBranch = new Map(settings.map((s) => [s.branchId, s]));
+  const productionReady = identities.filter((i) => i.onboardingStatus === "ProductionReady").length;
+  return {
+    columns: ["Branch", "VAT No.", "Onboarding Status", "Environment", "Numbering", "Status"],
+    statusCol: 5,
+    kpis: [
+      { label: "Branches Onboarded", value: String(identities.length), sub: "One CSID per branch", tone: "info" },
+      { label: "Production Ready", value: String(productionReady), sub: `${identities.length ? Math.round((productionReady / identities.length) * 100) : 0}%`, tone: productionReady === identities.length ? "success" : "warning" },
+      { label: "Invoices Issued", value: identities.reduce((sum, i) => sum + i.lastIcv, 0).toLocaleString("en-US"), sub: "Total ICV count", tone: "info" },
+    ],
+    rows: identities.map((i) => [
+      i.branchName, settingsByBranch.get(i.branchId)?.vatRegistrationNumber ?? "—", i.onboardingStatus,
+      i.environment, `ICV ${i.lastIcv.toLocaleString("en-US")}`, i.onboardingStatus === "ProductionReady" ? "Healthy" : "Pending",
+    ]),
+  };
+}
+
 export function mapZatcaInvoices(rows: ZatcaInvoiceDto[]): LiveTable {
   return {
     columns: ["Invoice", "Order", "Type", "Amount", "VAT", "QR", "Hash / UUID", "Submitted", "Status"],

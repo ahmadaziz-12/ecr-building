@@ -350,9 +350,12 @@ public class DevicesController(AppDbContext db, IAuditService audit) : Controlle
         return Ok(Map(device));
     }
 
+    // BRD §7.3: context distinguishes an automatic sale-completion open ("Sale" — no extra auth, it
+    // rides the cash payment) from a NO-SALE open ("NoSale" — needs supervisor authorization and its
+    // own distinct audit event so Z-report reconciliation can count them separately).
     [HttpPost("{id:int}/open-drawer")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
-    public async Task<ActionResult> OpenDrawer(int id, CancellationToken ct)
+    [RequireModule(ModuleArea.Network, AccessLevel.View)]
+    public async Task<ActionResult> OpenDrawer(int id, [FromQuery] string context = "NoSale", CancellationToken ct = default)
     {
         var device = await db.Devices.FirstOrDefaultAsync(d => d.Id == id, ct);
         if (device is null) return NotFound();
@@ -365,10 +368,21 @@ public class DevicesController(AppDbContext db, IAuditService audit) : Controlle
             return BadRequest(new { error = "This drawer is disconnected — reconnect it first." });
         }
 
+        var isSale = context.Equals("Sale", StringComparison.OrdinalIgnoreCase);
+        if (!isSale)
+        {
+            var isSupervisor = string.Equals(User.FindFirst("posCeiling:canVoidTransactions")?.Value, "True", StringComparison.OrdinalIgnoreCase);
+            if (!isSupervisor)
+            {
+                return StatusCode(403, new { error = "A no-sale drawer open requires Supervisor (or higher) authorization." });
+            }
+        }
+
         // No physical kick signal can be sent from a web request without a local print/POS agent —
         // recording the authorized open command is the correct backend responsibility here, exactly
-        // like a real POS system's manager-override audit trail.
-        await audit.LogAsync("network", "DEVICE_DRAWER_OPENED", id.ToString(), deviceId: device.Id, cancellationToken: ct);
+        // like a real POS system's manager-override audit trail. (The physical kick happens client-side
+        // via the QZ Tray printer pulse on receipt print.)
+        await audit.LogAsync("network", isSale ? "DEVICE_DRAWER_OPENED_SALE" : "DEVICE_DRAWER_NOSALE", id.ToString(), deviceId: device.Id, cancellationToken: ct);
         return Ok(new { message = $"Drawer-open command for {device.DeviceCode} logged and sent to the terminal's local agent." });
     }
 

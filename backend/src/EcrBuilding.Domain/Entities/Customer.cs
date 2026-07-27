@@ -27,11 +27,21 @@ public class Customer : BaseEntity
     public bool LoyaltyEnrolled { get; set; }
     public int LoyaltyPoints { get; set; }
     public int LoyaltyLifetimePoints { get; set; }
-    public LoyaltyTier LoyaltyTier { get; set; } = LoyaltyTier.Standard;
+    // BRD §4.3.2: tiers qualify on cumulative ex-VAT merchandise spend — accumulated at checkout on
+    // fully-paid orders (Module 7); LoyaltyTier is re-derived from this after every sale.
+    public decimal LoyaltyLifetimeSpend { get; set; }
+    public LoyaltyTier LoyaltyTier { get; set; } = LoyaltyTier.Bronze;
+    // Gold+ benefit (BRD §4.3.2): the staff member who owns this account relationship.
+    public int? AccountManagerUserId { get; set; }
+    public User? AccountManager { get; set; }
+    // Platinum benefit (BRD §4.3.2): flags this account for priority project billing in queues/reports.
+    public bool PriorityBilling { get; set; }
     public DateTime? LastPurchaseAt { get; set; }
     public EntityStatus Status { get; set; } = EntityStatus.Active;
 
     // Contractor/B2B-specific — left null for Walk-in/Retail/Loyalty customers.
     public string? ProjectName { get; set; }
     public int? CreditTermDays { get; set; }
+    // BRD §4.3.4 (Module 20): birthday-month bonus multiplier keys off this; optional.
+    public DateTime? DateOfBirth { get; set; }
 }

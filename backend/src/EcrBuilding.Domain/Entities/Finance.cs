@@ -68,10 +68,25 @@ public class TaxCode : BaseEntity
     public int? GlAccountId { get; set; }
     public Account? GlAccount { get; set; }
     public EntityStatus Status { get; set; } = EntityStatus.Active;
+    // Null = company-wide (true for every real VAT code — VAT is set by national law, not per
+    // branch). A branch-specific Fee-type code (e.g. one branch's own delivery surcharge) can be
+    // scoped to just that branch.
+    public int? BranchId { get; set; }
+    public Branch? Branch { get; set; }
 }
 
 public enum ReturnType { Standard, Surplus, Damaged, Exchange }
 public enum ReturnStatus { Completed, Quarantine, PendingApproval }
+
+// BRD §3.2.2: the five mandatory damage reason codes — free text is only supplementary description.
+public enum DamageReasonCode
+{
+    ManufacturingDefect = 0,
+    TransitDamage = 1,
+    IncorrectProductSupplied = 2,
+    QualityBelowSpecification = 3,
+    Other = 4,
+}
 
 public class Return : BaseEntity
 {
@@ -86,6 +101,30 @@ public class Return : BaseEntity
     public User? ApprovedBy { get; set; }
     public ReturnStatus Status { get; set; } = ReturnStatus.PendingApproval;
 
+    // BRD §3.2.2 damaged-return workflow: mandatory reason code, optional photo evidence reference,
+    // and the DGRN (Damaged Goods Return Note) number generated at creation — null on other types.
+    public DamageReasonCode? DamageReason { get; set; }
+    public string? PhotoReference { get; set; }
+    public string? DgrnNo { get; set; }
+
+    // BRD §3.2.3/§3.2.4 Return Value Calculation — computed server-side at creation from the original
+    // order lines (never trusted from the client) and frozen here so receipts/reports/GL all agree:
+    // NetCashback = GrossRefund (ex-VAT, at price actually paid) + VatReversal − RestockingFeeAmount.
+    public decimal GrossRefund { get; set; }
+    public decimal VatReversal { get; set; }
+    public decimal RestockingFeePct { get; set; }
+    public decimal RestockingFeeAmount { get; set; }
+    public decimal NetCashback { get; set; }
+
+    // BRD §3.2.4: Original (proportional split across the original payment methods — stored in
+    // RefundSplitJson at approval), Cash, StoreCredit, or AccountCredit (B2B: reduces Outstanding).
+    public string RefundMethod { get; set; } = "Original";
+    public string? RefundSplitJson { get; set; }
+
+    // BRD §3.2.1 exchange workflow: the replacement sale this return nets against, when Type=Exchange.
+    public int? ExchangeOrderId { get; set; }
+    public Order? ExchangeOrder { get; set; }
+
     public ICollection<ReturnLine> Lines { get; set; } = new List<ReturnLine>();
 }
 
@@ -96,6 +135,15 @@ public class ReturnLine
     public Return? Return { get; set; }
     public int ProductId { get; set; }
     public Product? Product { get; set; }
+    // The exact original order line this return draws down — prior-return accounting runs per line,
+    // so two partial returns can never jointly exceed what that line originally sold. Null only on
+    // legacy rows created before Module 6.
+    public int? OrderLineId { get; set; }
     public decimal Qty { get; set; }
+    // Stock-UOM quantity to restock (surplus/standard) or quarantine (damaged) — converted from the
+    // selling-UOM Qty via the original line's UOM factor (BRD §2.3). 0 on legacy rows → fall back to Qty.
+    public decimal StockQty { get; set; }
+    public decimal UnitPricePaid { get; set; }
+    public decimal VatRate { get; set; }
     public decimal Amount { get; set; }
 }

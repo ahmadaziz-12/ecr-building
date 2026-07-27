@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPost, apiPut } from "./client";
 
 export type LoyaltyTransactionDto = {
   id: number;
@@ -64,5 +64,32 @@ export function useAdjustPoints() {
     mutationFn: (request: { customerId: number; points: number; description: string }) =>
       apiPost<CustomerLoyaltyDto>("/api/loyalty/adjust", request),
     onSuccess: () => invalidateLoyalty(queryClient),
+  });
+}
+
+// BRD §4.3.1-§4.3.4: earn rate, redemption rate, min/max redemption limits, AND the tier ladder
+// (thresholds/multipliers/discounts), free delivery, birthday bonus and points expiry — all
+// configured from this page, Finance-scoped (not the Admin-only Pos Settings browser).
+export type LoyaltyConfigDto = {
+  pointsPerSarEarned: number; pointsPerSarRedeemed: number; minRedeemPoints: number; maxRedeemPctOfTotal: number;
+  silverThreshold: number; goldThreshold: number; platinumThreshold: number;
+  silverMultiplier: number; goldMultiplier: number; platinumMultiplier: number;
+  silverDiscountPct: number; goldDiscountPct: number; platinumDiscountPct: number;
+  freeDeliveryMinOrderSar: number; birthdayBonusMultiplier: number; pointsExpiryMonths: number;
+};
+export const useLoyaltyProgramConfig = (enabled = true) =>
+  useQuery({
+    queryKey: ["loyalty", "config"],
+    queryFn: () => apiGet<LoyaltyConfigDto>("/api/loyalty/config"),
+    enabled,
+  });
+export function useUpdateLoyaltyProgramConfig() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: LoyaltyConfigDto) => apiPut<LoyaltyConfigDto>("/api/loyalty/config", request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["loyalty", "config"] });
+      queryClient.invalidateQueries({ queryKey: ["pos", "loyalty-config"] });
+    },
   });
 }

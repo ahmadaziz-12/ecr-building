@@ -14,7 +14,12 @@ export class ApiError extends Error {
 // backend revokes the old refresh token when it issues a new one, so concurrent refresh calls
 // would otherwise have all-but-one fail and log the user out.
 let refreshPromise: Promise<boolean> | null = null;
-function refreshSession(): Promise<boolean> {
+// Exported so every refresh call in the app — including auth.tsx's bootstrap check and its
+// proactive 10-minute renewal timer — shares this SAME single flight. A second, independently
+// written fetch(/api/auth/refresh) anywhere else defeats the whole point of the guard above: the
+// backend revokes the old refresh token the instant one call redeems it, so two callers racing
+// with their own separate fetches will always have one come back 401 and log a valid session out.
+export function refreshSession(): Promise<boolean> {
   if (!refreshPromise) {
     refreshPromise = fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" })
       .then((r) => r.ok)

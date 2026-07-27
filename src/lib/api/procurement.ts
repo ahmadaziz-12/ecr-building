@@ -13,8 +13,13 @@ export type UpsertSupplierRequest = {
 export type SupplierLedgerLineDto = { date: string; reference: string; description: string; accountCode: string; accountName: string; debit: number; credit: number };
 
 export type PurchaseOrderLineDto = {
+  // uom: the PURCHASING unit qty/unitCost/receivedQty are expressed in (e.g. "Pallet"). stockUom is
+  // the product's own stock unit (e.g. "Bag") — always present so a display can show
+  // "3 of 5 Pallet (150 Bag)" without a second product lookup. uom === stockUom when no conversion applies.
   id: number; productId: number; sku: string; productName: string; branchId: number; branchName: string;
-  warehouseId: number; warehouseName: string; qty: number; unitCost: number; receivedQty: number;
+  // null when the branch had no linked warehouse at order time — the line still receives normally,
+  // it just has no warehouse-side bin/batch/expiry record.
+  warehouseId: number | null; warehouseName: string; uom: string; stockUom: string; qty: number; unitCost: number; receivedQty: number;
   batchNo: string | null; expiryDate: string | null;
 };
 export type PurchaseOrderDto = {
@@ -22,7 +27,9 @@ export type PurchaseOrderDto = {
   expectedDate: string; status: string; shipping: number; incoterm: string | null; carrier: string | null; trackingRef: string | null;
   totalValue: number; receivedPct: number; lines: PurchaseOrderLineDto[];
 };
-export type PoLineInput = { productId: number; branchId: number; warehouseId: number; qty: number; unitCost: number; batchNo?: string | null; expiryDate?: string | null };
+// uom: omit (or send the product's stock UOM) to order in stock UOM — otherwise must match one of the
+// product's configured UOM conversions (same rule the POS cart enforces at checkout).
+export type PoLineInput = { productId: number; branchId: number; warehouseId: number | null; uom?: string | null; qty: number; unitCost: number; batchNo?: string | null; expiryDate?: string | null };
 export type CreatePurchaseOrderRequest = {
   supplierId: number; currency: string; expectedDate: string; shipping: number; incoterm: string | null;
   approverUserId: number | null; lines: PoLineInput[];
@@ -139,8 +146,13 @@ export function useReceivePurchaseOrder() {
       apiPut<PurchaseOrderDto>(`/api/procurement/purchase-orders/${id}/receive`, { lines }),
     onSuccess: (_data, { id }) => {
       invalidatePo(queryClient, id);
+      // Receive credits BranchStockLevel (what POS/catalog availability reads) in the same call as
+      // the warehouse-side StockLevel/StockBatch — invalidating only the latter two left any already
+      // -open Branch Stock or POS product view showing pre-receive numbers until an unrelated refetch.
       queryClient.invalidateQueries({ queryKey: ["inventory", "stock-levels"] });
       queryClient.invalidateQueries({ queryKey: ["inventory", "stock-batches"] });
+      queryClient.invalidateQueries({ queryKey: ["inventory", "branch-stock-levels"] });
+      queryClient.invalidateQueries({ queryKey: ["catalog", "products"] });
     },
   });
 }
@@ -161,6 +173,9 @@ function invalidateRts(queryClient: ReturnType<typeof useQueryClient>, id: numbe
 function invalidateRtsStock(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ["inventory", "stock-levels"] });
   queryClient.invalidateQueries({ queryKey: ["inventory", "stock-batches"] });
+  // Dispatch/Reject debit or credit BranchStockLevel too (same reasoning as receive above).
+  queryClient.invalidateQueries({ queryKey: ["inventory", "branch-stock-levels"] });
+  queryClient.invalidateQueries({ queryKey: ["catalog", "products"] });
 }
 
 export function useDispatchRts() {
@@ -225,7 +240,7 @@ export function mapPurchaseOrders(rows: PurchaseOrderDto[]): LiveTable {
     ids: rows.map((p) => p.id),
     rows: rows.map((p) => [
       p.poNo, p.supplierName, p.branches.join(", ") || "—", fmtDate(p.expectedDate), p.lines.length,
-      `${p.totalValue.toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س`, `${p.receivedPct}%`, p.status,
+      `${p.totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`, `${p.receivedPct}%`, p.status,
     ]),
   };
 }
@@ -237,7 +252,7 @@ export function mapRts(rows: ReturnToSupplierDto[]): LiveTable {
     ids: rows.map((r) => r.id),
     rows: rows.map((r) => [
       r.rtsNo, r.supplierName, r.branchName, r.purchaseOrderNo ?? "—", r.reason, r.lines.reduce((s, l) => s + l.qty, 0),
-      r.lines.reduce((s, l) => s + l.qty * l.unitCost, 0).toLocaleString("en-US", { maximumFractionDigits: 0 }),
+      r.lines.reduce((s, l) => s + l.qty * l.unitCost, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
       r.creditNoteRef ?? "—", fmtDate(r.date), r.status,
     ]),
   };

@@ -21,6 +21,9 @@ export function QuotationFormDialog({ open, onOpenChange, branchId }: { open: bo
   const [lines, setLines] = useState<Line[]>([]);
   const [validUntil, setValidUntil] = useState("");
   const [notes, setNotes] = useState("");
+  // BRD §3.4 (Module 16): both mandatory on every quotation.
+  const [projectCode, setProjectCode] = useState("");
+  const [customerReference, setCustomerReference] = useState("");
 
   const matches = search.trim().length > 0
     ? (products ?? []).filter((p) => p.sku.toLowerCase().includes(search.toLowerCase()) || p.nameEn.toLowerCase().includes(search.toLowerCase())).slice(0, 6)
@@ -37,10 +40,16 @@ export function QuotationFormDialog({ open, onOpenChange, branchId }: { open: bo
     setLines([]);
     setValidUntil("");
     setNotes("");
+    setProjectCode("");
+    setCustomerReference("");
   }
 
   async function submit() {
     if (!branchId || lines.length === 0) return;
+    if (!projectCode.trim() || !customerReference.trim()) {
+      toast.error("Project code and customer reference are required on every quotation.");
+      return;
+    }
     try {
       await createQuotation.mutateAsync({
         branchId,
@@ -48,6 +57,8 @@ export function QuotationFormDialog({ open, onOpenChange, branchId }: { open: bo
         lines: lines.map((l) => ({ productId: l.productId, qty: l.qty })),
         validUntil: validUntil ? new Date(validUntil).toISOString() : null,
         notes: notes || undefined,
+        projectCode: projectCode.trim(),
+        customerReference: customerReference.trim(),
       });
       toast.success("Quotation created");
       reset();
@@ -71,6 +82,21 @@ export function QuotationFormDialog({ open, onOpenChange, branchId }: { open: bo
               {(customers ?? []).map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.nameEn}</SelectItem>)}
             </SelectContent>
           </Select>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Project Code <span className="text-critical">*</span>
+            </label>
+            <Input value={projectCode} onChange={(e) => setProjectCode(e.target.value)} placeholder="PRJ-104" />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Customer Reference <span className="text-critical">*</span>
+            </label>
+            <Input value={customerReference} onChange={(e) => setCustomerReference(e.target.value)} placeholder="REF-2026-88" />
+          </div>
         </div>
 
         <div>

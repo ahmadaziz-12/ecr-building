@@ -35,3 +35,9 @@ public record CreateDeliveryOrderRequest(
 
 public record LineProgressInput(int ProductId, decimal? LoadedQty, decimal? DeliveredQty, decimal? MissingQty, decimal? DamagedQty);
 public record TransitionRequest(string ToStage, int? DriverId, int? VehicleId, List<LineProgressInput>? Lines, string? ReceivedBy, string? Proof, string? FailureReason, string? NextAction, string? Note);
+
+// Permission model: Delivery:Edit can only file a move request (Applied=false, PendingApproval set);
+// Delivery:Full moves the order directly (Applied=true) and is also who can approve/reject someone
+// else's pending request — so a user holding both never has to wait on themselves.
+public record DeliveryApprovalDto(int Id, int DeliveryOrderId, string DeliveryNo, string RequestedByName, string? ApproverName, string FromStage, string ToStage, string Reason, string Status, DateTime CreatedAt, DateTime? ResolvedAt);
+public record TransitionResponseDto(bool Applied, DeliveryOrderDto Order, DeliveryApprovalDto? PendingApproval);

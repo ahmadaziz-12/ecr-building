@@ -15,6 +15,13 @@ public class Category : BaseEntity
     public string DefaultUom { get; set; } = "Piece";
     public decimal VatRate { get; set; } = 15m;
     public bool Returnable { get; set; } = true;
+    // BRD §4.3.1: loyalty points accrual rate per product category (e.g. 2x on featured categories
+    // during a promotional period). 1 = standard rate; read by OrdersController.Checkout.
+    public decimal LoyaltyAccrualMultiplier { get; set; } = 1m;
+    // BRD §3.2.3: percentage deducted from the cashback on SURPLUS returns of this category's
+    // products (e.g. 5–10%). 0 = no fee. Deducted from cashback only — never from the physical
+    // stock quantity reintegrated. Read by ReturnsController.
+    public decimal SurplusRestockingFeePct { get; set; }
     public EntityStatus Status { get; set; } = EntityStatus.Active;
 
     public ICollection<Product> Products { get; set; } = new List<Product>();
@@ -39,10 +46,57 @@ public class Product : BaseEntity
     public int ReorderLevel { get; set; }
     public int ReorderQty { get; set; }
     public string? ImageUrl { get; set; }
+    // BRD §2.3 items 5-6: cut-to-size products (glass, timber, cable) take length × width dimension
+    // entry at the POS instead of a plain quantity; the line quantity becomes the computed area
+    // (stock UOM m²) or linear length, priced at SellingPrice per stock UOM.
+    public bool IsCutToSize { get; set; }
+    // BRD §2.2: supplier link and physical bin/aisle reference, surfaced at the POS.
+    public int? SupplierId { get; set; }
+    public Supplier? Supplier { get; set; }
+    public string? BinLocation { get; set; }
     public EntityStatus Status { get; set; } = EntityStatus.Active;
 
     public ICollection<StockLevel> StockLevels { get; set; } = new List<StockLevel>();
     public ICollection<BranchStockLevel> BranchStockLevels { get; set; } = new List<BranchStockLevel>();
+    public ICollection<ProductUomConversion> UomConversions { get; set; } = new List<ProductUomConversion>();
+    public ICollection<ProductAttribute> Attributes { get; set; } = new List<ProductAttribute>();
+}
+
+// BRD §2.2 structured custom attributes (color code, size, grade, diameter, length, R-value,
+// pressure rating…) — key-value rather than typed columns because the attribute set varies by
+// category (an insulation roll has an R-value, a pipe has a pressure rating).
+public class ProductAttribute
+{
+    public int Id { get; set; }
+    public int ProductId { get; set; }
+    public Product? Product { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Value { get; set; } = string.Empty;
+}
+
+// BRD §2.3 (CRITICAL): one row per alternate selling UOM — "1 {Uom} = {FactorToStock} {Product.StockUom}"
+// (e.g. Uom="Pallet", FactorToStock=50 on a product stocked in Bags). SellUomsJson remains a plain
+// display-label list; this table is the conversion engine checkout actually computes with. A selling
+// UOM with no row here is NOT sellable — checkout fails loudly rather than assuming 1:1.
+public class ProductUomConversion
+{
+    public int Id { get; set; }
+    public int ProductId { get; set; }
+    public Product? Product { get; set; }
+    public string Uom { get; set; } = string.Empty;
+    public decimal FactorToStock { get; set; }
+}
+
+// BRD §5.1's six commercial bundle shapes — distinguishable for reporting; the selling mechanic
+// (constituent lines at a combined price) is the same for all of them.
+public enum BundleType
+{
+    ProductSystem = 0,
+    ProjectStarterPack = 1,
+    QuantityPallet = 2,
+    TradeValue = 3,
+    CrossCategory = 4,
+    Promotional = 5,
 }
 
 public class ProductBundle : BaseEntity
@@ -50,6 +104,7 @@ public class ProductBundle : BaseEntity
     public string Code { get; set; } = string.Empty;
     public string NameEn { get; set; } = string.Empty;
     public string? NameAr { get; set; }
+    public BundleType Type { get; set; } = BundleType.ProductSystem;
     public decimal BundlePrice { get; set; }
     public EntityStatus Status { get; set; } = EntityStatus.Active;
 

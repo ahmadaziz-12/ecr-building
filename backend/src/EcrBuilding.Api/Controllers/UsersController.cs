@@ -86,5 +86,5 @@ public class UsersController(AppDbContext db, IPasswordHasher hasher, IAuditServ
 
     private static UserDto Map(User u) => new(
         u.Id, u.Name, u.Email, u.RoleId, u.Role?.Name ?? "", u.BranchId, u.Branch?.NameEn, u.Status.ToString(), u.PreferredLocale, u.LastLoginAt,
-        u.PinHash is not null);
+        u.PinHash is not null, u.BiometricEnabled);
 }

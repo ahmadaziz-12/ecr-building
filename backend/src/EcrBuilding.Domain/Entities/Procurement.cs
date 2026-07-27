@@ -61,8 +61,16 @@ public class PurchaseOrderLine
     public Product? Product { get; set; }
     public int BranchId { get; set; }
     public Branch? Branch { get; set; }
-    public int WarehouseId { get; set; }
+    // Nullable: a branch with no warehouse linked yet can still be ordered for — goods still land on
+    // the branch's own sellable stock at Receive time (see ProcurementController.Receive), the
+    // warehouse-side bin/batch/expiry bookkeeping is just skipped for that line.
+    public int? WarehouseId { get; set; }
     public Warehouse? Warehouse { get; set; }
+    // Qty/UnitCost/ReceivedQty are all in the PURCHASING UOM the buyer entered (BRD §2.3 UOM engine,
+    // same convention as OrderLine.Uom/Qty): a bag-stocked cement product ordered by the Pallet stores
+    // Qty=10, Uom="Pallet", UnitCost=50×bag-cost — Receive converts to stock UOM once, at credit time,
+    // via UomMath (Product.UomConversions). "" or the product's own StockUom means no conversion (factor 1).
+    public string Uom { get; set; } = string.Empty;
     public decimal Qty { get; set; }
     public decimal UnitCost { get; set; }
     public decimal ReceivedQty { get; set; }

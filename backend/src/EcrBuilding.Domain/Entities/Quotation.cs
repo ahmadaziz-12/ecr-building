@@ -14,7 +14,11 @@ public class Quotation : BaseEntity
     public int CreatedByUserId { get; set; }
     public User? CreatedBy { get; set; }
     public QuotationStatus Status { get; set; } = QuotationStatus.Draft;
-    public DateTime ValidUntil { get; set; } = DateTime.UtcNow.AddDays(14);
+    // BRD §3.4: default validity is 15 days (was 14 before Module 16).
+    public DateTime ValidUntil { get; set; } = DateTime.UtcNow.AddDays(15);
+    // BRD §3.4: both MANDATORY on quotations — enforced in QuotationsController.Create.
+    public string ProjectCode { get; set; } = string.Empty;
+    public string CustomerReference { get; set; } = string.Empty;
     public decimal SubTotal { get; set; }
     public decimal DiscountTotal { get; set; }
     public decimal VatTotal { get; set; }

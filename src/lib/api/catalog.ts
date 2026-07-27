@@ -6,11 +6,16 @@ export type CategoryDto = {
   id: number; code: string; nameEn: string; nameAr: string | null; parentId: number | null; parentName: string | null;
   attributes: string[]; returnRule: string; defaultUom: string; vatRate: number; returnable: boolean; status: string; skuCount: number;
 };
+// BRD §2.3: "1 {uom} = {factorToStock} {stockUom}" — drives the POS cart's UOM dropdown; the backend
+// refuses to sell in any UOM without a row here, so the dropdown only ever offers configured units.
+export type ProductUomConversionDto = { uom: string; factorToStock: number };
+
 export type ProductDto = {
   id: number; sku: string; barcode: string | null; nameEn: string; nameAr: string | null; categoryId: number; categoryName: string;
   brand: string | null; costPrice: number; sellingPrice: number; vatRate: number; stockUom: string; sellUoms: string[];
   weight: number; returnable: boolean; reorderLevel: number; reorderQty: number; imageUrl: string | null; status: string;
   totalOnHand: number; totalAvailable: number;
+  uomConversions: ProductUomConversionDto[]; isCutToSize: boolean;
 };
 
 export const useCategories = (enabled = true) => useQuery({ queryKey: ["catalog", "categories"], queryFn: () => apiGet<CategoryDto[]>("/api/catalog/categories"), enabled });
@@ -28,6 +33,7 @@ export type CreateProductRequest = {
   sku: string; barcode: string | null; nameEn: string; nameAr: string | null; categoryId: number; brand: string | null;
   costPrice: number; sellingPrice: number; vatRate: number; stockUom: string; sellUoms: string[]; weight: number;
   returnable: boolean; reorderLevel: number; reorderQty: number; imageUrl: string | null;
+  uomConversions?: ProductUomConversionDto[]; isCutToSize?: boolean;
 };
 
 export function useCreateProduct() {

@@ -10,9 +10,17 @@ public static class DbSeeder
 {
     public const string DemoPassword = "Passw0rd!";
 
-    public static async Task SeedAsync(AppDbContext db, IPasswordHasher hasher)
+    // applyMigrations=false is for tests: EcrBuilding.Tests' CustomWebApplicationFactory already builds
+    // the schema via EnsureCreatedAsync against its private Sqlite database (see that class for why
+    // Database.MigrateAsync() isn't used there — the ~20 migrations are MySQL-authored and trip EF's
+    // cross-provider PendingModelChangesWarning against Sqlite). Production callers (Program.cs) never
+    // pass this, so behavior there is unchanged.
+    public static async Task SeedAsync(AppDbContext db, IPasswordHasher hasher, bool applyMigrations = true)
     {
-        await db.Database.MigrateAsync();
+        if (applyMigrations)
+        {
+            await db.Database.MigrateAsync();
+        }
 
         if (!await db.Branches.AnyAsync())
         {
@@ -29,6 +37,21 @@ public static class DbSeeder
             await SeedUsersAsync(db, hasher);
         }
 
+        // BRD §10.1: databases seeded before the authorization-ladder work never receive the
+        // Senior Cashier/Supervisor roles or the per-role POS ceilings via the empty-table guards
+        // above (migrations backfill the new columns with NULL/false, which the API reads as
+        // "no ceiling"/"no authority" — silently disabling discount gating and voiding entirely).
+        // This top-up is idempotent: it inserts missing ladder roles and applies the preset
+        // ceilings only to roles whose ceiling block is still in the untouched all-default state.
+        await EnsureBrdRolesAsync(db, hasher);
+        await EnsureReturnApprovalPermissionsAsync(db);
+
+        // Same drift class as the two ensure-steps above: a database seeded before the UOM engine's
+        // demo conversions were added to SeedCatalogAndInventoryAsync has EVERY product stuck at a
+        // single stock unit — no Pallet/Ton/m²/Roll options anywhere (POS cart, purchase orders).
+        // Idempotent by (ProductId, Uom) so re-running never duplicates a row an admin may have edited.
+        await EnsureUomConversionsAsync(db);
+
         if (!await db.Plans.AnyAsync())
         {
             await SeedPlansAsync(db);
@@ -44,10 +67,20 @@ public static class DbSeeder
             await SeedSettingsAsync(db);
         }
 
+        // Same drift class as the Ensure* calls above — a database seeded before the loyalty Group
+        // existed skips SeedSettingsAsync entirely (Settings is non-empty already).
+        await EnsureLoyaltySettingsAsync(db);
+        await EnsureReturnPolicySettingsAsync(db);
+
         if (!await db.Categories.AnyAsync())
         {
             await SeedCatalogAndInventoryAsync(db);
         }
+
+        // BRD §2.1 requires 14 top-level categories; earlier seeds only created 7. This top-up is
+        // idempotent (keyed on Code) so EXISTING databases gain the missing ones on restart, without
+        // touching anything an admin may have edited.
+        await EnsureBrdCategoriesAsync(db);
 
         if (!await db.Customers.AnyAsync())
         {
@@ -139,12 +172,266 @@ public static class DbSeeder
         await db.SaveChangesAsync();
     }
 
-    private static async Task SeedRolesAsync(AppDbContext db)
+    // BRD §10.1's Cashier → Senior Cashier → Supervisor → Store Manager → System Admin ladder, expressed
+    // as named POS-authorization ceiling presets so each role definition below can reference one
+    // directly instead of repeating 11 field assignments. `None` (all off / zero) is what any non-POS
+    // role (Warehouse Staff, Delivery Driver, HR Officer, Accountant) gets by leaving this unset — those
+    // roles never operate a register, so they carry no discount/return/void authorization at all.
+    private static class PosTier
     {
-        var definitions = new (string Name, string Description, decimal ApprovalCap, Dictionary<ModuleArea, AccessLevel> Levels)[]
+        public static readonly Action<Role> None = _ => { };
+
+        public static readonly Action<Role> Cashier = r =>
         {
-            ("Owner", "Full access across every module.", 999_999m, AllModules(AccessLevel.Full)),
-            ("Admin", "Manages users, settings, network and compliance.", 100_000m, AdminLevels()),
+            r.DiscountCeilingPercent = 5m;
+            r.SurplusReturnCeilingAmount = 500m;
+        };
+
+        public static readonly Action<Role> SeniorCashier = r =>
+        {
+            r.DiscountCeilingPercent = 10m;
+            r.SurplusReturnCeilingAmount = 1_000m;
+            r.CanAuthorizeStandardReturnWithoutReceipt = true;
+            r.CanOverrideItemPrice = true;
+        };
+
+        public static readonly Action<Role> Supervisor = r =>
+        {
+            r.DiscountCeilingPercent = 15m;
+            r.SurplusReturnCeilingAmount = null; // any value
+            r.CanAuthorizeStandardReturnWithoutReceipt = true;
+            r.CanOverrideItemPrice = true;
+            r.CanAuthorizeDamagedReturns = true;
+            r.CanVoidTransactions = true;
+            r.CanViewXReport = true;
+        };
+
+        // "Store Manager" in the BRD — applied to the pre-existing Branch Manager role rather than
+        // adding a same-purpose duplicate role name.
+        public static readonly Action<Role> Manager = r =>
+        {
+            r.DiscountCeilingPercent = null; // unlimited — above Supervisor's 15% ceiling
+            r.SurplusReturnCeilingAmount = null;
+            r.CanAuthorizeStandardReturnWithoutReceipt = true;
+            r.CanOverrideItemPrice = true;
+            r.CanAuthorizeDamagedReturns = true;
+            r.CanVoidTransactions = true;
+            r.CanViewXReport = true;
+            r.CanViewZReport = true;
+            r.CanConfigureReturnRulesAndFees = true;
+            r.CanManagePriceListAndUsers = true;
+        };
+
+        // "System Admin" in the BRD — applied to the pre-existing Admin/Owner roles.
+        public static readonly Action<Role> Admin = r =>
+        {
+            Manager(r);
+            r.CanManageSystemConfiguration = true;
+        };
+    }
+
+    // internal (not private) so EcrBuilding.Tests can verify the seeded BRD §10.1 ceiling values in
+    // isolation, without pulling in the branches/terminals/devices seed data that has some Sqlite-vs-MySQL
+    // FK-ordering incompatibility unrelated to roles (SeedBranchesTerminalsDevicesAsync).
+    // BRD §2.1's full top-level category structure — the 7 not covered by the original seed. Runs on
+    // every startup; inserts only codes that don't exist yet.
+    internal static async Task EnsureBrdCategoriesAsync(AppDbContext db)
+    {
+        var brdCategories = new[]
+        {
+            new Category { Code = "CAT-AGG", NameEn = "Aggregates & Sand", NameAr = "الركام والرمل", DefaultUom = "Ton", VatRate = 15 },
+            new Category { Code = "CAT-TMB", NameEn = "Timber & Boards", NameAr = "الأخشاب والألواح", DefaultUom = "Sheet", VatRate = 15 },
+            new Category { Code = "CAT-INS", NameEn = "Insulation", NameAr = "العزل", DefaultUom = "Roll", VatRate = 15 },
+            // Cut-to-size by nature — non-returnable per BRD §3.2.3.
+            new Category { Code = "CAT-GLS", NameEn = "Glass & Windows", NameAr = "الزجاج والنوافذ", DefaultUom = "m²", VatRate = 15, Returnable = false, ReturnRule = "Non-Returnable" },
+            new Category { Code = "CAT-HRD", NameEn = "Hardware & Fasteners", NameAr = "العدد والمثبتات", DefaultUom = "Piece", VatRate = 15 },
+            new Category { Code = "CAT-WPF", NameEn = "Waterproofing", NameAr = "العزل المائي", DefaultUom = "Litre", VatRate = 15 },
+            new Category { Code = "CAT-LND", NameEn = "Landscaping", NameAr = "تنسيق المواقع", DefaultUom = "m²", VatRate = 15 },
+        };
+
+        var existingCodes = await db.Categories.Select(c => c.Code).ToListAsync();
+        var missing = brdCategories.Where(c => !existingCodes.Contains(c.Code)).ToList();
+        if (missing.Count > 0)
+        {
+            db.Categories.AddRange(missing);
+            await db.SaveChangesAsync();
+        }
+    }
+
+    // Runs on every startup, same idempotent contract as EnsureBrdCategoriesAsync: only touches
+    // products that still exist (by SKU — a real tenant may have renamed/deleted the demo catalog)
+    // and only inserts a (Product, Uom) pair that isn't already there, so an admin's own conversions
+    // (or a deliberately-removed demo one) are never overwritten or resurrected.
+    internal static async Task EnsureUomConversionsAsync(AppDbContext db)
+    {
+        var demoConversions = new (string Sku, string Uom, decimal FactorToStock)[]
+        {
+            ("CEM-OPC-50KG", "Pallet", 50m),
+            ("CEM-OPC-50KG", "Ton", 20m),
+            ("CEM-WHT-40KG", "Pallet", 40m),
+            ("STEEL-RBR-12MM", "Piece", 0.0192m),
+            ("TILE-GRY-60X60", "Pallet", 40m),
+            ("ELEC-CBL-2.5MM", "Roll", 100m),
+        };
+
+        var skus = demoConversions.Select(c => c.Sku).Distinct().ToList();
+        var productIdBySku = await db.Products.Where(p => skus.Contains(p.Sku)).ToDictionaryAsync(p => p.Sku, p => p.Id);
+        if (productIdBySku.Count == 0) return;
+
+        var existing = await db.ProductUomConversions
+            .Where(c => productIdBySku.Values.Contains(c.ProductId))
+            .Select(c => new { c.ProductId, c.Uom })
+            .ToListAsync();
+        var existingKeys = existing.Select(e => (e.ProductId, e.Uom)).ToHashSet();
+
+        var missing = demoConversions
+            .Where(c => productIdBySku.ContainsKey(c.Sku))
+            .Select(c => new ProductUomConversion { ProductId = productIdBySku[c.Sku], Uom = c.Uom, FactorToStock = c.FactorToStock })
+            .Where(c => !existingKeys.Contains((c.ProductId, c.Uom)))
+            .ToList();
+
+        if (missing.Count > 0)
+        {
+            db.ProductUomConversions.AddRange(missing);
+            await db.SaveChangesAsync();
+        }
+    }
+
+    internal static async Task SeedRolesAsync(AppDbContext db)
+    {
+        foreach (var def in RoleDefinitions())
+        {
+            var role = new Role
+            {
+                Name = def.Name,
+                Description = def.Description,
+                ApprovalCap = def.ApprovalCap,
+                IsSystem = true,
+            };
+            role.Permissions = def.Levels.Select(kv => new RolePermission { Module = kv.Key, Level = kv.Value }).ToList();
+            def.PosCeilings(role);
+            db.Roles.Add(role);
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    // A role whose entire BRD §10.1 ceiling block is still at the column defaults the migration
+    // backfilled (NULL ceilings, every flag false). This is the drift signature EnsureBrdRolesAsync
+    // repairs; once a preset (or an admin) sets anything here, the role is never touched again.
+    private static bool HasUntouchedPosCeilings(Role r) =>
+        r.DiscountCeilingPercent is null && r.SurplusReturnCeilingAmount is null
+        && !r.CanAuthorizeStandardReturnWithoutReceipt && !r.CanOverrideItemPrice
+        && !r.CanAuthorizeDamagedReturns && !r.CanVoidTransactions
+        && !r.CanViewXReport && !r.CanViewZReport
+        && !r.CanConfigureReturnRulesAndFees && !r.CanManagePriceListAndUsers
+        && !r.CanManageSystemConfiguration;
+
+    // Runs on EVERY startup (same contract as EnsureBrdCategoriesAsync): inserts BRD ladder roles
+    // that don't exist yet, applies the preset ceilings to roles still carrying the untouched
+    // migration defaults, and — when this is the demo dataset — adds the demo users for roles that
+    // arrived after the original user seed. Never overwrites permissions, caps, or any ceiling an
+    // admin has customized.
+    internal static async Task EnsureBrdRolesAsync(AppDbContext db, IPasswordHasher hasher)
+    {
+        var existingRoles = await db.Roles.ToListAsync();
+        var changed = false;
+
+        foreach (var def in RoleDefinitions())
+        {
+            var role = existingRoles.FirstOrDefault(r => r.Name == def.Name);
+            if (role is null)
+            {
+                role = new Role
+                {
+                    Name = def.Name,
+                    Description = def.Description,
+                    ApprovalCap = def.ApprovalCap,
+                    IsSystem = true,
+                    Permissions = def.Levels.Select(kv => new RolePermission { Module = kv.Key, Level = kv.Value }).ToList(),
+                };
+                def.PosCeilings(role);
+                db.Roles.Add(role);
+                changed = true;
+            }
+            else if (HasUntouchedPosCeilings(role))
+            {
+                def.PosCeilings(role);
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            await db.SaveChangesAsync();
+        }
+
+        // Demo users for ladder roles added after the original user seed — only on the demo
+        // dataset (identified by the seeded admin account), never on a real tenant's user table.
+        if (await db.Users.AnyAsync(u => u.Email == "admin@ecr-building.local"))
+        {
+            var riyadh = await db.Branches.FirstOrDefaultAsync(b => b.Code == "BR-RUH-01");
+            var roleIdsByName = await db.Roles.ToDictionaryAsync(r => r.Name, r => r.Id);
+            var demoLadderUsers = new (string Name, string Email, string RoleName)[]
+            {
+                ("Mona Al-Harbi", "senior-cashier.ruh@ecr-building.local", "Senior Cashier"),
+                ("Tariq Al-Subaie", "supervisor.ruh@ecr-building.local", "Supervisor"),
+            };
+
+            var addedUser = false;
+            foreach (var (name, email, roleName) in demoLadderUsers)
+            {
+                if (!roleIdsByName.TryGetValue(roleName, out var roleId)) continue;
+                if (await db.Users.AnyAsync(u => u.Email == email)) continue;
+                db.Users.Add(new User
+                {
+                    Name = name, Email = email, RoleId = roleId, BranchId = riyadh?.Id,
+                    PasswordHash = hasher.Hash(DemoPassword),
+                });
+                addedUser = true;
+            }
+
+            if (addedUser)
+            {
+                await db.SaveChangesAsync();
+            }
+        }
+    }
+
+    // Same drift class as EnsureBrdRolesAsync/EnsureUomConversionsAsync: Supervisor and Branch
+    // Manager were seeded with Finance=View from day one, despite both role descriptions requiring
+    // Finance=Edit to ever reach ReturnsController.Approve — neither role could approve a single
+    // return since inception, even though CanAuthorizeDamagedReturns=true on both. Only touches the
+    // known-broken View default; an admin who deliberately reduced this further (e.g. to None) is
+    // never overwritten.
+    internal static async Task EnsureReturnApprovalPermissionsAsync(AppDbContext db)
+    {
+        // List<string>, not string[] — EF's LINQ-to-SQL translation of an array .Contains() inside a
+        // query hits a .NET expression-interpreter bug (span-based overload resolution) that crashes
+        // at startup; List<T>.Contains doesn't take that path.
+        var roleNames = new List<string> { "Supervisor", "Branch Manager" };
+        var roles = await db.Roles.Include(r => r.Permissions).Where(r => roleNames.Contains(r.Name)).ToListAsync();
+        var changed = false;
+        foreach (var role in roles)
+        {
+            var perm = role.Permissions.FirstOrDefault(p => p.Module == ModuleArea.Finance);
+            if (perm is not null && perm.Level == AccessLevel.View)
+            {
+                perm.Level = AccessLevel.Edit;
+                changed = true;
+            }
+        }
+        if (changed)
+        {
+            await db.SaveChangesAsync();
+        }
+    }
+
+    private static (string Name, string Description, decimal ApprovalCap, Dictionary<ModuleArea, AccessLevel> Levels, Action<Role> PosCeilings)[] RoleDefinitions() =>
+        new (string, string, decimal, Dictionary<ModuleArea, AccessLevel>, Action<Role>)[]
+        {
+            ("Owner", "Full access across every module.", 999_999m, AllModules(AccessLevel.Full), PosTier.Admin),
+            ("Admin", "Manages users, settings, network and compliance.", 100_000m, AdminLevels(), PosTier.Admin),
             ("Branch Manager", "Runs day-to-day branch operations.", 20_000m, new Dictionary<ModuleArea, AccessLevel>
             {
                 [ModuleArea.Pos] = AccessLevel.Edit,
@@ -153,11 +440,14 @@ public static class DbSeeder
                 [ModuleArea.Delivery] = AccessLevel.Edit,
                 [ModuleArea.Suppliers] = AccessLevel.Edit,
                 [ModuleArea.Insights] = AccessLevel.View,
-                [ModuleArea.Finance] = AccessLevel.View,
+                // Edit (not View): a branch manager must be able to approve customer returns
+                // (ReturnsController.Approve requires Finance:Edit) — running the branch includes
+                // authorizing refunds, not just viewing the ledger.
+                [ModuleArea.Finance] = AccessLevel.Edit,
                 [ModuleArea.Hr] = AccessLevel.View,
                 [ModuleArea.Network] = AccessLevel.View,
                 [ModuleArea.Admin] = AccessLevel.None,
-            }),
+            }, PosTier.Manager),
             ("Cashier", "Runs the point-of-sale register.", 500m, new Dictionary<ModuleArea, AccessLevel>
             {
                 [ModuleArea.Pos] = AccessLevel.Full,
@@ -172,7 +462,36 @@ public static class DbSeeder
                 // Printer Setup dialog; cashiers still can't manage branches/terminals/devices.
                 [ModuleArea.Network] = AccessLevel.View,
                 [ModuleArea.Admin] = AccessLevel.None,
-            }),
+            }, PosTier.Cashier),
+            ("Senior Cashier", "Cashier plus higher discount/return authorization.", 1_000m, new Dictionary<ModuleArea, AccessLevel>
+            {
+                [ModuleArea.Pos] = AccessLevel.Full,
+                [ModuleArea.Orders] = AccessLevel.Edit,
+                [ModuleArea.Inventory] = AccessLevel.View,
+                [ModuleArea.Delivery] = AccessLevel.None,
+                [ModuleArea.Suppliers] = AccessLevel.None,
+                [ModuleArea.Insights] = AccessLevel.None,
+                [ModuleArea.Finance] = AccessLevel.None,
+                [ModuleArea.Hr] = AccessLevel.None,
+                [ModuleArea.Network] = AccessLevel.View,
+                [ModuleArea.Admin] = AccessLevel.None,
+            }, PosTier.SeniorCashier),
+            ("Supervisor", "Authorizes damaged/surplus returns, voids, and X-reports.", 10_000m, new Dictionary<ModuleArea, AccessLevel>
+            {
+                [ModuleArea.Pos] = AccessLevel.Full,
+                [ModuleArea.Orders] = AccessLevel.Full,
+                [ModuleArea.Inventory] = AccessLevel.View,
+                // Edit (not View): the role description literally says "authorizes damaged/surplus
+                // returns" — ReturnsController.Approve requires Finance:Edit, so View could never
+                // actually approve anything despite CanAuthorizeDamagedReturns being true below.
+                [ModuleArea.Finance] = AccessLevel.Edit,
+                [ModuleArea.Delivery] = AccessLevel.View,
+                [ModuleArea.Suppliers] = AccessLevel.None,
+                [ModuleArea.Insights] = AccessLevel.View,
+                [ModuleArea.Hr] = AccessLevel.None,
+                [ModuleArea.Network] = AccessLevel.View,
+                [ModuleArea.Admin] = AccessLevel.None,
+            }, PosTier.Supervisor),
             ("Warehouse Staff", "Manages stock, transfers and receiving.", 0m, new Dictionary<ModuleArea, AccessLevel>
             {
                 [ModuleArea.Inventory] = AccessLevel.Edit,
@@ -185,7 +504,7 @@ public static class DbSeeder
                 [ModuleArea.Hr] = AccessLevel.None,
                 [ModuleArea.Network] = AccessLevel.None,
                 [ModuleArea.Admin] = AccessLevel.None,
-            }),
+            }, PosTier.None),
             ("Delivery Driver", "Executes assigned delivery orders.", 0m, new Dictionary<ModuleArea, AccessLevel>
             {
                 [ModuleArea.Delivery] = AccessLevel.Edit,
@@ -198,7 +517,7 @@ public static class DbSeeder
                 [ModuleArea.Hr] = AccessLevel.None,
                 [ModuleArea.Network] = AccessLevel.None,
                 [ModuleArea.Admin] = AccessLevel.None,
-            }),
+            }, PosTier.None),
             ("HR Officer", "Manages employees, attendance and leave.", 5_000m, new Dictionary<ModuleArea, AccessLevel>
             {
                 [ModuleArea.Hr] = AccessLevel.Full,
@@ -211,7 +530,7 @@ public static class DbSeeder
                 [ModuleArea.Insights] = AccessLevel.None,
                 [ModuleArea.Finance] = AccessLevel.None,
                 [ModuleArea.Network] = AccessLevel.None,
-            }),
+            }, PosTier.None),
             ("Accountant", "Owns finance, tax and reporting.", 50_000m, new Dictionary<ModuleArea, AccessLevel>
             {
                 [ModuleArea.Finance] = AccessLevel.Full,
@@ -224,24 +543,8 @@ public static class DbSeeder
                 [ModuleArea.Hr] = AccessLevel.None,
                 [ModuleArea.Network] = AccessLevel.None,
                 [ModuleArea.Admin] = AccessLevel.None,
-            }),
+            }, PosTier.None),
         };
-
-        foreach (var def in definitions)
-        {
-            var role = new Role
-            {
-                Name = def.Name,
-                Description = def.Description,
-                ApprovalCap = def.ApprovalCap,
-                IsSystem = true,
-            };
-            role.Permissions = def.Levels.Select(kv => new RolePermission { Module = kv.Key, Level = kv.Value }).ToList();
-            db.Roles.Add(role);
-        }
-
-        await db.SaveChangesAsync();
-    }
 
     private static Dictionary<ModuleArea, AccessLevel> AllModules(AccessLevel level) =>
         Enum.GetValues<ModuleArea>().ToDictionary(m => m, _ => level);
@@ -266,6 +569,8 @@ public static class DbSeeder
             new User { Name = "Sara Al-Dossary", Email = "admin@ecr-building.local", RoleId = roles["Admin"].Id, BranchId = null },
             new User { Name = "Faisal Al-Otaibi", Email = "manager.ruh@ecr-building.local", RoleId = roles["Branch Manager"].Id, BranchId = riyadh.Id },
             new User { Name = "Yousef Al-Malki", Email = "cashier.ruh@ecr-building.local", RoleId = roles["Cashier"].Id, BranchId = riyadh.Id },
+            new User { Name = "Mona Al-Harbi", Email = "senior-cashier.ruh@ecr-building.local", RoleId = roles["Senior Cashier"].Id, BranchId = riyadh.Id },
+            new User { Name = "Tariq Al-Subaie", Email = "supervisor.ruh@ecr-building.local", RoleId = roles["Supervisor"].Id, BranchId = riyadh.Id },
             new User { Name = "Khalid Al-Shehri", Email = "warehouse.jed@ecr-building.local", RoleId = roles["Warehouse Staff"].Id, BranchId = jeddah.Id },
             new User { Name = "Naif Al-Ghamdi", Email = "driver.ruh@ecr-building.local", RoleId = roles["Delivery Driver"].Id, BranchId = riyadh.Id },
             new User { Name = "Huda Al-Zahrani", Email = "hr@ecr-building.local", RoleId = roles["HR Officer"].Id, BranchId = null },
@@ -375,7 +680,79 @@ public static class DbSeeder
             new Setting { Category = "Pos", Group = "Receipts", Key = "ShowQrOnReceipt", Value = "true", Scope = SettingScope.Global },
             new Setting { Category = "Pos", Group = "Receipts", Key = "ReceiptFooterMessage", Value = "Thank you for your business", Scope = SettingScope.Global },
             new Setting { Category = "Pos", Group = "Discounts", Key = "MaxCashierDiscountPct", Value = "5", Scope = SettingScope.Global });
+        db.Settings.AddRange(LoyaltySettingsDefaults());
+        db.Settings.AddRange(ReturnPolicySettingsDefaults());
         await db.SaveChangesAsync();
+    }
+
+    // BRD §3.2.1/§3.2.4 defaults — kept as its own list so EnsureReturnPolicySettingsAsync (existing
+    // DBs) and SeedSettingsAsync (fresh DBs) can never drift apart, same pattern as loyalty's.
+    private static Setting[] ReturnPolicySettingsDefaults() =>
+    [
+        new Setting { Category = "Pos", Group = "Returns", Key = "Refund.DualAuthCashThreshold", Value = "500", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Returns", Key = "ReturnWindow.StandardDays", Value = "15", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Returns", Key = "ReturnWindow.SurplusDays", Value = "90", Scope = SettingScope.Global },
+    ];
+
+    // Same drift class as EnsureLoyaltySettingsAsync: a database seeded before these keys existed
+    // has none of them, so ReturnsController.GetSettingDecimalAsync silently falls back to its
+    // hardcoded defaults with no row anywhere for a manager to see or change. Idempotent by Key.
+    internal static async Task EnsureReturnPolicySettingsAsync(AppDbContext db)
+    {
+        var defaults = ReturnPolicySettingsDefaults();
+        var existingKeys = await db.Settings
+            .Where(s => s.Category == "Pos" && s.Group == "Returns")
+            .Select(s => s.Key).ToListAsync();
+        var missing = defaults.Where(s => !existingKeys.Contains(s.Key)).ToList();
+        if (missing.Count > 0)
+        {
+            db.Settings.AddRange(missing);
+            await db.SaveChangesAsync();
+        }
+    }
+
+    // BRD §4.3.1/§4.3.3 defaults, editable afterward from the same generic Pos-Settings page as
+    // MaxCashierDiscountPct — kept as its own list so EnsureLoyaltySettingsAsync (existing DBs) and
+    // SeedSettingsAsync (fresh DBs) can never drift apart.
+    private static Setting[] LoyaltySettingsDefaults() =>
+    [
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "PointsPerSarEarned", Value = "1", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "PointsPerSarRedeemed", Value = "100", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "MinRedeemPoints", Value = "500", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "MaxRedeemPctOfTotal", Value = "20", Scope = SettingScope.Global },
+        // BRD §4.3.2 tier ladder + §4.3.4 birthday bonus/points expiry — same Group so one
+        // Ensure*/Loyalty Program Settings round-trip covers all of it.
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "SilverThreshold", Value = "5000", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "GoldThreshold", Value = "20000", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "PlatinumThreshold", Value = "50000", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "SilverMultiplier", Value = "1.5", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "GoldMultiplier", Value = "2", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "PlatinumMultiplier", Value = "3", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "SilverDiscountPct", Value = "5", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "GoldDiscountPct", Value = "10", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "PlatinumDiscountPct", Value = "15", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "FreeDeliveryMinOrderSar", Value = "500", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "BirthdayBonusMultiplier", Value = "2", Scope = SettingScope.Global },
+        new Setting { Category = "Pos", Group = "Loyalty", Key = "PointsExpiryMonths", Value = "12", Scope = SettingScope.Global },
+    ];
+
+    // Same drift class as EnsureBrdCategoriesAsync/EnsureUomConversionsAsync: a database seeded
+    // before the loyalty economics moved from LoyaltyRules constants to Settings rows has none of
+    // these keys (SeedSettingsAsync only runs once, on a totally empty Settings table), which would
+    // otherwise make LoyaltyConfigLoader silently fall back to defaults with no way for an admin to
+    // see or change them on the Pos Settings page. Idempotent by (Category, Group, Key).
+    internal static async Task EnsureLoyaltySettingsAsync(AppDbContext db)
+    {
+        var defaults = LoyaltySettingsDefaults();
+        var existingKeys = await db.Settings
+            .Where(s => s.Category == "Pos" && s.Group == "Loyalty")
+            .Select(s => s.Key).ToListAsync();
+        var missing = defaults.Where(s => !existingKeys.Contains(s.Key)).ToList();
+        if (missing.Count > 0)
+        {
+            db.Settings.AddRange(missing);
+            await db.SaveChangesAsync();
+        }
     }
 
     private static async Task SeedCatalogAndInventoryAsync(AppDbContext db)
@@ -387,7 +764,8 @@ public static class DbSeeder
         {
             new Category { Code = "CAT-CEM", NameEn = "Cement", NameAr = "الأسمنت", DefaultUom = "Bag", VatRate = 15, Returnable = false, ReturnRule = "Non-Returnable" },
             new Category { Code = "CAT-STL", NameEn = "Steel", NameAr = "الحديد", DefaultUom = "Bundle", VatRate = 15 },
-            new Category { Code = "CAT-TIL", NameEn = "Tiles", NameAr = "البلاط", DefaultUom = "Box", VatRate = 15 },
+            // 5% surplus restocking fee (BRD §3.2.3) — the demo category for fee-bearing returns.
+            new Category { Code = "CAT-TIL", NameEn = "Tiles", NameAr = "البلاط", DefaultUom = "Box", VatRate = 15, SurplusRestockingFeePct = 5m },
             new Category { Code = "CAT-PNT", NameEn = "Paint", NameAr = "الطلاء", DefaultUom = "Can", VatRate = 15, Returnable = false, ReturnRule = "Non-Returnable" },
             new Category { Code = "CAT-PLM", NameEn = "Plumbing", NameAr = "السباكة", DefaultUom = "Piece", VatRate = 15 },
             new Category { Code = "CAT-ELC", NameEn = "Electrical", NameAr = "الكهرباء", DefaultUom = "Piece", VatRate = 15 },
@@ -413,10 +791,24 @@ public static class DbSeeder
             new Product { Sku = "ELEC-SW-1G", Barcode = "6281000600022", NameEn = "Wall Switch 1 Gang", CategoryId = catId["Electrical"], Brand = "Schneider", CostPrice = 12m, SellingPrice = 18m, StockUom = "Piece", Weight = 0.1m, ReorderLevel = 50, ReorderQty = 300 },
             new Product { Sku = "TOOL-DRL-18V", Barcode = "6281000700012", NameEn = "Cordless Drill 18V", CategoryId = catId["Tools"], Brand = "Bosch", CostPrice = 400m, SellingPrice = 540m, StockUom = "Piece", Weight = 1.8m, ReorderLevel = 10, ReorderQty = 25 },
             new Product { Sku = "TOOL-HMR-500", Barcode = "6281000700029", NameEn = "Claw Hammer 500g", CategoryId = catId["Tools"], Brand = "Stanley", CostPrice = 30m, SellingPrice = 42m, StockUom = "Piece", Weight = 0.6m, ReorderLevel = 20, ReorderQty = 60 },
-            new Product { Sku = "GLASS-6MM-CLR", Barcode = "6281000300034", NameEn = "Clear Float Glass 6MM", CategoryId = catId["Tiles"], Brand = "Saudi Glass", CostPrice = 135m, SellingPrice = 180m, StockUom = "m²", Weight = 15, Returnable = false, ReorderLevel = 15, ReorderQty = 80 },
+            new Product { Sku = "GLASS-6MM-CLR", Barcode = "6281000300034", NameEn = "Clear Float Glass 6MM", CategoryId = catId["Tiles"], Brand = "Saudi Glass", CostPrice = 135m, SellingPrice = 180m, StockUom = "m²", Weight = 15, Returnable = false, ReorderLevel = 15, ReorderQty = 80, IsCutToSize = true },
             new Product { Sku = "SEAL-SILC-300", Barcode = "6281000700036", NameEn = "Silicone Sealant 300ml", CategoryId = catId["Tools"], Brand = "Dow", CostPrice = 16m, SellingPrice = 22m, StockUom = "Tube", Weight = 0.4m, ReorderLevel = 40, ReorderQty = 200 },
         };
         db.Products.AddRange(products);
+        await db.SaveChangesAsync();
+
+        // BRD §2.3 UOM engine demo data — "1 <Uom> = FactorToStock <StockUom>". Cement sells by the
+        // pallet (50 bags) or ton (20 × 50kg bags); rebar bundles break down to 52 pieces; cable rolls
+        // are 100 metres; tiles are 4 boxes to a m²-covering pallet layer... enough spread to exercise
+        // the POS UOM dropdown across categories.
+        var productBySku = products.ToDictionary(p => p.Sku);
+        db.ProductUomConversions.AddRange(
+            new ProductUomConversion { ProductId = productBySku["CEM-OPC-50KG"].Id, Uom = "Pallet", FactorToStock = 50m },
+            new ProductUomConversion { ProductId = productBySku["CEM-OPC-50KG"].Id, Uom = "Ton", FactorToStock = 20m },
+            new ProductUomConversion { ProductId = productBySku["CEM-WHT-40KG"].Id, Uom = "Pallet", FactorToStock = 40m },
+            new ProductUomConversion { ProductId = productBySku["STEEL-RBR-12MM"].Id, Uom = "Piece", FactorToStock = 0.0192m },
+            new ProductUomConversion { ProductId = productBySku["TILE-GRY-60X60"].Id, Uom = "Pallet", FactorToStock = 40m },
+            new ProductUomConversion { ProductId = productBySku["ELEC-CBL-2.5MM"].Id, Uom = "Roll", FactorToStock = 100m });
         await db.SaveChangesAsync();
 
         var warehouses = new[]
@@ -493,7 +885,7 @@ public static class DbSeeder
             new Customer { NameEn = "Al Noor Contracting", NameAr = "النور للمقاولات", Type = CustomerType.Contractor, Phone = "+966551112233", VatNo = "310000112233", CreditLimit = 500_000, Outstanding = 84_200, City = "Riyadh", LoyaltyEnrolled = true, LoyaltyPoints = 4820, LoyaltyLifetimePoints = 6120, LoyaltyTier = LoyaltyTier.Platinum, ProjectName = "Al Narjis Villas Phase 2", CreditTermDays = 30 },
             new Customer { NameEn = "Modern Villas Est.", NameAr = "الفلل الحديثة", Type = CustomerType.Contractor, Phone = "+966509987654", VatNo = "310000998765", CreditLimit = 250_000, Outstanding = 42_150, City = "Jeddah", LoyaltyEnrolled = false, ProjectName = "Al Shati Compound", CreditTermDays = 15 },
             new Customer { NameEn = "Gulf Build Co.", NameAr = "الخليج للبناء", Type = CustomerType.B2B, Phone = "+966552201010", VatNo = "310000220101", CreditLimit = 1_000_000, Outstanding = 312_400, City = "Riyadh", LoyaltyEnrolled = false, CreditTermDays = 60 },
-            new Customer { NameEn = "Fahad Al-Qahtani", Type = CustomerType.Retail, Phone = "+966557806612", City = "Riyadh", LoyaltyEnrolled = true, LoyaltyPoints = 340, LoyaltyLifetimePoints = 340, LoyaltyTier = LoyaltyTier.Standard },
+            new Customer { NameEn = "Fahad Al-Qahtani", Type = CustomerType.Retail, Phone = "+966557806612", City = "Riyadh", LoyaltyEnrolled = true, LoyaltyPoints = 340, LoyaltyLifetimePoints = 340, LoyaltyLifetimeSpend = 3_400m, LoyaltyTier = LoyaltyTier.Bronze },
             new Customer { NameEn = "Walk-in Customer", Type = CustomerType.WalkIn, LoyaltyEnrolled = false });
         await db.SaveChangesAsync();
 
@@ -508,8 +900,8 @@ public static class DbSeeder
         await db.SaveChangesAsync();
 
         db.PricingRules.AddRange(
-            new PricingRule { Name = "Contractor Trade Price", Type = "Trade Tier", Scope = "Contractor customers", Condition = "Any", Action = "-5% list", Priority = 10 },
-            new PricingRule { Name = "Cement Pallet Deal", Type = "Quantity", Scope = "SKU: CEM-OPC-50KG", Condition = ">= 50 bags", Action = "-8%", Priority = 20, ValidUntil = DateTime.UtcNow.AddMonths(6) },
+            new PricingRule { Name = "Contractor Trade Price", Type = "Trade Tier", Scope = "Contractor customers", Condition = "Any", Action = "-5% list", Priority = 10, DiscountType = RuleDiscountType.Percentage, Value = 5 },
+            new PricingRule { Name = "Cement Pallet Deal", Type = "Quantity", Scope = "SKU: CEM-OPC-50KG", Condition = ">= 50 bags", Action = "-8%", Priority = 20, ValidUntil = DateTime.UtcNow.AddMonths(6), DiscountType = RuleDiscountType.Percentage, Value = 8, MinQuantity = 50, Sku = "CEM-OPC-50KG" },
             new PricingRule { Name = "Surplus Restocking Fee", Type = "Fee", Scope = "Surplus returns", Condition = ">15 days", Action = "+10% fee", Priority = 5 },
             new PricingRule { Name = "Welcome Discount", Type = "Coupon", Scope = "All branches", Condition = "Code: WELCOME10", Action = "10% off", Priority = 30, Code = "WELCOME10", DiscountType = RuleDiscountType.Percentage, Value = 10, ValidUntil = DateTime.UtcNow.AddYears(1) },
             new PricingRule { Name = "SAR 20 Off", Type = "Coupon", Scope = "All branches", Condition = "Code: SAVE20", Action = "20 ر.س off", Priority = 30, Code = "SAVE20", DiscountType = RuleDiscountType.Fixed, Value = 20, ValidUntil = DateTime.UtcNow.AddYears(1) });

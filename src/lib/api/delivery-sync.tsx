@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useDeliveryOrdersApi, useDriversApi, useVehiclesApi, useZonesApi, mapApiOrder, mapApiDriver, mapApiVehicle, mapApiZone } from "./delivery";
+import { useDeliveryOrdersApi, useDriversApi, useVehiclesApi, useZonesApi, useDeliveryApprovalsApi, mapApiOrder, mapApiDriver, mapApiVehicle, mapApiZone, mapApiApproval } from "./delivery";
 import { useBranches } from "./admin";
 import { useProducts } from "./catalog";
 import { useDeliveryStore } from "@/lib/delivery/store";
@@ -12,6 +12,7 @@ export function DeliverySync() {
   const drivers = useDriversApi();
   const vehicles = useVehiclesApi();
   const zones = useZonesApi();
+  const approvals = useDeliveryApprovalsApi();
   const branches = useBranches();
   const products = useProducts();
   const setSynced = useDeliveryStore((s) => s.setSynced);
@@ -19,6 +20,10 @@ export function DeliverySync() {
   useEffect(() => {
     if (orders.data) setSynced({ orders: orders.data.map(mapApiOrder) });
   }, [orders.data, setSynced]);
+
+  useEffect(() => {
+    if (approvals.data) setSynced({ pendingApprovals: approvals.data.filter((a) => a.status === "Pending").map(mapApiApproval) });
+  }, [approvals.data, setSynced]);
 
   useEffect(() => {
     if (drivers.data) setSynced({ drivers: drivers.data.map(mapApiDriver) });

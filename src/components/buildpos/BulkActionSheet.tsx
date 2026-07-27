@@ -28,6 +28,17 @@ export function BulkActionSheet({ config, onOpenChange }: { config: BulkActionCo
   const [submitting, setSubmitting] = useState(false);
   const mode = config?.mode ?? "multi";
 
+  // The same component instance is reused across actions and module routes — reset the selection
+  // whenever the sheet closes or shows a different action, or rows the user never chose stay
+  // pre-ticked (e.g. after Cancel, or a failed run followed by a different bulk action).
+  const configKey = config ? `${config.title}|${config.confirmLabel}` : null;
+  const [lastConfigKey, setLastConfigKey] = useState(configKey);
+  if (configKey !== lastConfigKey) {
+    setLastConfigKey(configKey);
+    setSelected(new Set());
+    setExtraValue("");
+  }
+
   function toggle(id: number) {
     if (mode === "single") { setSelected(new Set([id])); return; }
     setSelected((prev) => {

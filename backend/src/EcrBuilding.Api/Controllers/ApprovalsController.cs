@@ -62,6 +62,10 @@ public class ApprovalsController(AppDbContext db, IAuditService audit) : Control
         if (approval.Status != ApprovalStatus.Pending) return BadRequest(new { error = "This request has already been resolved." });
 
         var approverId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        if (approverId == approval.RequestedByUserId)
+        {
+            return BadRequest(new { error = "You cannot approve your own request — a different, higher-tier user must authorize it." });
+        }
         approval.Status = to;
         approval.ApproverUserId = approverId;
         approval.ResolvedAt = DateTime.UtcNow;

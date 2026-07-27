@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouterState } from "@tanstack/react-router";
 import { PageHeader, KpiGrid } from "@/components/buildpos/PageHeader";
 import { Pill, SectionCard } from "@/components/buildpos/sections";
@@ -24,18 +24,29 @@ import {
 import { RedeemPointsDialog } from "./RedeemPointsDialog";
 import { AdjustPointsDialog } from "./AdjustPointsDialog";
 import { CustomerStatementDialog } from "./CustomerStatementDialog";
+import { LoyaltyProgramSettingsDialog } from "./LoyaltyProgramSettingsDialog";
 import { useCustomers } from "@/lib/api/pos";
-import { useLoyaltyTransactions } from "@/lib/api/loyalty";
+import { useLoyaltyTransactions, useLoyaltyProgramConfig, type LoyaltyConfigDto } from "@/lib/api/loyalty";
+import { Settings2 } from "lucide-react";
 
 const TABS = ["All", "Earn", "Redeem", "Adjust", "Reversal", "Welcome"] as const;
 type Tab = (typeof TABS)[number];
-const SAR_PER_POINT = 0.1;
+// BRD §4.3.1/§4.3.3 defaults — only used before /api/loyalty/config has loaded; the page always
+// prefers the live, admin-configurable rate over these once the query resolves.
+const DEFAULT_CONFIG: LoyaltyConfigDto = {
+  pointsPerSarEarned: 1, pointsPerSarRedeemed: 100, minRedeemPoints: 500, maxRedeemPctOfTotal: 20,
+  silverThreshold: 5_000, goldThreshold: 20_000, platinumThreshold: 50_000,
+  silverMultiplier: 1.5, goldMultiplier: 2, platinumMultiplier: 3,
+  silverDiscountPct: 5, goldDiscountPct: 10, platinumDiscountPct: 15,
+  freeDeliveryMinOrderSar: 500, birthdayBonusMultiplier: 2, pointsExpiryMonths: 12,
+};
 const PAGE_SIZE = 10;
 
 function toneForType(type: string): Severity {
   switch (type) {
     case "Earn":
     case "Welcome":
+    case "RedeemReversal":
       return "success";
     case "Redeem":
       return "info";
@@ -88,21 +99,29 @@ export function LoyaltyPage() {
   const search = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
   const { data: transactions, refetch, isFetching } = useLoyaltyTransactions();
   const { data: customers } = useCustomers(true);
+  const { data: loyaltyConfig } = useLoyaltyProgramConfig();
+  const config = loyaltyConfig ?? DEFAULT_CONFIG;
+  const sarPerPoint = 1 / config.pointsPerSarRedeemed;
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [tab, setTab] = useState<Tab>("All");
   const [draft, setDraft] = useState<Record<string, string>>(() => emptyFilterDraft(FIELDS));
   const [applied, setApplied] = useState<Record<string, string>>(draft);
 
   // A cross-linked page load (e.g. Customers' "View Loyalty" row action ->
-  // /finance/loyalty?customerId=42) seeds the search filter with that member's name.
+  // /finance/loyalty?customerId=42) seeds the search filter with that member's name — ONCE per
+  // customerId. The `customers` query refetches on window focus with a fresh identity, and without
+  // the ref-guard each refetch would re-apply the seed and wipe out whatever the user filtered since.
+  const seededForCustomerId = useRef<number | null>(null);
   useEffect(() => {
     const id =
       typeof search.customerId === "string" || typeof search.customerId === "number"
         ? Number(search.customerId)
         : null;
-    if (!id || !customers) return;
+    if (!id || !customers || seededForCustomerId.current === id) return;
     const match = customers.find((c) => c.id === id);
     if (!match) return;
+    seededForCustomerId.current = id;
     const seeded = { ...emptyFilterDraft(FIELDS), search: match.nameEn };
     setDraft(seeded);
     setApplied(seeded);
@@ -163,7 +182,7 @@ export function LoyaltyPage() {
       {
         label: "Points Outstanding",
         value: pointsOutstanding.toLocaleString("en-US"),
-        sub: `≈ ${fmtSar(pointsOutstanding * SAR_PER_POINT)} liability`,
+        sub: `≈ ${fmtSar(pointsOutstanding * sarPerPoint)} liability`,
         tone: "info" as const,
       },
       {
@@ -181,7 +200,7 @@ export function LoyaltyPage() {
         tone: "success" as const,
       },
     ];
-  }, [enrolledCustomers, all, customers]);
+  }, [enrolledCustomers, all, customers, sarPerPoint]);
 
   function handleExport() {
     exportToCsv(
@@ -255,6 +274,54 @@ export function LoyaltyPage() {
       />
 
       <KpiGrid items={kpis} />
+
+      <SectionCard
+        title="Program Settings"
+        desc="Earn/redeem rate, redemption limits and the tier ladder — applied automatically at POS checkout."
+        action={
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSettingsOpen(true)}
+            className="h-9 gap-1.5 text-muted-foreground hover:text-foreground"
+          >
+            <Settings2 className="h-4 w-4" /> Edit Settings
+          </Button>
+        }
+      >
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div>
+            <p className="text-xs text-muted-foreground">Earn rate</p>
+            <p className="font-display text-base font-bold text-foreground">{config.pointsPerSarEarned} pt / ر.س 1</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Redemption value</p>
+            <p className="font-display text-base font-bold text-foreground">{fmtSar(sarPerPoint)} / pt</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Min to redeem</p>
+            <p className="font-display text-base font-bold text-foreground">{config.minRedeemPoints.toLocaleString("en-US")} pts</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Max per order</p>
+            <p className="font-display text-base font-bold text-foreground">{config.maxRedeemPctOfTotal}% of total</p>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-3 border-t border-black/5 pt-4 text-xs">
+          <div>
+            <p className="font-semibold text-info">Silver — {fmtSar(config.silverThreshold)}+</p>
+            <p className="text-muted-foreground">{config.silverMultiplier}x points · {config.silverDiscountPct}% off</p>
+          </div>
+          <div>
+            <p className="font-semibold text-warning">Gold — {fmtSar(config.goldThreshold)}+</p>
+            <p className="text-muted-foreground">{config.goldMultiplier}x points · {config.goldDiscountPct}% off</p>
+          </div>
+          <div>
+            <p className="font-semibold text-success">Platinum — {fmtSar(config.platinumThreshold)}+</p>
+            <p className="text-muted-foreground">{config.platinumMultiplier}x points · {config.platinumDiscountPct}% off</p>
+          </div>
+        </div>
+      </SectionCard>
 
       <SectionCard title="Members" desc={`${enrolledCustomers.length} enrolled`}>
         <div className="overflow-x-auto">
@@ -397,6 +464,7 @@ export function LoyaltyPage() {
         initialCustomerId={presetCustomerId}
       />
       <CustomerStatementDialog customerId={statementId} onClose={() => setStatementId(null)} />
+      <LoyaltyProgramSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} config={config} />
     </div>
   );
 }

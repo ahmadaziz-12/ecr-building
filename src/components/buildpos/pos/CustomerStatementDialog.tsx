@@ -4,7 +4,7 @@ import { statusTone } from "./shared";
 import { useCustomerStatement } from "@/lib/api/pos";
 
 function fmtSar(n: number): string {
-  return `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س`;
+  return `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
 }
 
 export function CustomerStatementDialog({ customerId, onClose }: { customerId: number | null; onClose: () => void }) {

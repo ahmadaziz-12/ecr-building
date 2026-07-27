@@ -2,9 +2,11 @@ using EcrBuilding.Domain.Common;
 
 namespace EcrBuilding.Domain.Entities;
 
+// BRD §4.3.2 ladder. "Bronze" was called "Standard" before Module 7 — the numeric value is what's
+// stored, so renaming the member is data-safe; JSON payloads now serialize "Bronze".
 public enum LoyaltyTier
 {
-    Standard = 0,
+    Bronze = 0,
     Silver = 1,
     Gold = 2,
     Platinum = 3
@@ -16,7 +18,12 @@ public enum LoyaltyTransactionType
     Earn,
     Redeem,
     Adjust,
-    Reversal
+    Reversal,
+    // Distinct from Reversal (which claws back EARNED points and is summed as a running total to
+    // cap what a return can reverse) — this restores REDEEMED points when the item paid for with
+    // them is returned. Keeping it a separate type stops it from corrupting Reversal's earn-clawback
+    // bookkeeping in FinanceController.Approve.
+    RedeemReversal
 }
 
 // Append-only ledger backing Customer.LoyaltyPoints — every accrual, redemption, manual

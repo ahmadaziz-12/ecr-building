@@ -27,6 +27,9 @@ export type TaxCodeDto = {
   effectiveFrom: string;
   glAccountCode: string | null;
   status: string;
+  // null = applies company-wide, across every branch.
+  branchId: number | null;
+  branchName: string | null;
 };
 export type ReturnLineDto = {
   productId: number;
@@ -34,6 +37,10 @@ export type ReturnLineDto = {
   productName: string;
   qty: number;
   amount: number;
+  orderLineId: number | null;
+  stockQty: number;
+  unitPricePaid: number;
+  vatRate: number;
 };
 export type ReturnDto = {
   id: number;
@@ -49,6 +56,35 @@ export type ReturnDto = {
   status: string;
   createdAt: string;
   lines: ReturnLineDto[];
+  // Module 6 (BRD §3.2): damaged-return workflow + frozen Return Value Calculation + refund routing.
+  dgrnNo: string | null;
+  damageReason: string | null;
+  photoReference: string | null;
+  grossRefund: number;
+  vatReversal: number;
+  restockingFeePct: number;
+  restockingFeeAmount: number;
+  netCashback: number;
+  refundMethod: string;
+  refundSplitJson: string | null;
+  exchangeOrderId: number | null;
+  exchangeOrderNo: string | null;
+  exchangeNetPayable: number | null;
+  // Inherited from the original sale via Order — null only if that order was later deleted.
+  branchId: number | null;
+  branchName: string | null;
+  cashierName: string | null;
+};
+
+// The Return Value Calculation shown to the cashier BEFORE confirming (BRD §3.2.3/§3.2.4).
+export type ReturnPreviewLineDto = {
+  orderLineId: number; productId: number; sku: string; productName: string; uom: string;
+  originalQty: number; maxReturnableQty: number; qty: number; unitPricePaid: number;
+  baseRefund: number; vatReversal: number; returnable: boolean; nonReturnableReason: string | null;
+};
+export type ReturnPreviewDto = {
+  grossRefund: number; vatReversal: number; restockingFeePct: number; restockingFeeAmount: number;
+  netCashback: number; requiresWindowOverride: boolean; windowDays: number; lines: ReturnPreviewLineDto[];
 };
 export type AccountDto = { id: number; code: string; name: string; type: string; balance: number };
 export type JournalLineDto = {
@@ -126,6 +162,8 @@ export type UpsertTaxCodeRequest = {
   appliesTo: string;
   effectiveFrom: string;
   glAccountCode: string | null;
+  // null = applies company-wide, across every branch.
+  branchId: number | null;
 };
 export function useCreateTaxCode() {
   const queryClient = useQueryClient();
@@ -152,13 +190,18 @@ export function useSetTaxCodeStatus() {
   });
 }
 
-export type CreateReturnLineInput = { productId: number; qty: number; amount: number };
+// Module 6: the cashier picks specific ORIGINAL ORDER LINES and quantities — refund amounts are
+// computed server-side from the original sale, never sent from the client.
+export type CreateReturnLineInput = { orderLineId: number; qty: number };
 export type CreateReturnRequest = {
-  orderId: number | null;
-  customerId: number | null;
+  orderId: number;
   type: string;
   reason: string;
   lines: CreateReturnLineInput[];
+  damageReasonCode?: string;
+  photoReference?: string;
+  windowOverrideApprovalRequestId?: number | null;
+  exchangeOrderId?: number | null;
 };
 export function useCreateReturn() {
   const queryClient = useQueryClient();
@@ -166,6 +209,13 @@ export function useCreateReturn() {
     mutationFn: (request: CreateReturnRequest) =>
       apiPost<ReturnDto>("/api/finance/returns", request),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance", "returns"] }),
+  });
+}
+
+export function useReturnPreview() {
+  return useMutation({
+    mutationFn: (request: { orderId: number; type: string; lines: CreateReturnLineInput[] }) =>
+      apiPost<ReturnPreviewDto>("/api/finance/returns/preview", request),
   });
 }
 export function useReconcileExpense() {
@@ -187,8 +237,10 @@ export function useQuarantineReturn() {
 export function useApproveReturn() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, branchId }: { id: number; branchId: number }) =>
-      apiPut<ReturnDto>(`/api/finance/returns/${id}/approve`, { branchId }),
+    mutationFn: ({ id, branchId, refundMethod, secondAuthEmail, secondAuthPin }: {
+      id: number; branchId: number; refundMethod?: string; secondAuthEmail?: string; secondAuthPin?: string;
+    }) =>
+      apiPut<ReturnDto>(`/api/finance/returns/${id}/approve`, { branchId, refundMethod, secondAuthEmail, secondAuthPin }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["finance", "returns"] });
       queryClient.invalidateQueries({ queryKey: ["inventory", "branch-stock-levels"] });
@@ -197,6 +249,23 @@ export function useApproveReturn() {
     },
   });
 }
+// BRD §3.2.1/§3.2.4: the return window and dual-authorization cash threshold — configured from the
+// Returns & Refunds page itself, not the generic Admin Settings browser.
+export type ReturnPolicyConfigDto = { dualAuthCashThreshold: number; standardWindowDays: number; surplusWindowDays: number };
+export const useReturnPolicyConfig = (enabled = true) =>
+  useQuery({
+    queryKey: ["finance", "returns", "policy-config"],
+    queryFn: () => apiGet<ReturnPolicyConfigDto>("/api/finance/returns/policy-config"),
+    enabled,
+  });
+export function useUpdateReturnPolicyConfig() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: ReturnPolicyConfigDto) => apiPut<ReturnPolicyConfigDto>("/api/finance/returns/policy-config", request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance", "returns", "policy-config"] }),
+  });
+}
+
 export const useAccounts = (enabled = true) =>
   useQuery({
     queryKey: ["finance", "accounts"],
@@ -262,9 +331,10 @@ export function mapTaxCodes(rows: TaxCodeDto[]): LiveTable {
       "Applies To",
       "Effective From",
       "GL Account",
+      "Branch",
       "Status",
     ],
-    statusCol: 7,
+    statusCol: 8,
     ids: rows.map((t) => t.id),
     rows: rows.map((t) => [
       t.code,
@@ -274,6 +344,7 @@ export function mapTaxCodes(rows: TaxCodeDto[]): LiveTable {
       t.appliesTo,
       fmtDate(t.effectiveFrom),
       t.glAccountCode ?? "—",
+      t.branchName ?? "All Branches",
       t.status,
     ]),
   };
@@ -291,6 +362,10 @@ export function mapReturns(rows: ReturnDto[]): LiveTable {
       "Reason",
       "Approved By",
       "Status",
+      // Appended after Status (not inserted earlier) so this doesn't shift the indices the
+      // Standard/Damaged/Surplus/Exchange tabs and status-pill rendering already key on.
+      "Branch",
+      "Cashier",
     ],
     statusCol: 8,
     ids: rows.map((r) => r.id),
@@ -304,6 +379,8 @@ export function mapReturns(rows: ReturnDto[]): LiveTable {
       r.reason,
       r.approvedByName ?? "—",
       r.status,
+      r.branchName ?? "—",
+      r.cashierName ?? "—",
     ]),
   };
 }

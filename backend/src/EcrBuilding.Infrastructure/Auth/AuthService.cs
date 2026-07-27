@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using EcrBuilding.Application.Abstractions;
+using EcrBuilding.Application.Admin;
 using EcrBuilding.Application.Auth;
 using EcrBuilding.Domain.Entities;
 using EcrBuilding.Domain.Enums;
@@ -42,6 +43,34 @@ public class AuthService(
         return new AuthResult(await MapCurrentUserAsync(user, cancellationToken), tokens);
     }
 
+    // BRD §10.2 (Module 15): PIN quick-login — identical issuance/audit path to password login, with
+    // the PIN (set via admin reset-pin) as the credential. Kept separate so failed-PIN attempts are
+    // distinguishable from failed-password attempts in the audit trail.
+    public async Task<AuthResult> PinLoginAsync(string email, string pin, string? ip, CancellationToken cancellationToken = default)
+    {
+        var user = await db.Users
+            .Include(u => u.Role).ThenInclude(r => r!.Permissions)
+            .Include(u => u.Branch)
+            .FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
+
+        if (user is null || user.PinHash is null || !passwordHasher.Verify(pin, user.PinHash))
+        {
+            await auditService.LogAsync("auth", "PIN_LOGIN_FAILED", reason: $"email={email}", severity: AuditSeverity.Warning, cancellationToken: cancellationToken);
+            throw new AuthException("Invalid email or PIN.");
+        }
+
+        if (user.Status != UserStatus.Active)
+        {
+            throw new AuthException("This account is not active.");
+        }
+
+        user.LastLoginAt = DateTime.UtcNow;
+        var tokens = await IssueTokensAsync(user, ip, cancellationToken);
+        await auditService.LogAsync("auth", "PIN_LOGIN_SUCCESS", recordId: user.Id.ToString(), userId: user.Id, userName: user.Name, branchId: user.BranchId, cancellationToken: cancellationToken);
+
+        return new AuthResult(await MapCurrentUserAsync(user, cancellationToken), tokens);
+    }
+
     public async Task<AuthResult> RefreshAsync(string refreshTokenValue, string? ip, CancellationToken cancellationToken = default)
     {
         var hash = Hash(refreshTokenValue);
@@ -53,6 +82,19 @@ public class AuthService(
         if (existing is null || !existing.IsActive || existing.User is null)
         {
             throw new AuthException("Refresh token is invalid or expired.");
+        }
+
+        // Unlike Login/PinLogin, this path never re-checked Status — a deactivated user's existing
+        // refresh cookie kept silently minting fresh access+refresh tokens with full permissions
+        // forever, since deactivation only blocks a NEW login, not an already-issued session's renewal.
+        // Revoke the token outright (not just refuse it) so this exact cookie can never be retried.
+        if (existing.User.Status != UserStatus.Active)
+        {
+            existing.RevokedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+            await auditService.LogAsync("auth", "REFRESH_DENIED_INACTIVE", recordId: existing.User.Id.ToString(),
+                userId: existing.User.Id, userName: existing.User.Name, severity: AuditSeverity.Warning, cancellationToken: cancellationToken);
+            throw new AuthException("This account is not active.");
         }
 
         existing.RevokedAt = DateTime.UtcNow;
@@ -98,16 +140,7 @@ public class AuthService(
 
     private async Task<TokenPair> IssueTokensAsync(User user, string? ip, CancellationToken cancellationToken)
     {
-        var claims = new Dictionary<string, string>
-        {
-            ["role"] = user.Role?.Name ?? "Unknown",
-            ["approvalCap"] = (user.Role?.ApprovalCap ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture),
-        };
-        if (user.BranchId is not null) claims["branchId"] = user.BranchId.Value.ToString();
-        foreach (var perm in user.Role?.Permissions ?? [])
-        {
-            claims[$"perm:{perm.Module}"] = perm.Level.ToString();
-        }
+        var claims = UserClaimsFactory.Build(user);
 
         var access = jwtTokenService.CreateAccessToken(user, claims);
 
@@ -138,6 +171,19 @@ public class AuthService(
             .Select(p => new ModulePermissionDto(p.Module.ToString(), p.Level.ToString()))
             .ToList();
 
+        var posCeilings = new PosCeilingsDto(
+            user.Role?.DiscountCeilingPercent,
+            user.Role?.SurplusReturnCeilingAmount,
+            user.Role?.CanAuthorizeStandardReturnWithoutReceipt ?? false,
+            user.Role?.CanOverrideItemPrice ?? false,
+            user.Role?.CanAuthorizeDamagedReturns ?? false,
+            user.Role?.CanVoidTransactions ?? false,
+            user.Role?.CanViewXReport ?? false,
+            user.Role?.CanViewZReport ?? false,
+            user.Role?.CanConfigureReturnRulesAndFees ?? false,
+            user.Role?.CanManagePriceListAndUsers ?? false,
+            user.Role?.CanManageSystemConfiguration ?? false);
+
         return new CurrentUserDto(
             user.Id,
             user.Name,
@@ -147,7 +193,8 @@ public class AuthService(
             user.BranchId,
             user.Branch?.NameEn,
             user.PreferredLocale,
-            permissions);
+            permissions,
+            posCeilings);
     }
 
     private static string Hash(string value)

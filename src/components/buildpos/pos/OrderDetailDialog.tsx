@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Pill } from "@/components/buildpos/sections";
 import { statusTone } from "./shared";
@@ -79,6 +80,19 @@ export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; 
               <span className="font-semibold text-foreground">Grand Total</span>
               <span className="text-right font-semibold text-foreground">{fmtSar(order.grandTotal)}</span>
             </div>
+
+            {order.deliveryOrderNo && (
+              <div className="flex items-center justify-between rounded-lg border border-black/5 bg-canvas px-3 py-2 text-sm">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Delivery</p>
+                  <p className="mt-0.5 flex items-center gap-1.5 font-medium">
+                    <span className="font-mono text-xs">{order.deliveryOrderNo}</span>
+                    <Pill tone={statusTone(order.deliveryStage ?? "")}>{order.deliveryStage}</Pill>
+                  </p>
+                </div>
+                <Link to="/delivery/orders" className="text-xs font-medium text-brand hover:underline">Track delivery →</Link>
+              </div>
+            )}
 
             {order.payments.length > 0 && (
               <div>

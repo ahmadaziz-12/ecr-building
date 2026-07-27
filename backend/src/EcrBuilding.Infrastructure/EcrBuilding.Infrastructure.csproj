@@ -6,6 +6,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Lets EcrBuilding.Tests call DbSeeder's internal SeedRolesAsync directly, to verify the seeded
+         BRD §10.1 role ceilings without pulling in the full production dataset (branches/terminals/
+         devices), which has a Sqlite-vs-MySQL FK-ordering issue unrelated to roles. -->
+    <InternalsVisibleTo Include="EcrBuilding.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="9.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0">

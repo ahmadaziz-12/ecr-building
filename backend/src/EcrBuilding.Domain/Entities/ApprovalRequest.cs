@@ -2,7 +2,7 @@ using EcrBuilding.Domain.Common;
 
 namespace EcrBuilding.Domain.Entities;
 
-public enum ApprovalType { Discount = 0, PriceOverride = 1, Refund = 2 }
+public enum ApprovalType { Discount = 0, PriceOverride = 1, Refund = 2, CreditOverride = 3, DeliveryStageChange = 4 }
 public enum ApprovalStatus { Pending = 0, Approved = 1, Rejected = 2 }
 
 public class ApprovalRequest : BaseEntity
@@ -19,5 +19,10 @@ public class ApprovalRequest : BaseEntity
     public ApprovalStatus Status { get; set; } = ApprovalStatus.Pending;
     public int? RelatedOrderId { get; set; }
     public Order? RelatedOrder { get; set; }
+    // DeliveryStageChange only: the delivery order the requested move applies to, and the original
+    // TransitionRequest (JSON) to replay unchanged once a Full-access approver signs off on it.
+    public int? RelatedDeliveryOrderId { get; set; }
+    public DeliveryOrder? RelatedDeliveryOrder { get; set; }
+    public string? Payload { get; set; }
     public DateTime? ResolvedAt { get; set; }
 }

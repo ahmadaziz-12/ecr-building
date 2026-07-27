@@ -65,6 +65,16 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 // Real delivery-order stage strings (backend enum) collapsed into the dashboard's 6 display lanes.
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(ms / 60_000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
 function stageBucket(stage: string): string {
   if (stage === "Pending") return "Pending";
   if (stage === "Assigned") return "Assigned";
@@ -98,7 +108,7 @@ const PAYMENT_META: Record<string, { tone: Severity; icon: string }> = {
 };
 
 function OverviewPage() {
-  const { activeTab, setActiveTab } = useFilters();
+  const { activeTab, setActiveTab, values: filterValues } = useFilters();
   const navigate = useNavigate();
   const { hasAccess } = useAuth();
 
@@ -122,7 +132,14 @@ function OverviewPage() {
   const { data: parkedBranch1 } = useParkedSales(1, hasAccess("Pos"));
   const { data: parkedBranch2 } = useParkedSales(2, hasAccess("Pos"));
 
-  const orderList = orders ?? [];
+  // The FilterBar's Branch filter (options come from the live branches list) narrows every
+  // order-derived KPI, chart and table by filtering at the source; non-order datasets
+  // (stock, shifts, deliveries) stay global.
+  const selectedBranchId = (branches ?? []).find((b) => b.nameEn === filterValues.Branch)?.id;
+  const orderList = useMemo(
+    () => (selectedBranchId === undefined ? orders ?? [] : (orders ?? []).filter((o) => o.branchId === selectedBranchId)),
+    [orders, selectedBranchId],
+  );
   const completedOrders = useMemo(() => orderList.filter((o) => o.status === "Completed"), [orderList]);
   const productMap = useMemo(() => new Map((products ?? []).map((p) => [p.id, p])), [products]);
   const stockLevelsList = stockLevels ?? [];
@@ -407,7 +424,7 @@ function OverviewPage() {
     () =>
       (notifications ?? []).map((n) => ({
         severity: (n.severity === "Critical" ? "critical" : n.severity === "Warning" ? "warning" : "info") as Severity,
-        module: n.type, msg: n.message, age: "Live", action: "View", link: n.link,
+        module: n.type, msg: n.message, age: timeAgo(n.asOf), action: "View", link: n.link,
       })),
     [notifications],
   );

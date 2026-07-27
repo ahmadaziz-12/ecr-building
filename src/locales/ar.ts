@@ -2494,7 +2494,7 @@ const ar: Record<string, string> = {
   "HR Activity Logs": "سجلات نشاط الموارد البشرية",
   "HR Dashboard": "لوحة تحكم الموارد البشرية",
   "HRMS": "نظام إدارة الموارد البشرية",
-  "Inventory & Stock": "الجرد والمخزون",
+  "Warehouse Stock": "مخزون المستودع",
   "Invoices & Tax Compliance": "الفواتير والامتثال الضريبي",
   "Leave Management": "إدارة الإجازات",
   "Loyalty Program": "برنامج الولاء",

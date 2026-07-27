@@ -62,6 +62,7 @@ import { Route as StockBranchStockRouteImport } from './routes/stock.branch-stoc
 import { Route as StockBundlesRouteImport } from './routes/stock.bundles'
 import { Route as StockExpiryRouteImport } from './routes/stock.expiry'
 import { Route as StockInventoryRouteImport } from './routes/stock.inventory'
+import { Route as StockMovementsRouteImport } from './routes/stock.movements'
 import { Route as StockStocksRouteImport } from './routes/stock.stocks'
 import { Route as StockTransfersRouteImport } from './routes/stock.transfers'
 import { Route as StockWarehousesRouteImport } from './routes/stock.warehouses'
@@ -333,6 +334,11 @@ const StockInventoryRoute = StockInventoryRouteImport.update({
   path: '/stock/inventory',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StockMovementsRoute = StockMovementsRouteImport.update({
+  id: '/stock/movements',
+  path: '/stock/movements',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StockStocksRoute = StockStocksRouteImport.update({
   id: '/stock/stocks',
   path: '/stock/stocks',
@@ -413,6 +419,7 @@ export interface FileRoutesByFullPath {
   '/stock/bundles': typeof StockBundlesRoute
   '/stock/expiry': typeof StockExpiryRoute
   '/stock/inventory': typeof StockInventoryRoute
+  '/stock/movements': typeof StockMovementsRoute
   '/stock/stocks': typeof StockStocksRoute
   '/stock/transfers': typeof StockTransfersRoute
   '/stock/warehouses': typeof StockWarehousesRoute
@@ -473,6 +480,7 @@ export interface FileRoutesByTo {
   '/stock/bundles': typeof StockBundlesRoute
   '/stock/expiry': typeof StockExpiryRoute
   '/stock/inventory': typeof StockInventoryRoute
+  '/stock/movements': typeof StockMovementsRoute
   '/stock/stocks': typeof StockStocksRoute
   '/stock/transfers': typeof StockTransfersRoute
   '/stock/warehouses': typeof StockWarehousesRoute
@@ -534,6 +542,7 @@ export interface FileRoutesById {
   '/stock/bundles': typeof StockBundlesRoute
   '/stock/expiry': typeof StockExpiryRoute
   '/stock/inventory': typeof StockInventoryRoute
+  '/stock/movements': typeof StockMovementsRoute
   '/stock/stocks': typeof StockStocksRoute
   '/stock/transfers': typeof StockTransfersRoute
   '/stock/warehouses': typeof StockWarehousesRoute
@@ -596,6 +605,7 @@ export interface FileRouteTypes {
     | '/stock/bundles'
     | '/stock/expiry'
     | '/stock/inventory'
+    | '/stock/movements'
     | '/stock/stocks'
     | '/stock/transfers'
     | '/stock/warehouses'
@@ -656,6 +666,7 @@ export interface FileRouteTypes {
     | '/stock/bundles'
     | '/stock/expiry'
     | '/stock/inventory'
+    | '/stock/movements'
     | '/stock/stocks'
     | '/stock/transfers'
     | '/stock/warehouses'
@@ -716,6 +727,7 @@ export interface FileRouteTypes {
     | '/stock/bundles'
     | '/stock/expiry'
     | '/stock/inventory'
+    | '/stock/movements'
     | '/stock/stocks'
     | '/stock/transfers'
     | '/stock/warehouses'
@@ -777,6 +789,7 @@ export interface RootRouteChildren {
   StockBundlesRoute: typeof StockBundlesRoute
   StockExpiryRoute: typeof StockExpiryRoute
   StockInventoryRoute: typeof StockInventoryRoute
+  StockMovementsRoute: typeof StockMovementsRoute
   StockStocksRoute: typeof StockStocksRoute
   StockTransfersRoute: typeof StockTransfersRoute
   StockWarehousesRoute: typeof StockWarehousesRoute
@@ -1157,6 +1170,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StockInventoryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/stock/movements': {
+      id: '/stock/movements'
+      path: '/stock/movements'
+      fullPath: '/stock/movements'
+      preLoaderRoute: typeof StockMovementsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/stock/stocks': {
       id: '/stock/stocks'
       path: '/stock/stocks'
@@ -1249,6 +1269,7 @@ const rootRouteChildren: RootRouteChildren = {
   StockBundlesRoute: StockBundlesRoute,
   StockExpiryRoute: StockExpiryRoute,
   StockInventoryRoute: StockInventoryRoute,
+  StockMovementsRoute: StockMovementsRoute,
   StockStocksRoute: StockStocksRoute,
   StockTransfersRoute: StockTransfersRoute,
   StockWarehousesRoute: StockWarehousesRoute,

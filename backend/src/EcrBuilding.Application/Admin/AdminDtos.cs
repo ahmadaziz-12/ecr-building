@@ -1,13 +1,29 @@
 namespace EcrBuilding.Application.Admin;
 
-public record UserDto(int Id, string Name, string Email, int RoleId, string RoleName, int? BranchId, string? BranchName, string Status, string PreferredLocale, DateTime? LastLoginAt, bool HasPin);
+public record UserDto(int Id, string Name, string Email, int RoleId, string RoleName, int? BranchId, string? BranchName, string Status, string PreferredLocale, DateTime? LastLoginAt, bool HasPin, bool BiometricEnabled);
 public record CreateUserRequest(string Name, string Email, string Password, int RoleId, int? BranchId);
 public record UpdateUserRequest(string Name, int RoleId, int? BranchId, string Status);
 public record ResetPinResponse(string Pin);
 
 public record ModulePermissionEntry(string Module, string Level);
-public record RoleDto(int Id, string Name, string? Description, decimal ApprovalCap, bool IsSystem, string Status, int UserCount, IReadOnlyList<ModulePermissionEntry> Permissions);
-public record UpsertRoleRequest(string Name, string? Description, decimal ApprovalCap, Dictionary<string, string> Permissions);
+
+// PosCeilings mirrors BRD §10.1's Cashier→Senior Cashier→Supervisor→Store Manager→System Admin ladder.
+// Null on a decimal ceiling means "no cap" for that role (e.g. Store Manager's DiscountCeilingPercent).
+public record PosCeilingsDto(
+    decimal? DiscountCeilingPercent,
+    decimal? SurplusReturnCeilingAmount,
+    bool CanAuthorizeStandardReturnWithoutReceipt,
+    bool CanOverrideItemPrice,
+    bool CanAuthorizeDamagedReturns,
+    bool CanVoidTransactions,
+    bool CanViewXReport,
+    bool CanViewZReport,
+    bool CanConfigureReturnRulesAndFees,
+    bool CanManagePriceListAndUsers,
+    bool CanManageSystemConfiguration);
+
+public record RoleDto(int Id, string Name, string? Description, decimal ApprovalCap, bool IsSystem, string Status, int UserCount, IReadOnlyList<ModulePermissionEntry> Permissions, PosCeilingsDto PosCeilings);
+public record UpsertRoleRequest(string Name, string? Description, decimal ApprovalCap, Dictionary<string, string> Permissions, PosCeilingsDto PosCeilings);
 
 public record BranchDto(int Id, string Code, string NameEn, string? NameAr, string City, string? Address, string? BusinessHours, string? VatRegistrationNumber, string? ManagerName, string? Warehouse, string Status, int TerminalCount, int OrdersCount);
 public record UpsertBranchRequest(string Code, string NameEn, string? NameAr, string City, string? Address, string? BusinessHours, string? VatRegistrationNumber, string? ManagerName, string? Warehouse);

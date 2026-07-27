@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 
-/* Spec §6 — Global Filters. Options are static per the BuildPOS blueprint. */
+/* Spec §6 — Global Filters. Options are static per the BuildPOS blueprint.
+   NOTE: FilterBar (sections.tsx) swaps the Category and Branch options for the live
+   category/branch names once loaded — these static lists are only the pre-load fallback. */
 
 export const primaryFilterGroups: { label: string; options: string[] }[] = [
   {

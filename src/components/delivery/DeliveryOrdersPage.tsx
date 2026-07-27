@@ -1,11 +1,77 @@
 import { useMemo, useState } from "react";
 import { Filter, Search, FileText } from "lucide-react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/buildpos/PageHeader";
 import { Pill, SectionCard } from "@/components/buildpos/sections";
 import { STAGES, STAGE_TONE, useDeliveryStore, type DeliveryOrder, type Stage } from "@/lib/delivery/store";
+import { useAuth } from "@/lib/api/auth";
 import { CreateDeliveryDialog } from "./CreateDeliveryDialog";
 import { StageActionDialog } from "./StageActionDialog";
 import { DeliveryTimeline } from "./DeliveryTimeline";
+
+function PendingApprovalsPanel() {
+  const pendingApprovals = useDeliveryStore((s) => s.pendingApprovals);
+  const approveMove = useDeliveryStore((s) => s.approveMove);
+  const rejectMove = useDeliveryStore((s) => s.rejectMove);
+  const { hasAccess } = useAuth();
+  const canApprove = hasAccess("Delivery", "Full");
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  if (pendingApprovals.length === 0) return null;
+
+  async function resolve(id: number, action: "approve" | "reject") {
+    setBusyId(id);
+    const res = await (action === "approve" ? approveMove(id) : rejectMove(id));
+    setBusyId(null);
+    if (!res.ok) {
+      toast.error(res.error ?? `Could not ${action} this request.`);
+      return;
+    }
+    toast.success(action === "approve" ? "Move approved." : "Move rejected.");
+  }
+
+  return (
+    <SectionCard title="Pending Move Requests" desc={`${pendingApprovals.length} awaiting approval`}>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <th className="px-2 py-2 text-left">DO #</th>
+              <th className="px-2 py-2 text-left">Requested by</th>
+              <th className="px-2 py-2 text-left">Move</th>
+              <th className="px-2 py-2 text-left">Reason</th>
+              <th className="px-2 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {pendingApprovals.map((a) => (
+              <tr key={a.id} className="border-t border-black/5">
+                <td className="px-2 py-2 font-mono text-xs text-brand">{a.deliveryNo}</td>
+                <td className="px-2 py-2">{a.requestedByName}</td>
+                <td className="px-2 py-2 text-xs">{a.fromStage} → {a.toStage}</td>
+                <td className="px-2 py-2 text-muted-foreground">{a.reason}</td>
+                <td className="px-2 py-2">
+                  {canApprove ? (
+                    <div className="flex justify-end gap-1">
+                      <button disabled={busyId === a.id} onClick={() => resolve(a.id, "reject")} className="rounded-md border border-black/10 bg-white px-2 py-1 text-[11px] font-medium text-foreground hover:border-red-300 hover:text-red-600 disabled:opacity-50">
+                        Reject
+                      </button>
+                      <button disabled={busyId === a.id} onClick={() => resolve(a.id, "approve")} className="rounded-md bg-brand px-2 py-1 text-[11px] font-medium text-brand-foreground hover:bg-brand/90 disabled:opacity-50">
+                        Approve
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="block text-right text-[11px] text-muted-foreground">Awaiting approval</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </SectionCard>
+  );
+}
 
 export function DeliveryOrdersPage() {
   const orders = useDeliveryStore((s) => s.orders);
@@ -45,6 +111,8 @@ export function DeliveryOrdersPage() {
         </select>
         <span className="ml-auto text-xs text-muted-foreground">{rows.length} of {orders.length}</span>
       </div>
+
+      <PendingApprovalsPanel />
 
       <SectionCard title="Delivery Order Ledger" desc={`${rows.length} records`}>
         <div className="overflow-x-auto">

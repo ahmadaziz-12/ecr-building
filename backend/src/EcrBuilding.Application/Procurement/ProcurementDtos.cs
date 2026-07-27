@@ -5,10 +5,14 @@ public record UpsertSupplierRequest(string Code, string NameEn, string? NameAr, 
 
 public record SupplierLedgerLineDto(DateTime Date, string Reference, string Description, string AccountCode, string AccountName, decimal Debit, decimal Credit);
 
-public record PurchaseOrderLineDto(int Id, int ProductId, string Sku, string ProductName, int BranchId, string BranchName, int WarehouseId, string WarehouseName, decimal Qty, decimal UnitCost, decimal ReceivedQty, string? BatchNo, DateTime? ExpiryDate);
+// Uom: the purchasing unit Qty/UnitCost/ReceivedQty are expressed in ("" = the product's own StockUom).
+// StockUom is included so the UI can show "3 of 5 Pallet (150 Bag)" without a second product lookup.
+public record PurchaseOrderLineDto(int Id, int ProductId, string Sku, string ProductName, int BranchId, string BranchName, int? WarehouseId, string WarehouseName, string Uom, string StockUom, decimal Qty, decimal UnitCost, decimal ReceivedQty, string? BatchNo, DateTime? ExpiryDate);
 public record PurchaseOrderDto(int Id, string PoNo, int SupplierId, string SupplierName, string[] Branches, string Currency, DateTime ExpectedDate, string Status, decimal Shipping, string? Incoterm, string? Carrier, string? TrackingRef, decimal TotalValue, decimal ReceivedPct, IReadOnlyList<PurchaseOrderLineDto> Lines);
 public record CreatePurchaseOrderRequest(int SupplierId, string Currency, DateTime ExpectedDate, decimal Shipping, string? Incoterm, int? ApproverUserId, List<PoLineInput> Lines);
-public record PoLineInput(int ProductId, int BranchId, int WarehouseId, decimal Qty, decimal UnitCost, string? BatchNo, DateTime? ExpiryDate);
+// Uom: null/"" orders in the product's own StockUom — otherwise must match a configured
+// ProductUomConversion (e.g. "Pallet"), same validation the POS cart applies at checkout.
+public record PoLineInput(int ProductId, int BranchId, int? WarehouseId, decimal Qty, decimal UnitCost, string? Uom, string? BatchNo, DateTime? ExpiryDate);
 public record ApprovePurchaseOrderRequest(int? ApproverUserId);
 public record DispatchPurchaseOrderRequest(string? Carrier, string? TrackingRef);
 public record ReceivePurchaseOrderRequest(List<ReceiveLineInput> Lines);

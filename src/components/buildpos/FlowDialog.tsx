@@ -4,9 +4,10 @@ import { toast } from "sonner";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { Field, Flow, LineItemColumn } from "@/lib/buildpos/flows";
-import { useProducts } from "@/lib/api/catalog";
-import { useBranches } from "@/lib/api/admin";
+import { useCategories, useProducts } from "@/lib/api/catalog";
+import { useBranches, useTerminals, useUsers, useRoles } from "@/lib/api/admin";
 import { useStockLevels, useBranchStockLevels } from "@/lib/api/inventory";
+import { sellableUoms, unitPriceFor, factorToStock } from "@/lib/buildpos/uom";
 
 type LineItemRow = Record<string, string>;
 
@@ -96,20 +97,40 @@ function LineItemsField({
   const { data: products } = useProducts();
   const rows = parseRows(value).length ? parseRows(value) : [{}];
   const availabilityColumn = columns.find((c) => c.availabilityField);
+  // Cross-reference for a "uom" column: which OTHER column on the same row holds the chosen SKU —
+  // same pattern as availabilityColumn, generalized so this isn't hardcoded to Create PO's field names.
+  const productColumn = columns.find((c) => c.type === "product");
+  const uomColumn = columns.find((c) => c.type === "uom");
 
   function setRows(next: LineItemRow[]) {
     onChange(JSON.stringify(next));
   }
   function updateCell(rowIdx: number, key: string, cellValue: string) {
-    const next = rows.map((r, i) => (i === rowIdx ? { ...r, [key]: cellValue } : r));
+    let row = { ...rows[rowIdx], [key]: cellValue };
     // Auto-fill unit cost from the picked product the first time a row's item is set.
-    if (key === "sku" && !next[rowIdx].unitCost) {
+    if (key === "sku" && !row.unitCost) {
       const product = products?.find((p) => p.sku === cellValue);
       if (product && columns.some((c) => c.key === "unitCost")) {
-        next[rowIdx] = { ...next[rowIdx], unitCost: String(product.costPrice) };
+        row = { ...row, unitCost: String(product.costPrice) };
       }
     }
-    setRows(next);
+    // Switching product invalidates any previously chosen purchasing UOM — reset to "" (the new
+    // product's own stock UOM), the only value guaranteed valid for every product.
+    if (key === "sku" && uomColumn) {
+      row = { ...row, [uomColumn.key]: "" };
+    }
+    // A UOM switch always re-suggests the unit cost from the product's stock-UOM cost × the new
+    // factor (1 Pallet = 50 Bag → 50× the per-bag cost) — same behavior as the POS cart's own UOM
+    // switch (PosCheckout.changeUom). It's a suggestion, not a lock: the buyer can still overtype it
+    // with the supplier's actual invoiced price afterward.
+    if (uomColumn && key === uomColumn.key && productColumn) {
+      const product = products?.find((p) => p.sku === row[productColumn.key]);
+      if (product && columns.some((c) => c.key === "unitCost")) {
+        const factor = factorToStock(cellValue || product.stockUom, product.stockUom, product.uomConversions) ?? 1;
+        row = { ...row, unitCost: String(unitPriceFor(product.costPrice, factor)) };
+      }
+    }
+    setRows(rows.map((r, i) => (i === rowIdx ? row : r)));
   }
   function addRow() {
     setRows([...rows, {}]);
@@ -164,6 +185,27 @@ function LineItemsField({
                   </>
                 ) : c.type === "branch" ? (
                   <BranchMultiSelect value={row[c.key] ?? ""} onChange={(v) => updateCell(rowIdx, c.key, v)} />
+                ) : c.type === "uom" ? (
+                  (() => {
+                    const rowProduct = productColumn ? products?.find((p) => p.sku === row[productColumn.key]) : undefined;
+                    return (
+                      <select
+                        className={inputClass}
+                        value={row[c.key] ?? ""}
+                        disabled={!rowProduct}
+                        onChange={(e) => updateCell(rowIdx, c.key, e.target.value)}
+                      >
+                        {!rowProduct && <option value="">Pick an item first…</option>}
+                        {rowProduct &&
+                          sellableUoms(rowProduct.stockUom, rowProduct.uomConversions).map((u) => (
+                            <option key={u.uom} value={u.factorToStock === 1 ? "" : u.uom}>
+                              {u.uom}
+                              {u.factorToStock !== 1 ? ` (= ${u.factorToStock} ${rowProduct.stockUom})` : " (stock unit)"}
+                            </option>
+                          ))}
+                      </select>
+                    );
+                  })()
                 ) : c.type === "select" ? (
                   <select className={inputClass} value={row[c.key] ?? ""} onChange={(e) => updateCell(rowIdx, c.key, e.target.value)}>
                     <option value="">Select…</option>
@@ -308,11 +350,21 @@ export function FlowDialog({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open) setValues(initialValues ?? {});
-    // Only re-seed when the dialog opens — otherwise a stale initialValues reference on every
-    // render would keep resetting the user's in-progress edits.
+    if (!open) return;
+    // Seed every field's `default` (across all steps) under the incoming prefill, so an untouched
+    // field submits exactly what the form displays instead of undefined (prefill still wins, even
+    // with an intentionally-empty value, e.g. a toggle prefilled off).
+    const seeded: Record<string, string> = {};
+    for (const s of flow?.steps ?? []) {
+      for (const f of s.fields) {
+        if (f.default !== undefined) seeded[f.name] = f.default;
+      }
+    }
+    setValues({ ...seeded, ...initialValues });
+    // Only re-seed when the dialog opens (or shows a different flow) — otherwise a stale
+    // initialValues reference on every render would keep resetting the user's in-progress edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, flow]);
 
   const steps = flow?.steps ?? [];
   const isReview = step === steps.length;
@@ -334,9 +386,33 @@ export function FlowDialog({
   }, [steps]);
   const availabilityMap = useLocationAvailability(availabilityRef ? values[availabilityRef.locationField] : undefined);
 
+  // Live options for selects with Field.optionsSource — the hooks run unconditionally (React
+  // requires it) but only actually fetch the lists this flow's fields reference.
+  const optionsSources = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of steps) for (const f of s.fields) if (f.optionsSource) set.add(f.optionsSource);
+    return set;
+  }, [steps]);
+  const { data: liveBranches } = useBranches(open && optionsSources.has("branches"));
+  const { data: liveTerminals } = useTerminals(open && optionsSources.has("terminals"));
+  const { data: liveCategories } = useCategories(open && optionsSources.has("categories"));
+  const { data: liveUsers } = useUsers(open && optionsSources.has("users"));
+  const { data: liveRoles } = useRoles(open && optionsSources.has("roles"));
+  const liveOptions: Record<NonNullable<Field["optionsSource"]>, string[] | undefined> = {
+    branches: liveBranches?.map((b) => b.nameEn),
+    terminals: liveTerminals?.map((t) => t.code),
+    categories: liveCategories?.map((c) => c.nameEn),
+    users: liveUsers?.map((u) => u.name),
+    roles: liveRoles?.map((r) => r.name),
+  };
+
   function resolveField(f: Field): Field {
     const override = fieldOverrides?.[f.name];
-    return override ? { ...f, ...override } : f;
+    const merged = override ? { ...f, ...override } : f;
+    if (!merged.optionsSource) return merged;
+    // Static options on an optionsSource field are special leading entries ("Unassigned",
+    // "— None (top level) —"); the real choices come from the live list.
+    return { ...merged, options: [...(merged.options ?? []), ...(liveOptions[merged.optionsSource] ?? [])] };
   }
 
   function summarizeLineItems(field: Field, raw: string): string {

@@ -1,3 +1,5 @@
+using EcrBuilding.Application.Admin;
+
 namespace EcrBuilding.Application.Auth;
 
 public record LoginRequest(string Email, string Password);
@@ -13,7 +15,8 @@ public record CurrentUserDto(
     int? BranchId,
     string? BranchName,
     string PreferredLocale,
-    IReadOnlyList<ModulePermissionDto> Permissions);
+    IReadOnlyList<ModulePermissionDto> Permissions,
+    PosCeilingsDto PosCeilings);
 
 public record TokenPair(string AccessToken, DateTime AccessTokenExpiresAt, string RefreshToken, DateTime RefreshTokenExpiresAt);
 

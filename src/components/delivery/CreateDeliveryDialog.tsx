@@ -52,6 +52,7 @@ export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { op
   });
 
   const addOrder = useDeliveryStore((s) => s.addOrder);
+  const moveStage = useDeliveryStore((s) => s.moveStage);
   const drivers = useDeliveryStore((s) => s.drivers);
   const vehicles = useDeliveryStore((s) => s.vehicles);
   const zones = useDeliveryStore((s) => s.zones);
@@ -132,17 +133,35 @@ export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { op
       amount: f.amount,
       charges: { fee: f.fee, handling: f.handling, heavy: f.heavy, discount: f.discount, vat },
       stockReserved: mode === "confirm",
-      stage: mode === "confirm" && f.driverEmpId && f.vehicleId ? "Assigned" : "Pending",
+      stage: "Pending", // backend always creates Pending; the Assigned transition happens explicitly below
       notes: f.notes,
     });
-    setSaving(false);
     if (!res.ok || !res.doc) {
+      setSaving(false);
       toast.error(res.error ?? "Could not create delivery order.");
       return;
     }
-    toast.success(`${res.doc.id} created`, {
-      description: mode === "confirm" ? "Stock reserved and driver assigned." : "Saved as draft — no stock reserved.",
-    });
+    if (mode === "confirm" && f.driverEmpId && f.vehicleId) {
+      const reserved = res.doc.stockReserved ? "Stock reserved" : "Stock not reserved";
+      const moved = await moveStage(res.doc.id, "Assigned", "Current User");
+      setSaving(false);
+      if (moved.ok && moved.applied === false) {
+        toast.success(`${res.doc.id} created`, { description: `${reserved}. Driver assignment sent for approval.` });
+      } else if (moved.ok) {
+        toast.success(`${res.doc.id} created`, { description: `${reserved} and driver assigned.` });
+      } else {
+        toast.warning(`${res.doc.id} created — still Pending`, {
+          description: `${reserved}. Assignment failed: ${moved.error ?? "stage transition failed."}`,
+        });
+      }
+    } else {
+      setSaving(false);
+      toast.success(`${res.doc.id} created`, {
+        description: mode === "confirm"
+          ? `${res.doc.stockReserved ? "Stock reserved" : "Stock not reserved"} — assign a driver and vehicle to proceed.`
+          : "Saved as draft — no stock reserved.",
+      });
+    }
     close(false);
   }
 

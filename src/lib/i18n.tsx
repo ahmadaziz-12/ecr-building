@@ -76,7 +76,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(DEFAULT_LANG);
 
   useEffect(() => {
-    if (isLang(user?.preferredLocale)) setLangState(user.preferredLocale);
+    // A signed-out visitor (or one who just logged out on a shared terminal) gets the browser
+    // default, not whatever the previous cashier's account had it set to — otherwise the login
+    // screen after an Arabic-preference cashier logs out silently stays in Arabic/RTL for the
+    // next person.
+    setLangState(isLang(user?.preferredLocale) ? user.preferredLocale : DEFAULT_LANG);
   }, [user?.preferredLocale]);
 
   const dir = dirOf(lang);

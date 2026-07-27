@@ -13,12 +13,18 @@ export function ShiftReportDialog({ target, onClose }: { target: { shiftId: numb
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!target) {
-      setReport(null);
-      setError(null);
-      return;
-    }
-    fetchShiftReport(target.shiftId, target.type).then(setReport).catch((err) => setError(err instanceof Error ? err.message : "Could not load report."));
+    setReport(null);
+    setError(null);
+    if (!target) return;
+    // Stale-response guard: a slow response for a previously opened shift must never overwrite the
+    // report of the shift currently on screen.
+    let cancelled = false;
+    fetchShiftReport(target.shiftId, target.type)
+      .then((r) => !cancelled && setReport(r))
+      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : "Could not load report."));
+    return () => {
+      cancelled = true;
+    };
   }, [target]);
 
   return (

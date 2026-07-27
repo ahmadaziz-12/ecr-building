@@ -137,7 +137,7 @@ export function useRowDetails(
                     l.onHand,
                     l.reserved,
                     l.available,
-                    l.value.toLocaleString("en-US", { maximumFractionDigits: 0 }),
+                    l.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
                   ]),
                 },
               ]
@@ -267,7 +267,7 @@ export function useRowDetails(
                 { label: "Notes", value: transfer.notes ?? "—" },
                 {
                   label: "Total Value",
-                  value: `${transfer.totalValue.toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س`,
+                  value: `${transfer.totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`,
                 },
               ],
             },
@@ -302,7 +302,7 @@ export function useRowDetails(
             {
               heading: "Operations",
               fields: [
-                { label: "Stock Value", value: `${warehouse.stockValue.toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س` },
+                { label: "Stock Value", value: `${warehouse.stockValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س` },
                 { label: "Distinct SKUs", value: String(warehouse.skuCount) },
                 { label: "Low Stock Lines", value: String(warehouse.lowStockCount) },
                 { label: "Active Batches", value: String(warehouse.activeBatchCount) },
@@ -440,7 +440,7 @@ export function useRowDetails(
                 { label: "Tracking Ref", value: po.trackingRef ?? "—" },
                 {
                   label: "Total Value",
-                  value: `${po.totalValue.toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س`,
+                  value: `${po.totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`,
                 },
                 { label: "Received", value: `${po.receivedPct}%` },
               ],

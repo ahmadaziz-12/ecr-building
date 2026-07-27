@@ -28,8 +28,12 @@ public class WarehousesController(AppDbContext db, IAuditService audit) : Contro
         var transfers = await db.StockTransfers
             .Where(t => t.Status != StockTransferStatus.Received && t.Status != StockTransferStatus.Cancelled)
             .Select(t => new { t.FromWarehouseId, t.ToWarehouseId }).ToListAsync(ct);
-        var transfersOut = transfers.GroupBy(t => t.FromWarehouseId).ToDictionary(g => g.Key, g => g.Count());
-        var transfersIn = transfers.GroupBy(t => t.ToWarehouseId).ToDictionary(g => g.Key, g => g.Count());
+        // A branch-to-branch transfer leaves FromWarehouseId/ToWarehouseId null — Dictionary<int, _>
+        // can't key on that, and these per-warehouse counters don't apply to it anyway.
+        var transfersOut = transfers.Where(t => t.FromWarehouseId is not null)
+            .GroupBy(t => t.FromWarehouseId!.Value).ToDictionary(g => g.Key, g => g.Count());
+        var transfersIn = transfers.Where(t => t.ToWarehouseId is not null)
+            .GroupBy(t => t.ToWarehouseId!.Value).ToDictionary(g => g.Key, g => g.Count());
 
         var now = DateTime.UtcNow;
         var activeBatchCounts = await db.StockBatches.Where(b => b.ManualStatus != StockBatchStatus.WrittenOff && b.ExpiryDate >= now)
@@ -262,7 +266,7 @@ public class StockBatchesController(AppDbContext db, IAuditService audit) : Cont
 [Route("api/inventory/transfers")]
 [Authorize]
 [RequireModule(ModuleArea.Inventory, AccessLevel.View)]
-public class StockTransfersController(AppDbContext db, IAuditService audit) : ControllerBase
+public class StockTransfersController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements) : ControllerBase
 {
     private IQueryable<StockTransfer> WithIncludes() => db.StockTransfers
         .Include(t => t.FromWarehouse).Include(t => t.ToWarehouse).Include(t => t.FromBranch).Include(t => t.ToBranch)
@@ -297,7 +301,7 @@ public class StockTransfersController(AppDbContext db, IAuditService audit) : Co
             : null;
     }
 
-    private async Task DebitAsync(int? warehouseId, int? branchId, int productId, decimal qty, string? batchNo, CancellationToken ct)
+    private async Task DebitAsync(int? warehouseId, int? branchId, int productId, decimal qty, string? batchNo, string? refId, CancellationToken ct)
     {
         if (warehouseId is not null)
         {
@@ -312,11 +316,13 @@ public class StockTransfersController(AppDbContext db, IAuditService audit) : Co
         }
         var branchLevel = await db.BranchStockLevels.FirstAsync(s => s.ProductId == productId && s.BranchId == branchId, ct);
         branchLevel.OnHand -= qty;
+        await stockMovements.RecordAsync(productId, branchId!.Value, StockMovementType.TransferOut, -qty,
+            refTable: "StockTransfer", refId: refId, cancellationToken: ct);
     }
 
     // Also used to restore a Cancel-while-InTransit — "give it back to the source" is the same
     // operation as "credit this location", find-or-create included.
-    private async Task CreditAsync(int? warehouseId, int? branchId, int productId, decimal qty, string? batchNo, DateTime? expiryDate, CancellationToken ct)
+    private async Task CreditAsync(int? warehouseId, int? branchId, int productId, decimal qty, string? batchNo, DateTime? expiryDate, string? refId, CancellationToken ct)
     {
         if (warehouseId is not null)
         {
@@ -351,6 +357,8 @@ public class StockTransfersController(AppDbContext db, IAuditService audit) : Co
             db.BranchStockLevels.Add(branchLevel);
         }
         branchLevel.OnHand += qty; // branches don't batch-track — no destination StockBatch here
+        await stockMovements.RecordAsync(productId, branchId!.Value, StockMovementType.TransferIn, qty,
+            refTable: "StockTransfer", refId: refId, cancellationToken: ct);
     }
 
     [HttpGet]
@@ -464,7 +472,7 @@ public class StockTransfersController(AppDbContext db, IAuditService audit) : Co
         // for the entire time a shipment was "in transit".
         foreach (var line in transfer.Lines)
         {
-            await DebitAsync(transfer.FromWarehouseId, transfer.FromBranchId, line.ProductId, line.Qty, line.BatchNo, ct);
+            await DebitAsync(transfer.FromWarehouseId, transfer.FromBranchId, line.ProductId, line.Qty, line.BatchNo, transfer.Id.ToString(), ct);
         }
 
         transfer.Status = StockTransferStatus.InTransit;
@@ -487,7 +495,7 @@ public class StockTransfersController(AppDbContext db, IAuditService audit) : Co
         {
             var receivedQty = request?.Lines?.FirstOrDefault(l => l.LineId == line.Id)?.ReceivedQty ?? line.Qty;
             line.ReceivedQty = receivedQty;
-            await CreditAsync(transfer.ToWarehouseId, transfer.ToBranchId, line.ProductId, receivedQty, line.BatchNo, line.ExpiryDate, ct);
+            await CreditAsync(transfer.ToWarehouseId, transfer.ToBranchId, line.ProductId, receivedQty, line.BatchNo, line.ExpiryDate, transfer.Id.ToString(), ct);
         }
 
         transfer.Status = StockTransferStatus.Received;
@@ -516,7 +524,7 @@ public class StockTransfersController(AppDbContext db, IAuditService audit) : Co
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             foreach (var line in transfer.Lines)
             {
-                await CreditAsync(transfer.FromWarehouseId, transfer.FromBranchId, line.ProductId, line.Qty, line.BatchNo, line.ExpiryDate, ct);
+                await CreditAsync(transfer.FromWarehouseId, transfer.FromBranchId, line.ProductId, line.Qty, line.BatchNo, line.ExpiryDate, transfer.Id.ToString(), ct);
             }
             transfer.Status = StockTransferStatus.Cancelled;
             await db.SaveChangesAsync(ct);
@@ -550,7 +558,7 @@ public class StockTransfersController(AppDbContext db, IAuditService audit) : Co
 [Route("api/inventory/adjustments")]
 [Authorize]
 [RequireModule(ModuleArea.Inventory, AccessLevel.View)]
-public class StockAdjustmentsController(AppDbContext db, IAuditService audit) : ControllerBase
+public class StockAdjustmentsController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<StockAdjustmentDto>>> List(CancellationToken ct)
@@ -566,6 +574,9 @@ public class StockAdjustmentsController(AppDbContext db, IAuditService audit) : 
     [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
     public async Task<ActionResult<StockAdjustmentDto>> Create(CreateStockAdjustmentRequest request, CancellationToken ct)
     {
+        var warehouse = await db.Warehouses.FindAsync([request.WarehouseId], ct);
+        if (warehouse is null) return BadRequest(new { error = "Unknown warehouse." });
+
         var adjustment = new StockAdjustment
         {
             Reason = request.Reason, WarehouseId = request.WarehouseId, Date = request.Date,
@@ -587,11 +598,31 @@ public class StockAdjustmentsController(AppDbContext db, IAuditService audit) : 
                 db.StockLevels.Add(level);
             }
             level.OnHand = line.CountedQty;
+
+            // A stocktake correction is the same class of movement as a PO receipt or an RTS dispatch
+            // — it must land on the branch's sellable pool too, or a cycle count that finds shrinkage
+            // (or extra stock) never reaches what the POS actually sells from. Same single-warehouse-
+            // per-branch invariant the receive/RTS fixes established: both pools track one physical
+            // stock, so a stocktake sets both to the same counted absolute value.
+            var branchLevel = await db.BranchStockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.BranchId == warehouse.BranchId, ct);
+            if (branchLevel is null)
+            {
+                branchLevel = new BranchStockLevel { ProductId = line.ProductId, BranchId = warehouse.BranchId };
+                db.BranchStockLevels.Add(branchLevel);
+            }
+            branchLevel.OnHand = line.CountedQty;
         }
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
 
         await audit.LogAsync("inventory", "STOCK_ADJUSTMENT_APPLIED", adjustment.Id.ToString(), newValue: request, cancellationToken: ct);
+        foreach (var line in adjustment.Lines)
+        {
+            var variance = line.CountedQty - line.SystemQty;
+            if (variance == 0) continue;
+            await stockMovements.RecordAsync(line.ProductId, warehouse.BranchId, StockMovementType.Adjustment, variance,
+                refTable: "StockAdjustment", refId: adjustment.Id.ToString(), cancellationToken: ct);
+        }
         await db.Entry(adjustment).Reference(a => a.Warehouse).LoadAsync(ct);
         foreach (var line in adjustment.Lines) await db.Entry(line).Reference(l => l.Product).LoadAsync(ct);
         var approverName = adjustment.ApproverUserId is null ? null : (await db.Users.FindAsync([adjustment.ApproverUserId], ct))?.Name;
@@ -603,4 +634,41 @@ public class StockAdjustmentsController(AppDbContext db, IAuditService audit) : 
         a.ApproverUserId is not null && approvers.TryGetValue(a.ApproverUserId.Value, out var n) ? n : null,
         a.EvidenceAttached, a.Status.ToString(),
         a.Lines.Select(l => new StockAdjustmentLineDto(l.ProductId, l.Product?.Sku ?? "", l.SystemQty, l.CountedQty, l.Variance, l.Note)).ToList());
+}
+
+[ApiController]
+[Route("api/inventory/stock-movements")]
+[Authorize]
+[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+public class StockMovementsController(AppDbContext db) : ControllerBase
+{
+    private static readonly Dictionary<StockMovementType, string> TypeLabels = new()
+    {
+        [StockMovementType.Sale] = "Sale",
+        [StockMovementType.Void] = "Void",
+        [StockMovementType.ReturnRestock] = "Return (Restock)",
+        [StockMovementType.ReturnDamage] = "Return (Damage)",
+        [StockMovementType.PoReceipt] = "PO Receipt",
+        [StockMovementType.RtsDispatch] = "RTS Dispatch",
+        [StockMovementType.RtsRestore] = "RTS Restore",
+        [StockMovementType.TransferOut] = "Transfer Out",
+        [StockMovementType.TransferIn] = "Transfer In",
+        [StockMovementType.Adjustment] = "Adjustment",
+    };
+
+    [HttpGet]
+    public async Task<ActionResult<List<StockMovementDto>>> List(CancellationToken ct)
+    {
+        var movements = await db.StockMovements.Include(m => m.Product).Include(m => m.Branch)
+            .OrderByDescending(m => m.CreatedAt).ToListAsync(ct);
+
+        var userIds = movements.Where(m => m.UserId != null).Select(m => m.UserId!.Value).Distinct().ToList();
+        var userNames = await db.Users.Where(u => userIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.Name, ct);
+
+        return Ok(movements.Select(m => new StockMovementDto(
+            m.Id, m.CreatedAt, TypeLabels.GetValueOrDefault(m.Type, m.Type.ToString()),
+            m.ProductId, m.Product?.Sku ?? "", m.Product?.NameEn ?? "",
+            m.BranchId, m.Branch?.NameEn ?? "", m.Qty, m.Qty >= 0 ? "In" : "Out",
+            m.RefTable, m.RefId, m.UserId is not null && userNames.TryGetValue(m.UserId.Value, out var n) ? n : null)).ToList());
+    }
 }

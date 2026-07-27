@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   BadgeCheck, Check, Crown, Rocket, Shield, Sparkles, Store, Users, Zap,
   Building2, Boxes, HeadphonesIcon, CreditCard, ArrowRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { apiGet } from "@/lib/api/client";
+import { useSubscription } from "@/lib/api/admin";
 import starter from "@/assets/plans/starter.jpg";
 import growth from "@/assets/plans/growth.jpg";
 import business from "@/assets/plans/business.jpg";
@@ -139,6 +142,15 @@ const addons = [
   { icon: Shield, name: "Advanced Compliance", price: "299 ر.س", per: "/mo", desc: "Audit exports, custom retention & fine-grained logs." },
 ];
 
+// GET /api/admin/plans — src/lib/api/admin.ts has no plans-list hook (only useSubscription), so
+// the query lives here. yearlyPrice is a full-year total; the cards display a per-month rate.
+type PlanDto = {
+  id: number; name: string; monthlyPrice: number; yearlyPrice: number;
+  maxBranches: number; maxTerminals: number; maxUsers: number; maxSkus: number;
+  features: string[]; status: string;
+};
+const usePlans = () => useQuery({ queryKey: ["admin", "plans"], queryFn: () => apiGet<PlanDto[]>("/api/admin/plans") });
+
 // No real payment gateway is wired up (Admin Overview's own health check reports the payment
 // gateway as "Simulated") — faking a successful charge/plan-change here would be dishonest, so a
 // plan or add-on request opens a real, pre-filled lead email instead of silently no-opping.
@@ -150,6 +162,18 @@ function sendLeadEmail(subject: string, planName: string) {
 export function SubscriptionsPage() {
   const [yearly, setYearly] = useState(true);
   const [selected, setSelected] = useState<string>("growth");
+  const { data: livePlans } = usePlans();
+  const { data: subscription } = useSubscription();
+
+  // "growth" above is just a render-before-data placeholder — sync to the tenant's REAL plan the
+  // first time it loads (this tenant is actually on Business, not Growth), without fighting the
+  // user's own clicks afterward if they're previewing other cards.
+  const syncedRealPlan = useRef(false);
+  useEffect(() => {
+    if (syncedRealPlan.current || !subscription) return;
+    syncedRealPlan.current = true;
+    setSelected(subscription.planName.toLowerCase());
+  }, [subscription]);
 
   return (
     <div className="space-y-8">
@@ -192,7 +216,12 @@ export function SubscriptionsPage() {
             <BadgeCheck className="h-4 w-4 text-teal" />
             <div>
               <p className="font-semibold">Your workspace</p>
-              <p className="text-xs text-white/60">Al Binaa Building Materials · Growth plan · Renews 12 Aug 2026</p>
+              <p className="text-xs text-white/60">
+                Al Binaa Building Materials
+                {subscription
+                  ? ` · ${subscription.planName} plan · Renews ${new Date(subscription.renewsAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`
+                  : " · Loading subscription…"}
+              </p>
             </div>
           </div>
         </div>
@@ -202,7 +231,12 @@ export function SubscriptionsPage() {
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
         {plans.map((p) => {
           const Icon = p.icon;
-          const price = yearly ? p.yearly : p.monthly;
+          // Real per-plan pricing from GET /api/admin/plans (matched by name); the static numbers
+          // only show while the query loads. Live yearlyPrice is per-year, shown as a monthly rate.
+          const livePlan = livePlans?.find((lp) => lp.name.toLowerCase() === p.id);
+          const price = livePlan
+            ? yearly ? Math.round(livePlan.yearlyPrice / 12) : livePlan.monthlyPrice
+            : yearly ? p.yearly : p.monthly;
           const isSelected = selected === p.id;
           return (
             <div

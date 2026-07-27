@@ -32,6 +32,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Product> Products => Set<Product>();
+    public DbSet<ProductUomConversion> ProductUomConversions => Set<ProductUomConversion>();
+    public DbSet<ProductAttribute> ProductAttributes => Set<ProductAttribute>();
     public DbSet<ProductBundle> ProductBundles => Set<ProductBundle>();
     public DbSet<BundleLine> BundleLines => Set<BundleLine>();
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
@@ -43,6 +45,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<StockTransferLine> StockTransferLines => Set<StockTransferLine>();
     public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
     public DbSet<StockAdjustmentLine> StockAdjustmentLines => Set<StockAdjustmentLine>();
+    public DbSet<StockMovement> StockMovements => Set<StockMovement>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<PurchaseOrderLine> PurchaseOrderLines => Set<PurchaseOrderLine>();
@@ -104,9 +107,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 if (property.ClrType.IsEnum || (Nullable.GetUnderlyingType(property.ClrType)?.IsEnum ?? false))
                 {
-                    var converterType = typeof(EnumToStringConverter<>).MakeGenericType(
+                    // LegacyTolerantEnumConverter, NOT the stock EnumToStringConverter: enum members
+                    // stored by an older build must keep deserializing after a rename (via
+                    // EnumLegacyAliases) instead of 500-ing every endpoint that touches the table.
+                    var converterType = typeof(LegacyTolerantEnumConverter<>).MakeGenericType(
                         Nullable.GetUnderlyingType(property.ClrType) ?? property.ClrType);
-                    property.SetValueConverter((ValueConverter?)Activator.CreateInstance(converterType, (object?)null));
+                    property.SetValueConverter((ValueConverter?)Activator.CreateInstance(converterType));
                     property.SetMaxLength(64);
                 }
                 else if (property.ClrType == typeof(decimal) || property.ClrType == typeof(decimal?))
@@ -193,6 +199,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             b.HasIndex(x => x.Sku).IsUnique();
             b.HasOne(x => x.Category).WithMany(x => x.Products).HasForeignKey(x => x.CategoryId);
+        });
+
+        modelBuilder.Entity<ProductUomConversion>(b =>
+        {
+            b.HasOne(x => x.Product).WithMany(x => x.UomConversions).HasForeignKey(x => x.ProductId);
+            // One factor per (product, UOM) — a second "Pallet" row for the same product would make
+            // FactorToStock resolution ambiguous.
+            b.HasIndex(x => new { x.ProductId, x.Uom }).IsUnique();
+        });
+
+        modelBuilder.Entity<ProductAttribute>(b =>
+        {
+            b.HasOne(x => x.Product).WithMany(x => x.Attributes).HasForeignKey(x => x.ProductId);
+            b.HasIndex(x => new { x.ProductId, x.Name }).IsUnique();
         });
 
         modelBuilder.Entity<ProductBundle>(b =>
@@ -307,6 +327,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasOne(x => x.Terminal).WithMany().HasForeignKey(x => x.TerminalId);
             b.HasOne(x => x.Cashier).WithMany().HasForeignKey(x => x.CashierUserId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.Customer).WithMany().HasForeignKey(x => x.CustomerId);
+            // Module 10 offline replay: one order per client idempotency key. Length-capped so the
+            // unique index fits MySQL's key limit; nulls (online sales) are exempt from uniqueness.
+            b.Property(x => x.ClientRequestId).HasMaxLength(64);
+            b.HasIndex(x => x.ClientRequestId).IsUnique();
         });
 
         modelBuilder.Entity<OrderLine>(b =>
@@ -361,6 +385,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasOne(x => x.RequestedBy).WithMany().HasForeignKey(x => x.RequestedByUserId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.Approver).WithMany().HasForeignKey(x => x.ApproverUserId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.RelatedOrder).WithMany().HasForeignKey(x => x.RelatedOrderId);
+            b.HasOne(x => x.RelatedDeliveryOrder).WithMany().HasForeignKey(x => x.RelatedDeliveryOrderId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<CashierShift>(b =>
@@ -472,18 +497,31 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasOne(x => x.GlAccount).WithMany().HasForeignKey(x => x.GlAccountId);
         });
 
+        modelBuilder.Entity<Customer>(b =>
+        {
+            // FK name doesn't follow the {Navigation}Id convention (navigation is AccountManager,
+            // column is AccountManagerUserId) — mapped explicitly. Restrict: deleting a staff user
+            // must never cascade-delete the customers they managed.
+            b.HasOne(x => x.AccountManager).WithMany().HasForeignKey(x => x.AccountManagerUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<Return>(b =>
         {
             b.HasIndex(x => x.ReturnNo).IsUnique();
             b.HasOne(x => x.Order).WithMany().HasForeignKey(x => x.OrderId);
             b.HasOne(x => x.Customer).WithMany().HasForeignKey(x => x.CustomerId);
             b.HasOne(x => x.ApprovedBy).WithMany().HasForeignKey(x => x.ApprovedByUserId);
+            // Exchange workflow (BRD §3.2.1): the replacement sale this return nets against.
+            b.HasOne(x => x.ExchangeOrder).WithMany().HasForeignKey(x => x.ExchangeOrderId);
         });
 
         modelBuilder.Entity<ReturnLine>(b =>
         {
             b.HasOne(x => x.Return).WithMany(x => x.Lines).HasForeignKey(x => x.ReturnId);
             b.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId);
+            // Per-original-order-line drawdown accounting (BRD §3.2.1 partial returns) — indexed
+            // because every preview/create sums prior returns grouped by this column.
+            b.HasIndex(x => x.OrderLineId);
         });
 
         modelBuilder.Entity<LoyaltyTransaction>(b =>

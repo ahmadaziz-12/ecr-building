@@ -3,9 +3,12 @@ import { useAuditStore } from "@/lib/store/audit";
 import {
   apiCreateDeliveryOrder, apiCreateZone, apiDeleteZone, apiReserveStock, apiTransitionDelivery,
   apiCreateDriver, apiUpdateDriver, apiCreateVehicle, apiUpdateVehicle,
-  mapApiDriver, mapApiOrder, mapApiVehicle, mapApiZone,
+  apiApproveDeliveryMove, apiRejectDeliveryMove,
+  mapApiDriver, mapApiOrder, mapApiVehicle, mapApiZone, mapApiApproval, type DeliveryApproval,
   STAGE_TO_BACKEND, VEHICLE_TYPE_TO_BACKEND, DRIVER_STATUS_TO_BACKEND, VEHICLE_STATUS_TO_BACKEND,
 } from "@/lib/api/delivery";
+
+export type { DeliveryApproval } from "@/lib/api/delivery";
 
 export type Stage =
   | "Pending"
@@ -161,10 +164,16 @@ type S = {
   vehicles: Vehicle[];
   zones: Zone[];
   lookups: LookupMaps;
-  setSynced: (data: Partial<Pick<S, "orders" | "drivers" | "vehicles" | "zones" | "lookups">>) => void;
+  // Delivery:Edit users' moves land here as Pending instead of changing `orders` directly — see
+  // moveStage below. Delivery:Full users never populate this for their own moves.
+  pendingApprovals: DeliveryApproval[];
+  setSynced: (data: Partial<Pick<S, "orders" | "drivers" | "vehicles" | "zones" | "lookups" | "pendingApprovals">>) => void;
   addOrder: (o: Omit<DeliveryOrder, "id" | "history">) => Promise<ActionResult & { doc?: DeliveryOrder }>;
   updateOrder: (id: string, patch: Partial<DeliveryOrder>) => void;
-  moveStage: (id: string, to: Stage, by: string, note?: string) => Promise<ActionResult>;
+  reserveStock: (id: string) => Promise<ActionResult>;
+  moveStage: (id: string, to: Stage, by: string, note?: string) => Promise<ActionResult & { applied?: boolean; pendingApproval?: DeliveryApproval }>;
+  approveMove: (approvalId: number) => Promise<ActionResult>;
+  rejectMove: (approvalId: number) => Promise<ActionResult>;
   addDriver: (input: DriverInput) => Promise<ActionResult>;
   updateDriver: (empId: string, patch: Partial<Driver>) => void;
   editDriver: (empId: string, input: DriverEditInput) => Promise<ActionResult>;
@@ -224,6 +233,7 @@ export const useDeliveryStore = create<S>()((set, get) => ({
   vehicles: [],
   zones: [],
   lookups: { productIdBySku: {}, branchIdByName: {} },
+  pendingApprovals: [],
   setSynced: (data) => set((s) => ({ ...s, ...data })),
 
   // Backend-first: resolves SKUs/branch/driver/vehicle against the live catalog synced into
@@ -281,6 +291,23 @@ export const useDeliveryStore = create<S>()((set, get) => ({
   updateOrder: (id, patch) =>
     set((s) => ({ orders: s.orders.map((o) => (o.id === id ? { ...o, ...patch } : o)) })),
 
+  // Backend-first: the reserved flag only flips once the server actually reserved the stock —
+  // a failed reservation surfaces its error instead of faking the flag locally.
+  reserveStock: async (id) => {
+    const o = get().orders.find((x) => x.id === id);
+    if (!o) return { ok: false, error: "Not found" };
+    if (o.stockReserved) return { ok: true };
+    if (!o._backendId) return { ok: false, error: "This order has no backend record to reserve." };
+    try {
+      const updated = await apiReserveStock(o._backendId);
+      const doc = mapApiOrder(updated);
+      set((s) => ({ orders: s.orders.map((x) => (x.id === id ? doc : x)) }));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: errMsg(err, "Could not reserve stock.") };
+    }
+  },
+
   // Backend-first: the state-machine guards run here for a fast local rejection, but the stage
   // only actually changes once the server confirms the transition — same guards run again there
   // against the authoritative row, so a stale client can't fake a transition it lost the race on.
@@ -295,7 +322,7 @@ export const useDeliveryStore = create<S>()((set, get) => ({
     const vehicleBackendId = get().vehicles.find((v) => v.id === o.vehicleId)?._backendId;
 
     try {
-      const updated = await apiTransitionDelivery(o._backendId, {
+      const result = await apiTransitionDelivery(o._backendId, {
         toStage: STAGE_TO_BACKEND[to],
         driverId: driverBackendId, vehicleId: vehicleBackendId,
         lines: o.lines.map((l) => ({
@@ -306,8 +333,20 @@ export const useDeliveryStore = create<S>()((set, get) => ({
         nextAction: o.nextAction ?? null, note: note ?? null,
       });
 
-      const doc = mapApiOrder(updated);
+      const doc = mapApiOrder(result.order);
       set((s) => ({ orders: s.orders.map((x) => (x.id === id ? doc : x)) }));
+
+      // Delivery:Edit users land here instead of actually moving the order — a Delivery:Full user
+      // (which may or may not be them) still has to approve it via approveMove below.
+      if (!result.applied) {
+        const pendingApproval = result.pendingApproval ? mapApiApproval(result.pendingApproval) : undefined;
+        if (pendingApproval) set((s) => ({ pendingApprovals: [pendingApproval, ...s.pendingApprovals] }));
+        useAuditStore.getState().log({
+          module: "delivery", event: "DELIVERY_STAGE_CHANGE_REQUESTED", recordId: id, branch: o.branch,
+          oldValue: o.stage, newValue: to, reason: note, severity: "info",
+        });
+        return { ok: true, applied: false, pendingApproval };
+      }
 
       const evMap: Record<Stage, string> = {
         Pending: "DELIVERY_UPDATED",
@@ -326,9 +365,38 @@ export const useDeliveryStore = create<S>()((set, get) => ({
         module: "delivery", event: evMap[to], recordId: id, branch: o.branch,
         oldValue: o.stage, newValue: to, reason: note, severity: to === "Failed" ? "critical" : "info",
       });
-      return { ok: true };
+      return { ok: true, applied: true };
     } catch (err) {
       return { ok: false, error: errMsg(err, "Could not move stage.") };
+    }
+  },
+
+  // Delivery:Full only (enforced server-side) — approves someone else's pending move request and
+  // actually applies the stage change; self-approval is rejected by the server regardless.
+  approveMove: async (approvalId) => {
+    try {
+      const result = await apiApproveDeliveryMove(approvalId);
+      const doc = mapApiOrder(result.order);
+      set((s) => ({
+        orders: s.orders.map((x) => (x._backendId === result.order.id ? doc : x)),
+        pendingApprovals: s.pendingApprovals.filter((a) => a.id !== approvalId),
+      }));
+      useAuditStore.getState().log({
+        module: "delivery", event: "DELIVERY_STAGE_CHANGE_APPROVED", recordId: doc.id, branch: doc.branch, severity: "info",
+      });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: errMsg(err, "Could not approve this request.") };
+    }
+  },
+
+  rejectMove: async (approvalId) => {
+    try {
+      await apiRejectDeliveryMove(approvalId);
+      set((s) => ({ pendingApprovals: s.pendingApprovals.filter((a) => a.id !== approvalId) }));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: errMsg(err, "Could not reject this request.") };
     }
   },
 

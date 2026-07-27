@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import type { Field } from "@/lib/buildpos/flows";
+import { formatUomConversions, parseUomConversions } from "@/lib/buildpos/uom";
 import {
   useCategories,
   useProducts,
@@ -56,14 +57,16 @@ import {
 } from "./finance";
 import { usePricingRules, useUpdatePricingRuleStatus } from "./pos";
 import { useSubmitZatcaInvoice, useZatcaInvoices } from "./zatca";
+import { useInsightsReports, useSetReportStatus, useInsightsBi, useRetryBiFeed, useUpdateKpiTarget } from "./insights";
 import {
   useUsers, useRoles, useBranches, useTerminals, useDevices,
   useUpdateUser, useUpdateRole, useUpdateBranch, useUpdateTerminal, useUpdateDevice,
   useSetTerminalStatus, useSetDeviceStatus,
-  useRules, useCompliance, useMaintenance, useSettings,
+  useRules, useCompliance, useMaintenance, useSettings, useCreateMaintenance,
   useUpdateRule, useUpdateCompliance, useUpdateMaintenanceStatus, useUpsertSetting,
   TERMINAL_TYPE_TO_BACKEND, TERMINAL_TYPE_TO_FRONTEND, CONNECTION_TO_BACKEND, CONNECTION_TO_FRONTEND,
   RULE_DOMAIN_TO_BACKEND, RULE_DOMAIN_TO_FRONTEND, RULE_PRIORITY_TO_NUMBER, rulePriorityLabel,
+  posCeilingsFromTier, posTierFromCeilings,
   type RoleDto,
 } from "./admin";
 
@@ -74,12 +77,24 @@ function confirmed(message: string, fn: () => Promise<unknown>, okMsg: string): 
   };
 }
 
+function downloadCsv(filename: string, rows: (string | number)[][]) {
+  const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function permFieldValues(role: RoleDto): Record<string, string> {
   const level = (m: string) => role.permissions.find((p) => p.module === m)?.level ?? "None";
   return {
     name: role.name,
     description: role.description ?? "",
     approvalCap: String(role.approvalCap),
+    posTier: posTierFromCeilings(role.posCeilings),
     permPos: level("Pos"), permOrders: level("Orders"), permInventory: level("Inventory"), permFinance: level("Finance"),
     permAdmin: level("Admin"), permDelivery: level("Delivery"), permHr: level("Hr"), permInsights: level("Insights"),
     permSuppliers: level("Suppliers"), permNetwork: level("Network"),
@@ -125,7 +140,7 @@ export function useRowActions(
   const navigate = useNavigate();
 
   const { data: products } = useProducts(
-    pathname === "/stock/inventory" || pathname === "/stock/stocks",
+    pathname === "/stock/inventory" || pathname === "/stock/stocks" || pathname === "/stock/branch-stock",
   );
   const setProductStatus = useSetProductStatus();
   const updateProduct = useUpdateProduct();
@@ -137,7 +152,9 @@ export function useRowActions(
   const setCategoryStatus = useSetCategoryStatus();
   const updateCategory = useUpdateCategory();
 
-  const { data: warehouses } = useWarehouses(pathname === "/stock/stocks" || pathname === "/stock/warehouses");
+  const { data: warehouses } = useWarehouses(
+    pathname === "/stock/stocks" || pathname === "/stock/warehouses" || pathname === "/stock/branch-stock",
+  );
   const createStockAdjustment = useCreateStockAdjustment();
   const createStockTransfer = useCreateStockTransfer();
   const { data: transfers } = useStockTransfers(pathname === "/stock/transfers");
@@ -192,11 +209,15 @@ export function useRowActions(
   const { data: zatcaInvoices } = useZatcaInvoices(undefined, pathname === "/admin/zatca-invoices");
   const submitZatcaInvoice = useSubmitZatcaInvoice();
 
-  const { data: users } = useUsers(pathname === "/admin/users" || pathname === "/admin/rules" || pathname === "/network/terminals");
+  const { data: users } = useUsers(
+    pathname === "/admin/users" || pathname === "/admin/rules" || pathname === "/network/terminals"
+      || pathname === "/admin/overview",
+  );
   const { data: roles } = useRoles(pathname === "/admin/users" || pathname === "/admin/roles");
   const { data: branches } = useBranches(
     pathname === "/admin/users" || pathname === "/network/branches" || pathname === "/network/terminals"
-      || pathname === "/stock/warehouses" || pathname === "/stock/stocks" || pathname === "/finance/returns",
+      || pathname === "/stock/warehouses" || pathname === "/stock/stocks" || pathname === "/stock/branch-stock"
+      || pathname === "/finance/returns" || pathname === "/finance/tax-zatca",
   );
   const { data: terminals } = useTerminals(pathname === "/network/terminals" || pathname === "/network/devices");
   const { data: devices } = useDevices(pathname === "/network/devices");
@@ -217,6 +238,67 @@ export function useRowActions(
   const updateCompliance = useUpdateCompliance();
   const updateMaintenanceStatus = useUpdateMaintenanceStatus();
   const upsertSetting = useUpsertSetting();
+  const createMaintenance = useCreateMaintenance();
+  const updateKpiTarget = useUpdateKpiTarget();
+  const { data: reports } = useInsightsReports(pathname === "/insights/reports");
+  const setReportStatus = useSetReportStatus();
+  const { data: biFeeds } = useInsightsBi(pathname === "/insights/bi");
+  const retryBiFeed = useRetryBiFeed();
+
+  // Shared by /stock/stocks and /stock/branch-stock: a transfer's source/destination can each be
+  // either a warehouse or a branch (mirrors the backend's WithIncludes/Debit/Credit "either-or" model).
+  const createTransferAction = (fromLabel: string, sku: string): RowAction => ({
+    label: "Transfer",
+    onClick: () =>
+      openFlow(
+        "Create Transfer",
+        { from: fromLabel, items: JSON.stringify([{ sku, qty: "1" }]) },
+        async (values) => {
+          if (!values.from || !values.to)
+            throw new Error("From and To location are required.");
+          const resolve = (value: string) => {
+            if (value.toLowerCase().startsWith("warehouse:")) {
+              const name = value.slice("warehouse:".length).trim();
+              const w = warehouses?.find((x) => x.name.toLowerCase() === name.toLowerCase());
+              if (!w) throw new Error(`Unknown warehouse "${name}".`);
+              return { warehouseId: w.id as number | null, branchId: null as number | null };
+            }
+            if (value.toLowerCase().startsWith("branch:")) {
+              const name = value.slice("branch:".length).trim();
+              const b = branches?.find((x) => x.nameEn.toLowerCase() === name.toLowerCase());
+              if (!b) throw new Error(`Unknown branch "${name}".`);
+              return { warehouseId: null as number | null, branchId: b.id as number | null };
+            }
+            throw new Error(`"${value}" must be prefixed "Warehouse:" or "Branch:".`);
+          };
+          const from = resolve(values.from);
+          const to = resolve(values.to);
+          if (from.warehouseId !== null && from.warehouseId === to.warehouseId) throw new Error("Source and destination warehouse must differ.");
+          if (from.branchId !== null && from.branchId === to.branchId) throw new Error("Source and destination branch must differ.");
+          if (!values.items) throw new Error("At least one line item is required.");
+          const rows = JSON.parse(values.items) as { sku?: string; qty?: string; unitCost?: string; batchNo?: string; expiryDate?: string }[];
+          const lines = rows.map((row) => {
+            if (!row.sku || !row.qty) throw new Error("Every line needs an item and a quantity.");
+            const p = products?.find((pr) => pr.sku.toLowerCase() === row.sku!.toLowerCase());
+            if (!p) throw new Error(`Unknown SKU "${row.sku}".`);
+            return {
+              productId: p.id, qty: Number(row.qty), unitCost: Number(row.unitCost || p.costPrice),
+              batchNo: row.batchNo || null, expiryDate: row.expiryDate || null,
+            };
+          });
+          await createStockTransfer.mutateAsync({
+            fromWarehouseId: from.warehouseId,
+            fromBranchId: from.branchId,
+            toWarehouseId: to.warehouseId,
+            toBranchId: to.branchId,
+            eta: values.eta || null,
+            carrier: values.carrier || null,
+            notes: values.notes || null,
+            lines,
+          });
+        },
+      ),
+  });
 
   return (id, row, statusText) => {
     switch (pathname) {
@@ -238,6 +320,8 @@ export function useRowActions(
                   brand: product.brand ?? "",
                   stockUom: product.stockUom,
                   sellUoms: product.sellUoms.join(", "),
+                  uomConversions: formatUomConversions(product.uomConversions),
+                  cutToSize: product.isCutToSize ? "on" : "",
                   weight: String(product.weight),
                   returnable: product.returnable ? "on" : "",
                   cost: String(product.costPrice),
@@ -284,6 +368,8 @@ export function useRowActions(
                       reorderLevel: Number(values.reorder || 0),
                       reorderQty: Number(values.reorderQty || 0),
                       imageUrl: product.imageUrl,
+                      uomConversions: parseUomConversions(values.uomConversions),
+                      isCutToSize: values.cutToSize === "on",
                     },
                   });
                 },
@@ -444,62 +530,27 @@ export function useRowActions(
                 },
               ),
           },
+          createTransferAction(`Warehouse: ${String(warehouseName)}`, String(sku)),
           {
-            label: "Transfer",
-            onClick: () =>
-              openFlow(
-                "Create Transfer",
-                { from: `Warehouse: ${String(warehouseName)}`, items: JSON.stringify([{ sku: String(sku), qty: "1" }]) },
-                async (values) => {
-                  if (!values.from || !values.to)
-                    throw new Error("From and To location are required.");
-                  const resolve = (value: string) => {
-                    if (value.toLowerCase().startsWith("warehouse:")) {
-                      const name = value.slice("warehouse:".length).trim();
-                      const w = warehouses?.find((x) => x.name.toLowerCase() === name.toLowerCase());
-                      if (!w) throw new Error(`Unknown warehouse "${name}".`);
-                      return { warehouseId: w.id as number | null, branchId: null as number | null };
-                    }
-                    if (value.toLowerCase().startsWith("branch:")) {
-                      const name = value.slice("branch:".length).trim();
-                      const b = branches?.find((x) => x.nameEn.toLowerCase() === name.toLowerCase());
-                      if (!b) throw new Error(`Unknown branch "${name}".`);
-                      return { warehouseId: null as number | null, branchId: b.id as number | null };
-                    }
-                    throw new Error(`"${value}" must be prefixed "Warehouse:" or "Branch:".`);
-                  };
-                  const from = resolve(values.from);
-                  const to = resolve(values.to);
-                  if (from.warehouseId !== null && from.warehouseId === to.warehouseId) throw new Error("Source and destination warehouse must differ.");
-                  if (from.branchId !== null && from.branchId === to.branchId) throw new Error("Source and destination branch must differ.");
-                  if (!values.items) throw new Error("At least one line item is required.");
-                  const rows = JSON.parse(values.items) as { sku?: string; qty?: string; unitCost?: string; batchNo?: string; expiryDate?: string }[];
-                  const lines = rows.map((row) => {
-                    if (!row.sku || !row.qty) throw new Error("Every line needs an item and a quantity.");
-                    const p = products?.find((pr) => pr.sku.toLowerCase() === row.sku!.toLowerCase());
-                    if (!p) throw new Error(`Unknown SKU "${row.sku}".`);
-                    return {
-                      productId: p.id, qty: Number(row.qty), unitCost: Number(row.unitCost || p.costPrice),
-                      batchNo: row.batchNo || null, expiryDate: row.expiryDate || null,
-                    };
-                  });
-                  await createStockTransfer.mutateAsync({
-                    fromWarehouseId: from.warehouseId,
-                    fromBranchId: from.branchId,
-                    toWarehouseId: to.warehouseId,
-                    toBranchId: to.branchId,
-                    eta: values.eta || null,
-                    carrier: values.carrier || null,
-                    notes: values.notes || null,
-                    lines,
-                  });
-                },
-              ),
+            label: "Reorder",
+            // No sku search param: PO rows carry no SKU text, so seeding the list's free-text
+            // search with it always filtered every record out.
+            onClick: () => navigate({ to: "/finance/purchase-orders" }),
+          },
+        ];
+      }
+
+      case "/stock/branch-stock": {
+        const [sku, , categoryName, branchName] = row;
+        return [
+          createTransferAction(`Branch: ${String(branchName)}`, String(sku)),
+          {
+            label: "View in Catalog",
+            onClick: () => navigate({ to: "/stock/inventory", search: { category: String(categoryName) } }),
           },
           {
             label: "Reorder",
-            onClick: () =>
-              navigate({ to: "/finance/purchase-orders", search: { sku: String(sku) } }),
+            onClick: () => navigate({ to: "/finance/purchase-orders" }),
           },
         ];
       }
@@ -963,7 +1014,12 @@ export function useRowActions(
                   (b) => b.nameEn.toLowerCase() === values.branch.toLowerCase(),
                 );
                 if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
-                await approveReturn.mutateAsync({ id: ret.id, branchId: branch.id });
+                await approveReturn.mutateAsync({
+                  id: ret.id, branchId: branch.id,
+                  refundMethod: values.refundMethod || undefined,
+                  secondAuthEmail: values.secondAuthEmail || undefined,
+                  secondAuthPin: values.secondAuthPin || undefined,
+                });
               }),
           });
         }
@@ -987,10 +1043,15 @@ export function useRowActions(
                   appliesTo: taxCode.appliesTo,
                   effectiveFrom: taxCode.effectiveFrom.slice(0, 10),
                   glAccount: taxCode.glAccountCode ?? "",
+                  branch: taxCode.branchName ?? "All Branches",
                 },
                 async (values) => {
                   if (!values.code || !values.name || !values.rate || !values.appliesTo)
                     throw new Error("Code, name, rate and applies-to are required.");
+                  const branch =
+                    values.branch && values.branch !== "All Branches"
+                      ? branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase())
+                      : undefined;
                   await updateTaxCode.mutateAsync({
                     id: taxCode.id,
                     request: {
@@ -1001,6 +1062,7 @@ export function useRowActions(
                       appliesTo: values.appliesTo,
                       effectiveFrom: values.effectiveFrom || taxCode.effectiveFrom,
                       glAccountCode: values.glAccount || null,
+                      branchId: branch?.id ?? null,
                     },
                   });
                 },
@@ -1112,6 +1174,7 @@ export function useRowActions(
                     description: values.description || null,
                     approvalCap: Number(values.approvalCap || 0),
                     permissions: permissionsFromValues(values),
+                    posCeilings: posCeilingsFromTier(values.posTier),
                   },
                 });
               }),
@@ -1198,7 +1261,6 @@ export function useRowActions(
       case "/network/terminals": {
         const terminal = terminals?.find((t) => t.id === id);
         if (!terminal) return [];
-        const cashier = users?.find((u) => u.name.toLowerCase() === terminal.assignedCashierName?.toLowerCase());
         return [
           {
             label: "Edit",
@@ -1217,9 +1279,15 @@ export function useRowActions(
                   if (!values.id || !values.branch) throw new Error("Terminal ID and branch are required.");
                   const branch = branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase());
                   if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
-                  const assignedCashier = values.operator && values.operator !== "Unassigned"
-                    ? users?.find((u) => u.name.toLowerCase() === values.operator.toLowerCase())
-                    : undefined;
+                  // "Unassigned" (or empty) explicitly clears the cashier; an unknown name is an
+                  // error rather than silently keeping the previous assignment.
+                  const operatorName = (values.operator ?? "").trim();
+                  let assignedCashierId: number | null = null;
+                  if (operatorName && operatorName !== "Unassigned") {
+                    const assignedCashier = users?.find((u) => u.name.toLowerCase() === operatorName.toLowerCase());
+                    if (!assignedCashier) throw new Error(`Unknown cashier "${operatorName}" — pick a user that exists.`);
+                    assignedCashierId = assignedCashier.id;
+                  }
                   await updateTerminal.mutateAsync({
                     id: terminal.id,
                     request: {
@@ -1227,7 +1295,7 @@ export function useRowActions(
                       name: values.name || values.id,
                       branchId: branch.id,
                       type: TERMINAL_TYPE_TO_BACKEND[values.type] ?? terminal.type,
-                      assignedCashierId: assignedCashier ? assignedCashier.id : cashier?.id ?? null,
+                      assignedCashierId,
                       offlineModeEnabled: values.offline === "on",
                       ipAddress: terminal.ipAddress,
                       macAddress: terminal.macAddress,
@@ -1456,6 +1524,116 @@ export function useRowActions(
                   effectiveFrom: new Date().toISOString().slice(0, 10),
                 });
               }),
+          },
+        ];
+      }
+
+      case "/insights/kpi": {
+        if (id === undefined) return [];
+        return [
+          {
+            label: "Edit Target",
+            onClick: () => {
+              const currentTarget = row[3];
+              const next = window.prompt(`New target for "${row[0]}" (current: ${currentTarget}):`, String(currentTarget));
+              if (next === null) return;
+              const target = Number(next);
+              if (Number.isNaN(target)) {
+                toast.error("Target must be a number.");
+                return;
+              }
+              guarded(() => updateKpiTarget.mutateAsync({ id, target }), "KPI target updated")();
+            },
+          },
+        ];
+      }
+
+      case "/insights/reports": {
+        const report = reports?.find((r) => r.id === id);
+        if (!report) return [];
+        return [
+          {
+            label: "Download",
+            onClick: () =>
+              downloadCsv(`report-${report.code}.csv`, [
+                ["Code", "Name", "Category", "Owner", "Frequency", "Format", "Status"],
+                [report.code, report.name, report.category, report.owner, report.frequency, report.format, report.status],
+              ]),
+          },
+          {
+            label: report.status === "Active" ? "Pause Schedule" : "Resume Schedule",
+            onClick: guarded(
+              () => setReportStatus.mutateAsync({ id: report.id, status: report.status === "Active" ? "Inactive" : "Active" }),
+              report.status === "Active" ? "Report schedule paused" : "Report schedule resumed",
+            ),
+          },
+        ];
+      }
+
+      case "/insights/bi": {
+        const feed = biFeeds?.find((f) => f.id === id);
+        if (!feed) return [];
+        const actions: RowAction[] = [
+          {
+            label: "View Schema",
+            onClick: () =>
+              window.alert(
+                `${feed.name}\n\n${feed.source} → ${feed.destination}\nFrequency: ${feed.frequency}\nLast run: ${new Date(feed.lastRun).toLocaleString("en-GB")}\nRows: ${feed.rows} · Failed: ${feed.failed}\nLatency: ${feed.latency}\nStatus: ${feed.status}`,
+              ),
+          },
+        ];
+        if (feed.failed > 0 || feed.status !== "Healthy") {
+          actions.push({
+            label: "Retry",
+            onClick: guarded(() => retryBiFeed.mutateAsync(feed.id), "Feed retried"),
+          });
+        }
+        return actions;
+      }
+
+      case "/insights/sales": {
+        const segment = String(row[0] ?? "");
+        if (!segment) return [];
+        return [
+          {
+            label: "Drill Down",
+            onClick: () => navigate({ to: "/stock/inventory", search: { category: segment } }),
+          },
+        ];
+      }
+
+      case "/admin/overview": {
+        const area = String(row[0] ?? "");
+        if (!area) return [];
+        const routeFor = (name: string): string =>
+          /zatca/i.test(name) ? "/admin/zatca-invoices" : /compliance/i.test(name) ? "/admin/compliance" : "/admin/audit-logs";
+        return [
+          {
+            label: "Investigate",
+            onClick: () => navigate({ to: routeFor(area) }),
+          },
+          {
+            label: "Assign",
+            onClick: () => {
+              const owner = window.prompt(`Assign "${area}" to (enter a user name):`, "");
+              if (owner === null) return;
+              if (!owner.trim()) {
+                toast.error("Pick who to assign.");
+                return;
+              }
+              guarded(
+                () => createMaintenance.mutateAsync({ deviceOrModule: area, branchId: null, severity: "Warning", owner: owner.trim(), slaHours: 24 }),
+                "Ticket created and assigned",
+              )();
+            },
+          },
+          {
+            label: "Escalate",
+            onClick: guarded(
+              () => createMaintenance.mutateAsync({ deviceOrModule: area, branchId: null, severity: "Critical", owner: "IT Support", slaHours: 4 }),
+              "Critical maintenance ticket created",
+            ),
+            tone: "critical",
           },
         ];
       }

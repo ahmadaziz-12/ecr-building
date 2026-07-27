@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
 using EcrBuilding.Application.Delivery;
@@ -17,22 +18,6 @@ namespace EcrBuilding.Api.Controllers;
 [RequireModule(ModuleArea.Delivery, AccessLevel.View)]
 public class DeliveryOrdersController(AppDbContext db, IAuditService audit) : ControllerBase
 {
-    // Ported verbatim from the previous client-only ALLOWED_TRANSITIONS state machine.
-    private static readonly Dictionary<DeliveryStage, DeliveryStage[]> AllowedTransitions = new()
-    {
-        [DeliveryStage.Pending] = [DeliveryStage.Assigned, DeliveryStage.Cancelled],
-        [DeliveryStage.Assigned] = [DeliveryStage.Loading, DeliveryStage.Pending, DeliveryStage.Cancelled],
-        [DeliveryStage.Loading] = [DeliveryStage.ReadyToDispatch, DeliveryStage.Assigned],
-        [DeliveryStage.ReadyToDispatch] = [DeliveryStage.Dispatched, DeliveryStage.Loading],
-        [DeliveryStage.Dispatched] = [DeliveryStage.Delivered, DeliveryStage.PartiallyDelivered, DeliveryStage.Failed, DeliveryStage.ReturnedToBranch],
-        [DeliveryStage.PartiallyDelivered] = [DeliveryStage.Delivered, DeliveryStage.Rescheduled, DeliveryStage.ReturnedToBranch],
-        [DeliveryStage.Delivered] = [],
-        [DeliveryStage.Failed] = [DeliveryStage.Rescheduled, DeliveryStage.ReturnedToBranch, DeliveryStage.Cancelled],
-        [DeliveryStage.ReturnedToBranch] = [DeliveryStage.Rescheduled, DeliveryStage.Cancelled],
-        [DeliveryStage.Cancelled] = [],
-        [DeliveryStage.Rescheduled] = [DeliveryStage.Pending, DeliveryStage.Assigned],
-    };
-
     [HttpGet]
     public async Task<ActionResult<List<DeliveryOrderDto>>> List(CancellationToken ct)
     {
@@ -88,9 +73,12 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit) : Co
         return Ok(Map(created));
     }
 
+    // Delivery:Edit can request a move; Delivery:Full moves directly (and is who approves an Edit
+    // user's request — see ApproveMove below). A user with Full never enters the request/approve
+    // pipeline at all, since they can just move the order themselves.
     [HttpPut("{id:int}/transition")]
     [RequireModule(ModuleArea.Delivery, AccessLevel.Edit)]
-    public async Task<ActionResult<DeliveryOrderDto>> Transition(int id, TransitionRequest request, CancellationToken ct)
+    public async Task<ActionResult<TransitionResponseDto>> Transition(int id, TransitionRequest request, CancellationToken ct)
     {
         var order = await db.DeliveryOrders.Include(o => o.Lines).Include(o => o.Driver).Include(o => o.Vehicle)
             .FirstOrDefaultAsync(o => o.Id == id, ct);
@@ -101,87 +89,146 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit) : Co
             return BadRequest(new { error = $"Unknown stage '{request.ToStage}'." });
         }
 
-        if (!AllowedTransitions.TryGetValue(order.Stage, out var allowed) || !allowed.Contains(toStage))
-        {
-            return BadRequest(new { error = $"Cannot move from {order.Stage} to {toStage}." });
-        }
-
-        if (request.DriverId is not null) order.DriverId = request.DriverId;
-        if (request.VehicleId is not null) order.VehicleId = request.VehicleId;
-
-        if (request.Lines is not null)
-        {
-            foreach (var progress in request.Lines)
-            {
-                var line = order.Lines.FirstOrDefault(l => l.ProductId == progress.ProductId);
-                if (line is null) continue;
-                if (progress.LoadedQty is not null) line.LoadedQty = progress.LoadedQty.Value;
-                if (progress.DeliveredQty is not null) line.DeliveredQty = progress.DeliveredQty.Value;
-                if (progress.MissingQty is not null) line.MissingQty = progress.MissingQty.Value;
-                if (progress.DamagedQty is not null) line.DamagedQty = progress.DamagedQty.Value;
-            }
-        }
-
-        // Guards ported from the previous client-only validate() function.
-        switch (toStage)
-        {
-            case DeliveryStage.Assigned:
-                if (order.DriverId is null || order.VehicleId is null)
-                    return BadRequest(new { error = "Assigning requires a driver and a vehicle." });
-                break;
-            case DeliveryStage.Loading:
-                if (!order.StockReserved)
-                    return BadRequest(new { error = "Stock must be reserved before loading." });
-                break;
-            case DeliveryStage.ReadyToDispatch:
-                if (!order.Lines.Any(l => l.LoadedQty > 0))
-                    return BadRequest(new { error = "At least one line must have a loaded quantity." });
-                break;
-            case DeliveryStage.Dispatched:
-                if (order.DriverId is null || order.VehicleId is null)
-                    return BadRequest(new { error = "Dispatch requires a driver and a vehicle." });
-                break;
-            case DeliveryStage.Delivered:
-            case DeliveryStage.PartiallyDelivered:
-                if (!order.Lines.Any(l => l.DeliveredQty > 0))
-                    return BadRequest(new { error = "At least one line must have a delivered quantity." });
-                break;
-        }
-
-        var fromStage = order.Stage;
-        order.Stage = toStage;
-        if (request.ReceivedBy is not null) order.ReceivedBy = request.ReceivedBy;
-        if (request.Proof is not null) order.Proof = request.Proof;
-        if (request.FailureReason is not null) order.FailureReason = request.FailureReason;
-        if (request.NextAction is not null) order.NextAction = request.NextAction;
-
-        if (toStage == DeliveryStage.Dispatched)
-        {
-            order.DispatchedAt = DateTime.UtcNow;
-            if (order.Driver is not null) order.Driver.Status = DriverStatus.OnDelivery;
-            if (order.Vehicle is not null) order.Vehicle.Status = VehicleStatus.OnDelivery;
-        }
-        else if (toStage is DeliveryStage.Delivered or DeliveryStage.Failed or DeliveryStage.ReturnedToBranch or DeliveryStage.PartiallyDelivered)
-        {
-            if (toStage == DeliveryStage.Delivered) order.DeliveredAt = DateTime.UtcNow;
-            if (order.Driver is not null) { order.Driver.Status = DriverStatus.Available; order.Driver.DeliveriesToday += 1; }
-            if (order.Vehicle is not null) order.Vehicle.Status = VehicleStatus.Available;
-        }
-        else if (toStage == DeliveryStage.Loading)
-        {
-            if (order.Driver is not null) order.Driver.Status = DriverStatus.Loading;
-            if (order.Vehicle is not null) order.Vehicle.Status = VehicleStatus.Loading;
-        }
-
         var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        db.DeliveryHistories.Add(new DeliveryHistory { DeliveryOrderId = order.Id, FromStage = fromStage, ToStage = toStage, ByUserId = userId, Note = request.Note });
 
+        if (!HasDeliveryLevel(AccessLevel.Full))
+        {
+            var effectiveDriverId = request.DriverId ?? order.DriverId;
+            var effectiveVehicleId = request.VehicleId ?? order.VehicleId;
+            var effectiveLines = order.Lines.Select(l =>
+            {
+                var progress = request.Lines?.FirstOrDefault(p => p.ProductId == l.ProductId);
+                return (LoadedQty: progress?.LoadedQty ?? l.LoadedQty, DeliveredQty: progress?.DeliveredQty ?? l.DeliveredQty);
+            }).ToList();
+
+            var validationError = DeliveryTransitionEngine.Validate(order.Stage, toStage, effectiveDriverId, effectiveVehicleId, order.StockReserved, effectiveLines);
+            if (validationError is not null) return BadRequest(new { error = validationError });
+
+            var approval = new ApprovalRequest
+            {
+                Type = ApprovalType.DeliveryStageChange,
+                BranchId = order.BranchId,
+                RequestedByUserId = userId,
+                Reason = $"Move {order.DeliveryNo} from {order.Stage} to {toStage}.",
+                RelatedDeliveryOrderId = order.Id,
+                Payload = JsonSerializer.Serialize(request),
+            };
+            db.ApprovalRequests.Add(approval);
+            await db.SaveChangesAsync(ct);
+            await audit.LogAsync("delivery", "DELIVERY_STAGE_CHANGE_REQUESTED", approval.Id.ToString(), userId: userId, branchId: order.BranchId, cancellationToken: ct);
+
+            var requester = await db.Users.FindAsync([userId], ct);
+            var pending = new DeliveryApprovalDto(approval.Id, order.Id, order.DeliveryNo, requester?.Name ?? "", null, order.Stage.ToString(), toStage.ToString(), approval.Reason, approval.Status.ToString(), approval.CreatedAt, null);
+            var unchanged = await Query().FirstAsync(o => o.Id == order.Id, ct);
+            return Ok(new TransitionResponseDto(false, Map(unchanged), pending));
+        }
+
+        var (error, history) = DeliveryTransitionEngine.Apply(order, request, toStage, userId);
+        if (error is not null) return BadRequest(new { error });
+
+        db.DeliveryHistories.Add(history!);
         await db.SaveChangesAsync(ct);
         await audit.LogAsync("delivery", "DELIVERY_STAGE_CHANGED", order.Id.ToString(), userId: userId,
-            oldValue: fromStage.ToString(), newValue: toStage.ToString(), cancellationToken: ct);
+            oldValue: history!.FromStage.ToString(), newValue: toStage.ToString(), cancellationToken: ct);
 
         var updated = await Query().FirstAsync(o => o.Id == id, ct);
-        return Ok(Map(updated));
+        return Ok(new TransitionResponseDto(true, Map(updated), null));
+    }
+
+    [HttpGet("approvals")]
+    public async Task<ActionResult<List<DeliveryApprovalDto>>> ListApprovals([FromQuery] string? status, CancellationToken ct)
+    {
+        var query = ApprovalsQuery();
+        if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<ApprovalStatus>(status, ignoreCase: true, out var parsed))
+        {
+            query = query.Where(a => a.Status == parsed);
+        }
+        var rows = await query.OrderByDescending(a => a.CreatedAt).ToListAsync(ct);
+        return Ok(rows.Select(MapApproval).ToList());
+    }
+
+    [HttpPut("approvals/{approvalId:int}/approve")]
+    [RequireModule(ModuleArea.Delivery, AccessLevel.Full)]
+    public async Task<ActionResult<TransitionResponseDto>> ApproveMove(int approvalId, CancellationToken ct)
+    {
+        var approval = await db.ApprovalRequests.FirstOrDefaultAsync(a => a.Id == approvalId && a.Type == ApprovalType.DeliveryStageChange, ct);
+        if (approval is null) return NotFound();
+        if (approval.Status != ApprovalStatus.Pending) return BadRequest(new { error = "This request has already been resolved." });
+
+        var approverId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        if (approverId == approval.RequestedByUserId)
+        {
+            return BadRequest(new { error = "You cannot approve your own request — a different user with move authority must approve it." });
+        }
+
+        var order = await db.DeliveryOrders.Include(o => o.Lines).Include(o => o.Driver).Include(o => o.Vehicle)
+            .FirstOrDefaultAsync(o => o.Id == approval.RelatedDeliveryOrderId, ct);
+        if (order is null) return NotFound(new { error = "The delivery order for this request no longer exists." });
+
+        var request = JsonSerializer.Deserialize<TransitionRequest>(approval.Payload!)!;
+        if (!Enum.TryParse<DeliveryStage>(request.ToStage, out var toStage))
+        {
+            return BadRequest(new { error = $"Unknown stage '{request.ToStage}'." });
+        }
+
+        var (error, history) = DeliveryTransitionEngine.Apply(order, request, toStage, approval.RequestedByUserId);
+        if (error is not null) return BadRequest(new { error = $"This request is no longer valid: {error}" });
+
+        db.DeliveryHistories.Add(history!);
+        approval.Status = ApprovalStatus.Approved;
+        approval.ApproverUserId = approverId;
+        approval.ResolvedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("delivery", "DELIVERY_STAGE_CHANGE_APPROVED", approval.Id.ToString(), userId: approverId,
+            oldValue: history!.FromStage.ToString(), newValue: toStage.ToString(), cancellationToken: ct);
+
+        var updated = await Query().FirstAsync(o => o.Id == order.Id, ct);
+        return Ok(new TransitionResponseDto(true, Map(updated), null));
+    }
+
+    [HttpPut("approvals/{approvalId:int}/reject")]
+    [RequireModule(ModuleArea.Delivery, AccessLevel.Full)]
+    public async Task<ActionResult<DeliveryApprovalDto>> RejectMove(int approvalId, CancellationToken ct)
+    {
+        var approval = await db.ApprovalRequests.FirstOrDefaultAsync(a => a.Id == approvalId && a.Type == ApprovalType.DeliveryStageChange, ct);
+        if (approval is null) return NotFound();
+        if (approval.Status != ApprovalStatus.Pending) return BadRequest(new { error = "This request has already been resolved." });
+
+        var approverId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        if (approverId == approval.RequestedByUserId)
+        {
+            return BadRequest(new { error = "You cannot reject your own request." });
+        }
+
+        approval.Status = ApprovalStatus.Rejected;
+        approval.ApproverUserId = approverId;
+        approval.ResolvedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("delivery", "DELIVERY_STAGE_CHANGE_REJECTED", approval.Id.ToString(), userId: approverId, cancellationToken: ct);
+
+        var resolved = await ApprovalsQuery().FirstAsync(a => a.Id == approvalId, ct);
+        return Ok(MapApproval(resolved));
+    }
+
+    private bool HasDeliveryLevel(AccessLevel min)
+    {
+        var claim = User.FindFirst($"perm:{ModuleArea.Delivery}")?.Value;
+        var level = Enum.TryParse<AccessLevel>(claim, out var parsed) ? parsed : AccessLevel.None;
+        return level >= min;
+    }
+
+    private IQueryable<ApprovalRequest> ApprovalsQuery() => db.ApprovalRequests
+        .Where(a => a.Type == ApprovalType.DeliveryStageChange)
+        .Include(a => a.RequestedBy).Include(a => a.Approver).Include(a => a.RelatedDeliveryOrder);
+
+    private static DeliveryApprovalDto MapApproval(ApprovalRequest a)
+    {
+        var request = a.Payload is not null ? JsonSerializer.Deserialize<TransitionRequest>(a.Payload) : null;
+        return new DeliveryApprovalDto(
+            a.Id, a.RelatedDeliveryOrderId ?? 0, a.RelatedDeliveryOrder?.DeliveryNo ?? "",
+            a.RequestedBy?.Name ?? "", a.Approver?.Name, a.RelatedDeliveryOrder?.Stage.ToString() ?? "", request?.ToStage ?? "",
+            a.Reason, a.Status.ToString(), a.CreatedAt, a.ResolvedAt);
     }
 
     private IQueryable<DeliveryOrder> Query() => db.DeliveryOrders

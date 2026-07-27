@@ -10,3 +10,13 @@ public record CustomerLoyaltyDto(
 
 public record RedeemPointsRequest(int CustomerId, int Points, string? Description);
 public record AdjustPointsRequest(int CustomerId, int Points, string Description);
+
+// BRD §4.3.1-§4.3.4: the FULL loyalty program configuration — earn/redeem economics, tier ladder
+// (thresholds/multipliers/discounts), free delivery, birthday bonus and points expiry — all
+// editable from the Loyalty Program page's "Program Settings" dialog.
+public record LoyaltyProgramConfigDto(
+    decimal PointsPerSarEarned, decimal PointsPerSarRedeemed, int MinRedeemPoints, decimal MaxRedeemPctOfTotal,
+    decimal SilverThreshold, decimal GoldThreshold, decimal PlatinumThreshold,
+    decimal SilverMultiplier, decimal GoldMultiplier, decimal PlatinumMultiplier,
+    decimal SilverDiscountPct, decimal GoldDiscountPct, decimal PlatinumDiscountPct,
+    decimal FreeDeliveryMinOrderSar, decimal BirthdayBonusMultiplier, int PointsExpiryMonths);

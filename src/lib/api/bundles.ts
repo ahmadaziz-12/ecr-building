@@ -2,11 +2,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPut } from "./client";
 import type { LiveTable } from "./admin";
 
-export type BundleLineDto = { productId: number; sku: string; productName: string; qty: number; unitCost: number };
+export type BundleLineDto = { productId: number; sku: string; productName: string; qty: number; unitCost: number; sellingPrice: number; vatRate: number };
 export type BundleDto = {
   id: number; code: string; nameEn: string; nameAr: string | null; bundlePrice: number; componentCost: number;
   status: string; lines: BundleLineDto[];
+  // Module 8 (BRD §5): bundle type + individual price total — the POS card shows the savings from these.
+  type: string; individualTotal: number;
 };
+
+// BRD §5.4 Bundle Sales Report row.
+export type BundleSalesReportRowDto = {
+  bundleId: number; code: string; nameEn: string; type: string; unitsSold: number;
+  revenueAtBundlePrice: number; revenueAtIndividualPrice: number; discountGiven: number;
+};
+export const useBundleSalesReport = (enabled = true) =>
+  useQuery({ queryKey: ["catalog", "bundle-sales-report"], queryFn: () => apiGet<BundleSalesReportRowDto[]>("/api/catalog/bundles/sales-report"), enabled });
 
 export const useBundles = (enabled = true) =>
   useQuery({ queryKey: ["catalog", "bundles"], queryFn: () => apiGet<BundleDto[]>("/api/catalog/bundles"), enabled });
@@ -54,7 +64,7 @@ export function mapBundles(rows: BundleDto[]): LiveTable {
       { label: "Active Bundles", value: String(rows.filter((b) => b.status === "Active").length), sub: `${rows.length} total`, tone: "success" },
       { label: "Avg Components", value: rows.length ? (rows.reduce((s, b) => s + b.lines.length, 0) / rows.length).toFixed(1) : "0", sub: "Per bundle", tone: "info" },
       { label: "Avg Margin", value: rows.length ? `${Math.round(rows.reduce((s, b) => s + (b.bundlePrice > 0 ? (b.bundlePrice - b.componentCost) / b.bundlePrice : 0), 0) / rows.length * 100)}%` : "—", sub: "Bundle price vs cost", tone: "success" },
-      { label: "Total Bundle Value", value: rows.reduce((s, b) => s + b.bundlePrice, 0).toLocaleString("en-US", { maximumFractionDigits: 0 }), sub: "Sum of bundle prices", tone: "info" },
+      { label: "Total Bundle Value", value: rows.reduce((s, b) => s + b.bundlePrice, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), sub: "Sum of bundle prices", tone: "info" },
     ],
   };
 }

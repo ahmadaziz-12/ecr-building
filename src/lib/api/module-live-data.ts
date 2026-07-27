@@ -5,11 +5,11 @@ import {
 } from "./admin";
 import { useCategories, useProducts, mapCategories, mapProducts } from "./catalog";
 import { useBundles, mapBundles } from "./bundles";
-import { useWarehouses, useStockLevels, useBranchStockLevels, useStockBatches, useStockTransfers, mapWarehouses, mapStockLevels, mapBranchStockLevels, mapStockBatches, mapStockTransfers } from "./inventory";
+import { useWarehouses, useStockLevels, useBranchStockLevels, useStockBatches, useStockTransfers, useStockMovements, mapWarehouses, mapStockLevels, mapBranchStockLevels, mapStockBatches, mapStockTransfers, mapStockMovements } from "./inventory";
 import { useSuppliers, usePurchaseOrders, useReturnsToSupplier, mapSuppliers, mapPurchaseOrders, mapRts } from "./procurement";
 import { usePricingRules, mapPricingRules } from "./pos";
 import { useExpenses, useTaxCodes, useReturns, mapExpenses, mapTaxCodes, mapReturns } from "./finance";
-import { useZatcaInvoices, mapZatcaInvoices } from "./zatca";
+import { useZatcaInvoices, useZatcaIdentities, useZatcaSettings, mapZatcaInvoices, mapZatcaConfiguration } from "./zatca";
 import { useInsightsSales, useInsightsKpi, useInsightsReports, useInsightsBi, useAdminOverview, mapSales, mapKpis, mapReports, mapBiFeeds, mapOverview } from "./insights";
 
 // Registry of routes that are wired to the real backend — everything else keeps using the static
@@ -35,6 +35,7 @@ export function useModuleLiveData(pathname: string): LiveTable | undefined {
   const branchStockLevels = useBranchStockLevels(pathname === "/stock/branch-stock");
   const stockBatches = useStockBatches(pathname === "/stock/expiry");
   const transfers = useStockTransfers(pathname === "/stock/transfers");
+  const movements = useStockMovements(pathname === "/stock/movements");
   const bundles = useBundles(pathname === "/stock/bundles");
   const suppliers = useSuppliers(pathname === "/suppliers/suppliers");
   const purchaseOrders = usePurchaseOrders(pathname === "/finance/purchase-orders");
@@ -45,6 +46,8 @@ export function useModuleLiveData(pathname: string): LiveTable | undefined {
   const taxCodes = useTaxCodes(pathname === "/finance/tax-zatca");
   const returns = useReturns(pathname === "/finance/returns");
   const zatcaInvoices = useZatcaInvoices(undefined, pathname === "/admin/zatca-invoices");
+  const zatcaIdentities = useZatcaIdentities(pathname === "/admin/zatca-settings");
+  const zatcaSettingsList = useZatcaSettings(pathname === "/admin/zatca-settings");
   const sales = useInsightsSales(pathname === "/insights/sales");
   const kpi = useInsightsKpi(pathname === "/insights/kpi");
   const reports = useInsightsReports(pathname === "/insights/reports");
@@ -90,6 +93,8 @@ export function useModuleLiveData(pathname: string): LiveTable | undefined {
       return stockBatches.data ? mapStockBatches(stockBatches.data) : undefined;
     case "/stock/transfers":
       return transfers.data ? mapStockTransfers(transfers.data) : undefined;
+    case "/stock/movements":
+      return movements.data ? mapStockMovements(movements.data) : undefined;
     case "/stock/bundles":
       return bundles.data ? mapBundles(bundles.data) : undefined;
     case "/suppliers/suppliers":
@@ -108,6 +113,8 @@ export function useModuleLiveData(pathname: string): LiveTable | undefined {
       return returns.data ? mapReturns(returns.data) : undefined;
     case "/admin/zatca-invoices":
       return zatcaInvoices.data ? mapZatcaInvoices(zatcaInvoices.data) : undefined;
+    case "/admin/zatca-settings":
+      return zatcaIdentities.data && zatcaSettingsList.data ? mapZatcaConfiguration(zatcaIdentities.data, zatcaSettingsList.data) : undefined;
     case "/insights/sales":
       return sales.data ? mapSales(sales.data) : undefined;
     case "/insights/kpi":

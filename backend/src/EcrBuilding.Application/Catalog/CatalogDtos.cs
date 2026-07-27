@@ -1,14 +1,29 @@
 namespace EcrBuilding.Application.Catalog;
 
-public record CategoryDto(int Id, string Code, string NameEn, string? NameAr, int? ParentId, string? ParentName, string[] Attributes, string ReturnRule, string DefaultUom, decimal VatRate, bool Returnable, string Status, int SkuCount);
-public record UpsertCategoryRequest(string Code, string NameEn, string? NameAr, int? ParentId, string[] Attributes, string ReturnRule, string DefaultUom, decimal VatRate, bool Returnable);
+public record CategoryDto(int Id, string Code, string NameEn, string? NameAr, int? ParentId, string? ParentName, string[] Attributes, string ReturnRule, string DefaultUom, decimal VatRate, bool Returnable, decimal LoyaltyAccrualMultiplier, string Status, int SkuCount, decimal SurplusRestockingFeePct = 0);
+public record UpsertCategoryRequest(string Code, string NameEn, string? NameAr, int? ParentId, string[] Attributes, string ReturnRule, string DefaultUom, decimal VatRate, bool Returnable, decimal LoyaltyAccrualMultiplier = 1m, decimal SurplusRestockingFeePct = 0);
 
-public record ProductDto(int Id, string Sku, string? Barcode, string NameEn, string? NameAr, int CategoryId, string CategoryName, string? Brand, decimal CostPrice, decimal SellingPrice, decimal VatRate, string StockUom, string[] SellUoms, decimal Weight, bool Returnable, int ReorderLevel, int ReorderQty, string? ImageUrl, string Status, decimal TotalOnHand, decimal TotalAvailable);
-public record UpsertProductRequest(string Sku, string? Barcode, string NameEn, string? NameAr, int CategoryId, string? Brand, decimal CostPrice, decimal SellingPrice, decimal VatRate, string StockUom, string[] SellUoms, decimal Weight, bool Returnable, int ReorderLevel, int ReorderQty, string? ImageUrl);
+// BRD §2.3: "1 {Uom} = {FactorToStock} {StockUom}" — the POS UOM dropdown and checkout conversion
+// both read these rows; SellUoms remains display labels only.
+public record ProductUomConversionDto(string Uom, decimal FactorToStock);
+
+// BRD §2.2 structured custom attribute (color code, grade, diameter, R-value, pressure rating…).
+public record ProductAttributeDto(string Name, string Value);
+
+public record ProductDto(int Id, string Sku, string? Barcode, string NameEn, string? NameAr, int CategoryId, string CategoryName, string? Brand, decimal CostPrice, decimal SellingPrice, decimal VatRate, string StockUom, string[] SellUoms, decimal Weight, bool Returnable, int ReorderLevel, int ReorderQty, string? ImageUrl, string Status, decimal TotalOnHand, decimal TotalAvailable, IReadOnlyList<ProductUomConversionDto> UomConversions, bool IsCutToSize,
+    IReadOnlyList<ProductAttributeDto>? Attributes = null, int? SupplierId = null, string? SupplierName = null, string? BinLocation = null);
+public record UpsertProductRequest(string Sku, string? Barcode, string NameEn, string? NameAr, int CategoryId, string? Brand, decimal CostPrice, decimal SellingPrice, decimal VatRate, string StockUom, string[] SellUoms, decimal Weight, bool Returnable, int ReorderLevel, int ReorderQty, string? ImageUrl, List<ProductUomConversionDto>? UomConversions = null, bool IsCutToSize = false,
+    List<ProductAttributeDto>? Attributes = null, int? SupplierId = null, string? BinLocation = null);
 
 public record SetStatusRequest(string Status);
 
-public record BundleLineDto(int ProductId, string Sku, string ProductName, decimal Qty, decimal UnitCost);
-public record BundleDto(int Id, string Code, string NameEn, string? NameAr, decimal BundlePrice, decimal ComponentCost, string Status, IReadOnlyList<BundleLineDto> Lines);
+public record BundleLineDto(int ProductId, string Sku, string ProductName, decimal Qty, decimal UnitCost, decimal SellingPrice = 0, decimal VatRate = 0);
+public record BundleDto(int Id, string Code, string NameEn, string? NameAr, decimal BundlePrice, decimal ComponentCost, string Status, IReadOnlyList<BundleLineDto> Lines,
+    // Module 8 (BRD §5): bundle type + what the constituents would cost individually — the POS card
+    // shows "individual total vs bundle price" and the savings from these.
+    string Type = "ProductSystem", decimal IndividualTotal = 0);
 public record BundleLineInput(int ProductId, decimal Qty);
-public record UpsertBundleRequest(string Code, string NameEn, string? NameAr, decimal BundlePrice, List<BundleLineInput> Lines);
+public record UpsertBundleRequest(string Code, string NameEn, string? NameAr, decimal BundlePrice, List<BundleLineInput> Lines, string Type = "ProductSystem");
+
+// BRD §5.4 Bundle Sales Report row.
+public record BundleSalesReportRowDto(int BundleId, string Code, string NameEn, string Type, decimal UnitsSold, decimal RevenueAtBundlePrice, decimal RevenueAtIndividualPrice, decimal DiscountGiven);

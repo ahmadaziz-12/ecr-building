@@ -4,7 +4,7 @@ import {
   useBranches, useSetBranchStatus, useUpdateBranch, useTerminals, useAssignCashier, useForceSyncTerminal, mapTerminals,
   useDevices, useOpenDrawer, mapDevices, useRules, useTestRule, useUpdateRule, useUsers, useUpdateUser, useResetPin,
   useMaintenance, useAssignMaintenance, useUpdateMaintenanceStatus, useCreateMaintenance, useCompliance, useUpdateCompliance, useSignOffCompliance,
-  useRoles, useUpdateRole, useSettings, useUpsertSetting,
+  useRoles, useUpdateRole, useSettings, useUpsertSetting, posCeilingsFromTier,
 } from "./admin";
 import type { Field } from "@/lib/buildpos/flows";
 import type { BulkActionConfig } from "@/components/buildpos/BulkActionSheet";
@@ -449,7 +449,10 @@ export function useBulkActions(
               if (!values.name) throw new Error("Role name is required.");
               await updateRole.mutateAsync({
                 id: r.id,
-                request: { name: values.name, description: values.description || null, approvalCap: Number(values.approvalCap || 0), permissions: permissionsFromValues(values) },
+                request: {
+                  name: values.name, description: values.description || null, approvalCap: Number(values.approvalCap || 0),
+                  permissions: permissionsFromValues(values), posCeilings: posCeilingsFromTier(values.posTier),
+                },
               });
             });
           },

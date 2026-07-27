@@ -249,13 +249,19 @@ public class ZatcaService(
             new ZatcaInvoiceLineItem(l.Product?.NameEn ?? "Item", l.Qty, l.Qty != 0 ? l.LineTotal / l.Qty : l.UnitPrice, vatPercent)
         ).ToList();
 
+        // Module 11 (BRD §6.3): a B2B/Contractor customer WITH a captured VAT registration number gets
+        // a STANDARD tax invoice (subtype 0100000, clearance model, buyer party on the XML); everyone
+        // else stays on the simplified (B2C) reporting path exactly as before.
+        var isB2b = order.Customer is { VatNo.Length: > 0 }
+            && order.Customer.Type is CustomerType.Contractor or CustomerType.B2B;
+
         var data = new ZatcaInvoiceData(
             Id: invoiceNumber,
             Uuid: uuid,
             IssueDate: order.CreatedAt.ToString("yyyy-MM-dd"),
             IssueTime: order.CreatedAt.ToString("HH:mm:ss"),
             InvoiceTypeCode: "388",
-            Subtype: "0200000", // simplified — this system never captures buyer VAT at checkout
+            Subtype: isB2b ? "0100000" : "0200000",
             Icv: icv,
             Pih: pih,
             Supplier: new ZatcaParty(
@@ -264,23 +270,30 @@ public class ZatcaService(
                 Address: new ZatcaPartyAddress(settings?.Street, settings?.BuildingNumber, settings?.City, order.Branch?.City, settings?.PostalCode),
                 PartyIdentificationSchemeId: settings?.CrNumber is { Length: > 0 } ? "CRN" : null,
                 PartyIdentificationId: settings?.CrNumber is { Length: > 0 } ? settings.CrNumber : null),
-            Customer: null,
+            Customer: isB2b
+                ? new ZatcaParty(
+                    RegistrationName: order.Customer!.NameEn,
+                    VatId: order.Customer.VatNo!,
+                    Address: new ZatcaPartyAddress(order.Customer.Address, null, order.Customer.City, order.Customer.District, null))
+                : null,
             Items: items,
             DiscountAmount: orderLevelDiscount);
 
         var invoiceDoc = _xmlBuilder.Build(data);
         var signed = _signer.Sign(invoiceDoc, DecodeCertificateContent(identity.ProductionToken), privateKey);
 
-        // Simplified (B2C) only — this POS never captures a buyer VAT number, so every checkout
-        // invoice always reports rather than clears. See §6 of the integration guide for the
-        // standard/B2B clearance path this system doesn't yet exercise.
-        var response = await apiClient.InvoiceReportingAsync(environment, identity.ProductionToken, pcsidSecret, signed);
-        var status = response.Body.RootElement.TryGetProperty("reportingStatus", out var statusEl) ? statusEl.GetString() ?? "" : "";
-        var isAccepted = status.Contains("REPORTED", StringComparison.Ordinal);
+        // Standard (B2B) invoices go through CLEARANCE; simplified (B2C) invoices go through REPORTING.
+        var response = isB2b
+            ? await apiClient.InvoiceClearanceAsync(environment, identity.ProductionToken, pcsidSecret, signed)
+            : await apiClient.InvoiceReportingAsync(environment, identity.ProductionToken, pcsidSecret, signed);
+        var statusProperty = isB2b ? "clearanceStatus" : "reportingStatus";
+        var status = response.Body.RootElement.TryGetProperty(statusProperty, out var statusEl) ? statusEl.GetString() ?? "" : "";
+        var isAccepted = status.Contains(isB2b ? "CLEARED" : "REPORTED", StringComparison.Ordinal);
 
         var invoice = new ZatcaInvoice
         {
-            OrderId = order.Id, InvoiceNumber = invoiceNumber, Uuid = uuid, Type = Domain.Entities.ZatcaInvoiceType.Simplified,
+            OrderId = order.Id, InvoiceNumber = invoiceNumber, Uuid = uuid,
+            Type = isB2b ? Domain.Entities.ZatcaInvoiceType.Standard : Domain.Entities.ZatcaInvoiceType.Simplified,
             IssueDate = order.CreatedAt, TotalAmount = order.GrandTotal, TaxAmount = order.VatTotal,
             Icv = icv, PreviousHash = pih, InvoiceHash = signed.InvoiceHash, QrCodeBase64 = signed.QrCode, XmlContent = signed.Invoice,
             Status = isAccepted ? Domain.Entities.ZatcaInvoiceStatus.Cleared : Domain.Entities.ZatcaInvoiceStatus.Failed,

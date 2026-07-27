@@ -24,6 +24,14 @@ export type CustomerDto = {
   projectName: string | null;
   creditTermDays: number | null;
   createdAt: string;
+  // Module 7 (BRD §4.3.2): SAR-spend tier progress + Gold's dedicated manager + Platinum's priority billing.
+  loyaltyLifetimeSpend: number;
+  accountManagerUserId: number | null;
+  accountManagerName: string | null;
+  priorityBilling: boolean;
+  // Module 20 (BRD §4.3.4): birthday-bonus source + "points lapse next month" cashier alert.
+  dateOfBirth?: string | null;
+  pointsExpiringSoon?: boolean;
 };
 export type OrderLineDto = {
   productId: number;
@@ -34,6 +42,17 @@ export type OrderLineDto = {
   discountPct: number;
   vatRate: number;
   lineTotal: number;
+  // BRD §2.3 audit trail — qty/unitPrice are in the selling UOM (`uom`); stockQty is what inventory
+  // was actually deducted, in stock UOM. Legacy lines predating the UOM engine: uom="", stockQty=0.
+  uom: string;
+  stockQty: number;
+  lengthM: number | null;
+  widthM: number | null;
+  // The OrderLine's own id — Module 6 return creation references original lines by this.
+  id: number;
+  // BRD §5.2: set when the line was auto-populated from a bundle.
+  bundleId: number | null;
+  bundleName: string | null;
 };
 export type OrderPaymentDto = {
   method: string;
@@ -64,6 +83,18 @@ export type OrderDto = {
   lines: OrderLineDto[];
   payments: OrderPaymentDto[];
   fees: OrderFeeDto[];
+  // Only populated on the checkout response for a loyalty-enrolled customer (BRD §4.3.1) — null on
+  // List/Get/Void, which don't recompute a points snapshot.
+  loyaltyPointsEarned: number | null;
+  loyaltyPointsBalance: number | null;
+  loyaltyNextTierThreshold: number | null;
+  loyaltyPointsRedeemed: number | null;
+  // BRD §3.5: set when this sale had at least one delivery-flagged line — the auto-created
+  // DeliveryOrder's own id/no/stage, so POS screens can show live delivery status without a trip to
+  // the separate Delivery module.
+  deliveryOrderId: number | null;
+  deliveryOrderNo: string | null;
+  deliveryStage: string | null;
 };
 export type CashierShiftDto = {
   id: number;
@@ -94,6 +125,13 @@ export type PricingRuleDto = {
   code: string | null;
   discountType: string;
   value: number;
+  // null = applies company-wide, across every branch.
+  branchId: number | null;
+  branchName: string | null;
+  // Type="Quantity" only: the cart-line quantity threshold that auto-applies the discount, and the
+  // SKU it's scoped to (null = any product).
+  minQuantity: number | null;
+  sku: string | null;
 };
 
 export const useCustomers = (enabled = true, filters?: { type?: string; search?: string }) =>
@@ -137,6 +175,24 @@ export const usePricingRules = (enabled = true) =>
     enabled,
   });
 
+// BRD §4.3.1-§4.3.3: the checkout screen needs the current earn/redeem rate/min/max AND the tier
+// ladder (thresholds/multipliers/discounts/free-delivery) — all Settings-driven, read here instead
+// of hardcoding the BRD's own default numbers.
+export type LoyaltyConfigDto = {
+  pointsPerSarEarned: number; pointsPerSarRedeemed: number; minRedeemPoints: number; maxRedeemPctOfTotal: number;
+  silverThreshold: number; goldThreshold: number; platinumThreshold: number;
+  silverMultiplier: number; goldMultiplier: number; platinumMultiplier: number;
+  silverDiscountPct: number; goldDiscountPct: number; platinumDiscountPct: number;
+  freeDeliveryMinOrderSar: number;
+};
+export const useLoyaltyConfig = (enabled = true) =>
+  useQuery({
+    queryKey: ["pos", "loyalty-config"],
+    queryFn: () => apiGet<LoyaltyConfigDto>("/api/pos/orders/loyalty-config"),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  });
+
 export type UpsertPricingRuleRequest = {
   name: string;
   type: string;
@@ -148,6 +204,10 @@ export type UpsertPricingRuleRequest = {
   code: string | null;
   discountType: string;
   value: number;
+  // null = applies company-wide, across every branch.
+  branchId: number | null;
+  minQuantity?: number | null;
+  sku?: string | null;
 };
 export function useCreatePricingRule() {
   const queryClient = useQueryClient();
@@ -166,10 +226,21 @@ export function useUpdatePricingRuleStatus() {
   });
 }
 
-export type CartLine = { productId: number; qty: number };
+// uom: selling UOM (omitted = stock UOM). lengthM/widthM: cut-to-size dimensions — when both are set
+// on an IsCutToSize product the server computes qty = area itself and ignores the sent qty (BRD §2.3).
+// requiresDelivery (BRD §3.5): cashier flags this line for delivery instead of counter pickup.
+export type CartLine = { productId: number; qty: number; uom?: string; lengthM?: number; widthM?: number; requiresDelivery?: boolean };
 export type PaymentInput = { method: string; amount: number };
 export type ManualDiscountInput = { type: "Percentage" | "Fixed"; value: number };
 export type CustomFeeInput = { label: string; amount: number };
+// BRD §3.5: one shared address/date/driver-vehicle-preference for every delivery-flagged line in
+// the cart. zoneId (optional): the delivery fee auto-calculates from the zone's configured fee.
+export type DeliveryDetailsInput = {
+  addressType: string; contactName: string; contactMobile: string; city: string;
+  district?: string | null; street?: string | null; landmark?: string | null; instructions?: string | null;
+  promisedDate: string; promisedTime: string; timeSlot?: string | null; priority?: string | null;
+  driverId?: number | null; vehicleId?: number | null; zoneId?: number | null; weightTons?: number | null;
+};
 export type CheckoutRequest = {
   branchId: number;
   terminalId: number | null;
@@ -181,6 +252,22 @@ export type CheckoutRequest = {
   manualDiscount?: ManualDiscountInput | null;
   customFees?: CustomFeeInput[];
   notes?: string;
+  // BRD §5.2: bundles in the cart — the server expands each into constituent lines at proportional
+  // bundle prices with per-item VAT.
+  bundles?: { bundleId: number; qty: number }[];
+  // Module 11 (BRD §4.2): B2B purchase-order reference + project code for the tax invoice.
+  poReference?: string | null;
+  projectCode?: string | null;
+  // Module 10 (offline mode): idempotency key — a replay with the same id returns the original order.
+  clientRequestId?: string;
+  // Id of an Approved ApprovalRequest (Type=Discount) — required when manualDiscount exceeds the
+  // cashier's own BRD §10.1 discount-authorization ceiling (see OrdersController.Checkout).
+  discountApprovalRequestId?: number | null;
+  // Id of an Approved ApprovalRequest (Type=CreditOverride) — required when an AccountCredit payment
+  // would push a B2B customer's Outstanding balance over their CreditLimit (BRD §4.2).
+  creditOverrideApprovalRequestId?: number | null;
+  // BRD §3.5: required when any `lines` entry has requiresDelivery=true.
+  delivery?: DeliveryDetailsInput | null;
 };
 
 export function useCheckout() {
@@ -282,11 +369,42 @@ export const useCustomerStatement = (customerId: number | null) =>
     enabled: customerId !== null,
   });
 
+// Settles a Pending/Unpaid order (a converted quotation) — the register takes the payment here
+// instead of the order sitting "Awaiting payment" forever. Loyalty/AccountCredit are checkout-only
+// tenders; the server rejects them on this endpoint.
+export function usePayOrder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payments, terminalId }: { id: number; payments: PaymentInput[]; terminalId?: number | null }) =>
+      apiPut<OrderDto>(`/api/pos/orders/${id}/pay`, { payments, terminalId: terminalId ?? null }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pos", "orders"] });
+      queryClient.invalidateQueries({ queryKey: ["pos", "cashier-shifts"] });
+      queryClient.invalidateQueries({ queryKey: ["finance", "accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["zatca"] });
+    },
+  });
+}
+
 export function useVoidOrder() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
-      apiPut<OrderDto>(`/api/pos/orders/${id}/void`, { reason }),
+    mutationFn: ({ id, reason, reasonCode, authorizerEmail, authorizerPin }: {
+      id: number; reason: string; reasonCode: string; authorizerEmail?: string; authorizerPin?: string;
+    }) =>
+      apiPut<OrderDto>(`/api/pos/orders/${id}/void`, { reason, reasonCode, authorizerEmail, authorizerPin }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "orders"] }),
+  });
+}
+
+// BRD §3.6 (Module 17): void a single line — restores only that line's stock and adjusts totals.
+export function useVoidOrderLine() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, orderLineId, reason, reasonCode, authorizerEmail, authorizerPin }: {
+      id: number; orderLineId: number; reason: string; reasonCode: string; authorizerEmail?: string; authorizerPin?: string;
+    }) =>
+      apiPut<OrderDto>(`/api/pos/orders/${id}/void-line`, { orderLineId, reason, reasonCode, authorizerEmail, authorizerPin }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "orders"] }),
   });
 }
@@ -453,6 +571,9 @@ export type CreateQuotationRequest = {
   lines: CartLine[];
   validUntil?: string | null;
   notes?: string;
+  // BRD §3.4 (Module 16): both mandatory — the server rejects quotations without them.
+  projectCode: string;
+  customerReference: string;
 };
 
 export const useQuotations = (enabled = true) =>
@@ -545,7 +666,7 @@ export const useApproveApproval = () => useResolveApprovalAction("approve");
 export const useRejectApproval = () => useResolveApprovalAction("reject");
 
 function fmtSar(amount: number): string {
-  return `${amount.toLocaleString("en-US", { maximumFractionDigits: 0 })} ر.س`;
+  return `${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
 }
 function fmtTime(iso: string | null): string {
   if (!iso) return "—";
@@ -659,9 +780,10 @@ export function mapPricingRules(rows: PricingRuleDto[]): LiveTable {
       "Discount",
       "Priority",
       "Valid Until",
+      "Branch",
       "Status",
     ],
-    statusCol: 8,
+    statusCol: 9,
     ids: rows.map((r) => r.id),
     rows: rows.map((r) => [
       `PR-${String(r.id).padStart(3, "0")}`,
@@ -678,6 +800,7 @@ export function mapPricingRules(rows: PricingRuleDto[]): LiveTable {
             year: "numeric",
           })
         : "Ongoing",
+      r.branchName ?? "All Branches",
       r.status,
     ]),
   };

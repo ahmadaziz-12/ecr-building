@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -13,6 +13,12 @@ function fmtSar(n: number): string {
 export function CloseShiftDialog({ shift, onClose }: { shift: CashierShiftDto | null; onClose: () => void }) {
   const [counted, setCounted] = useState("");
   const closeShift = useCloseShift();
+
+  // A cancelled entry must not carry into the next shift's close — a stale counted figure from
+  // Terminal A silently becomes Terminal B's declared drawer count.
+  useEffect(() => {
+    setCounted("");
+  }, [shift?.id]);
 
   const variance = shift && counted ? Number(counted) - shift.expectedCash : null;
 

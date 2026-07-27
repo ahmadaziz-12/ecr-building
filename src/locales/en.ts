@@ -2499,7 +2499,7 @@ const en: Record<string, string> = {
   "HR Activity Logs": "HR Activity Logs",
   "HR Dashboard": "HR Dashboard",
   "HRMS": "HRMS",
-  "Inventory & Stock": "Inventory & Stock",
+  "Warehouse Stock": "Warehouse Stock",
   "Invoices & Tax Compliance": "Invoices & Tax Compliance",
   "Leave Management": "Leave Management",
   "Loyalty Program": "Loyalty Program",

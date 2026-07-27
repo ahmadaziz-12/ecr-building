@@ -18,7 +18,6 @@ import {
   PackageCheck,
   Receipt,
   Wallet,
-  Percent,
   ShieldCheck,
   Wrench,
 } from "lucide-react";
@@ -30,7 +29,10 @@ export type FieldType = "text" | "number" | "select" | "textarea" | "tags" | "to
 // use `options` as-is — pass per-open dynamic {value,label} options via Field.lineItemColumns
 // overrides (see FlowDialog's `fieldOverrides` prop) when the choices depend on which record a row
 // action was opened from (e.g. Receive PO's outstanding lines).
-export type LineItemColumnType = "product" | "branch" | "select" | "number" | "text" | "date";
+// "uom" renders the purchasing unit for the row's chosen product (its stock UOM plus any configured
+// conversions, e.g. Pallet/Ton) — requires a "product"-type column elsewhere on the same row; picking
+// a UOM re-suggests the unit cost scaled by that UOM's factor (same convention as the POS cart).
+export type LineItemColumnType = "product" | "branch" | "select" | "number" | "text" | "date" | "uom";
 export type LineItemColumn = {
   key: string;
   label: string;
@@ -51,6 +53,10 @@ export type Field = {
   type: FieldType;
   placeholder?: string;
   options?: string[];
+  /** Pull this select's options live inside FlowDialog (branches → nameEn, terminals → code,
+   *  categories → nameEn, users → name, roles → name). Any static `options` are kept as leading
+   *  entries, so restrict them to special placeholders like "Unassigned" / "— None (top level) —". */
+  optionsSource?: "branches" | "terminals" | "categories" | "users" | "roles";
   hint?: string;
   required?: boolean;
   full?: boolean;
@@ -270,18 +276,7 @@ export const flows: Record<string, Flow> = {
             name: "category",
             label: "Category",
             type: "select",
-            options: [
-              "Cement",
-              "Steel",
-              "Tiles",
-              "Paint",
-              "Plumbing",
-              "Electrical",
-              "Glass",
-              "Tools",
-              "Sealants",
-              "Adhesives",
-            ],
+            optionsSource: "categories",
           },
           { name: "brand", label: "Brand", type: "text", placeholder: "e.g. Al Noor" },
         ],
@@ -297,6 +292,11 @@ export const flows: Record<string, Flow> = {
             options: ["Bag", "Piece", "Box", "Bundle", "m²", "m", "Can", "Roll"],
           },
           { name: "sellUoms", label: "Selling UOMs", type: "tags", placeholder: "Bag, Pallet(50)" },
+          {
+            name: "uomConversions", label: "UOM Conversions", type: "text", full: true,
+            placeholder: "Pallet=50; Ton=20  (1 unit = N stock UOM)",
+          },
+          { name: "cutToSize", label: "Cut-to-size (dimension entry at POS)", type: "toggle" },
           { name: "weight", label: "Weight (kg)", type: "number" },
           { name: "returnable", label: "Returnable", type: "toggle" },
         ],
@@ -337,18 +337,7 @@ export const flows: Record<string, Flow> = {
             name: "category",
             label: "Category",
             type: "select",
-            options: [
-              "Cement",
-              "Steel",
-              "Tiles",
-              "Paint",
-              "Plumbing",
-              "Electrical",
-              "Glass",
-              "Tools",
-              "Sealants",
-              "Adhesives",
-            ],
+            optionsSource: "categories",
           },
           { name: "brand", label: "Brand", type: "text" },
         ],
@@ -363,6 +352,11 @@ export const flows: Record<string, Flow> = {
             options: ["Bag", "Piece", "Box", "Bundle", "m²", "m", "Can", "Roll"],
           },
           { name: "sellUoms", label: "Selling UOMs", type: "tags" },
+          {
+            name: "uomConversions", label: "UOM Conversions", type: "text", full: true,
+            placeholder: "Pallet=50; Ton=20  (1 unit = N stock UOM)",
+          },
+          { name: "cutToSize", label: "Cut-to-size (dimension entry at POS)", type: "toggle" },
           { name: "weight", label: "Weight (kg)", type: "number" },
           { name: "returnable", label: "Returnable", type: "toggle" },
         ],
@@ -402,16 +396,8 @@ export const flows: Record<string, Flow> = {
             name: "parent",
             label: "Parent Category",
             type: "select",
-            options: [
-              "— None (top level) —",
-              "Cement",
-              "Steel",
-              "Tiles",
-              "Paint",
-              "Plumbing",
-              "Electrical",
-              "Tools",
-            ],
+            options: ["— None (top level) —"],
+            optionsSource: "categories",
           },
           {
             name: "attributes",
@@ -463,16 +449,8 @@ export const flows: Record<string, Flow> = {
             name: "parent",
             label: "Parent Category",
             type: "select",
-            options: [
-              "— None (top level) —",
-              "Cement",
-              "Steel",
-              "Tiles",
-              "Paint",
-              "Plumbing",
-              "Electrical",
-              "Tools",
-            ],
+            options: ["— None (top level) —"],
+            optionsSource: "categories",
           },
           {
             name: "attributes",
@@ -556,7 +534,7 @@ export const flows: Record<string, Flow> = {
             name: "approver",
             label: "Approver",
             type: "select",
-            options: ["Faisal Al-Otaibi", "Khalid Al-Shehri", "Abdullah Al-Rashid"],
+            optionsSource: "users",
           },
           { name: "attachEvidence", label: "Attach evidence document", type: "toggle" },
         ],
@@ -575,7 +553,7 @@ export const flows: Record<string, Flow> = {
         fields: [
           { name: "code", label: "Code", type: "text", placeholder: "WH-RUH-02", required: true },
           { name: "name", label: "Name", type: "text", placeholder: "Riyadh Overflow Yard", required: true, full: true },
-          { name: "branch", label: "Branch", type: "select", options: ["Riyadh Main", "Jeddah"], required: true },
+          { name: "branch", label: "Branch", type: "select", optionsSource: "branches", required: true },
           {
             name: "type", label: "Type", type: "select", required: true,
             options: ["MainYard", "Distribution", "ColdStorage", "Overflow"],
@@ -881,11 +859,14 @@ export const flows: Record<string, Flow> = {
               { key: "sku", label: "Item", type: "product" },
               { key: "branch", label: "Branch", type: "branch" },
               { key: "qty", label: "Qty", type: "number", placeholder: "0" },
+              // Order in whatever unit the supplier actually invoices — a Pallet of cement, a Ton of
+              // rebar, a m² of glass — not forced into the stock unit; receiving converts automatically.
+              { key: "uom", label: "Unit", type: "uom" },
               { key: "unitCost", label: "Unit Cost (ر.س)", type: "number", placeholder: "0.00" },
               { key: "batchNo", label: "Batch (optional)", type: "text" },
               { key: "expiryDate", label: "Expiry (optional)", type: "date" },
             ],
-            hint: "Select multiple branches on one row to send the same qty/cost to each — or add a separate row for a different quantity per branch.",
+            hint: "Select multiple branches on one row to send the same qty/cost to each — or add a separate row for a different quantity per branch. Pick a unit once an item is selected; Qty is in that unit.",
           },
           { name: "shipping", label: "Shipping Cost (ر.س)", type: "number" },
           {
@@ -903,7 +884,7 @@ export const flows: Record<string, Flow> = {
             name: "approver",
             label: "Approver",
             type: "select",
-            options: ["Procurement Manager", "Finance Manager", "General Manager"],
+            optionsSource: "users",
           },
         ],
       },
@@ -1103,7 +1084,7 @@ export const flows: Record<string, Flow> = {
             name: "branch",
             label: "Branch",
             type: "select",
-            options: ["Riyadh Main", "Jeddah", "Dammam", "Makkah", "Madinah"],
+            optionsSource: "branches",
             required: true,
           },
           {
@@ -1116,7 +1097,8 @@ export const flows: Record<string, Flow> = {
             name: "operator",
             label: "Default Cashier",
             type: "select",
-            options: ["Unassigned", "Ahmed Al-Harbi", "Fahad Al-Qahtani", "Sara Al-Otaibi"],
+            options: ["Unassigned"],
+            optionsSource: "users",
           },
           { name: "offline", label: "Enable offline mode", type: "toggle" },
         ],
@@ -1154,7 +1136,7 @@ export const flows: Record<string, Flow> = {
             name: "terminal",
             label: "Attach to Terminal",
             type: "select",
-            options: ["POS-01", "POS-02", "POS-03", "POS-04", "POS-05"],
+            optionsSource: "terminals",
           },
           {
             name: "connection",
@@ -1191,14 +1173,8 @@ export const flows: Record<string, Flow> = {
           { name: "name", label: "Full Name", type: "text", required: true },
           { name: "email", label: "Email", type: "text", placeholder: "name@ecr-building.local", required: true },
           { name: "password", label: "Temporary Password", type: "text", placeholder: "Passw0rd!", required: true },
-          {
-            name: "role", label: "Role", type: "select", required: true,
-            options: ["Owner", "Admin", "Branch Manager", "Cashier", "Warehouse Staff", "Delivery Driver", "HR Officer", "Accountant"],
-          },
-          {
-            name: "branch", label: "Branch", type: "select",
-            options: ["All Branches", "Riyadh Main Yard", "Jeddah Industrial Branch"],
-          },
+          { name: "role", label: "Role", type: "select", required: true, optionsSource: "roles" },
+          { name: "branch", label: "Branch", type: "select", options: ["All Branches"], optionsSource: "branches" },
         ],
       },
     ],
@@ -1214,14 +1190,8 @@ export const flows: Record<string, Flow> = {
         name: "Account",
         fields: [
           { name: "name", label: "Full Name", type: "text", required: true },
-          {
-            name: "role", label: "Role", type: "select", required: true,
-            options: ["Owner", "Admin", "Branch Manager", "Cashier", "Warehouse Staff", "Delivery Driver", "HR Officer", "Accountant"],
-          },
-          {
-            name: "branch", label: "Branch", type: "select",
-            options: ["All Branches", "Riyadh Main Yard", "Jeddah Industrial Branch"],
-          },
+          { name: "role", label: "Role", type: "select", required: true, optionsSource: "roles" },
+          { name: "branch", label: "Branch", type: "select", options: ["All Branches"], optionsSource: "branches" },
           { name: "status", label: "Status", type: "select", options: ["Active", "Suspended", "Inactive"] },
         ],
       },
@@ -1240,6 +1210,10 @@ export const flows: Record<string, Flow> = {
           { name: "name", label: "Role Name", type: "text", required: true },
           { name: "description", label: "Description", type: "textarea", full: true },
           { name: "approvalCap", label: "Approval Cap (SAR)", type: "number", placeholder: "999999 for unlimited" },
+          {
+            name: "posTier", label: "POS Authorization Tier", type: "select",
+            options: ["None (no POS authorization)", "Cashier", "Senior Cashier", "Supervisor", "Store Manager", "System Admin"],
+          },
         ],
       },
       {
@@ -1272,6 +1246,10 @@ export const flows: Record<string, Flow> = {
           { name: "name", label: "Role Name", type: "text", required: true },
           { name: "description", label: "Description", type: "textarea", full: true },
           { name: "approvalCap", label: "Approval Cap (SAR)", type: "number", placeholder: "999999 for unlimited" },
+          {
+            name: "posTier", label: "POS Authorization Tier", type: "select",
+            options: ["None (no POS authorization)", "Cashier", "Senior Cashier", "Supervisor", "Store Manager", "System Admin"],
+          },
         ],
       },
       {
@@ -1336,7 +1314,7 @@ export const flows: Record<string, Flow> = {
           { name: "name", label: "Display Name", type: "text", placeholder: "Front Counter 6" },
           {
             name: "branch", label: "Branch", type: "select",
-            options: ["Riyadh Main Yard", "Jeddah Industrial Branch"], required: true,
+            optionsSource: "branches", required: true,
           },
           {
             name: "type", label: "Terminal Type", type: "select",
@@ -1346,7 +1324,8 @@ export const flows: Record<string, Flow> = {
             name: "operator",
             label: "Default Cashier",
             type: "select",
-            options: ["Unassigned", "Ahmed Al-Harbi", "Fahad Al-Qahtani", "Sara Al-Otaibi"],
+            options: ["Unassigned"],
+            optionsSource: "users",
           },
           { name: "offline", label: "Enable offline mode", type: "toggle" },
         ],
@@ -1401,6 +1380,7 @@ export const flows: Record<string, Flow> = {
               "Refund & Return",
               "Credit & Payment",
               "Inventory Movement",
+              "POS",
               "Approvals",
               "Compliance",
             ],
@@ -1457,7 +1437,7 @@ export const flows: Record<string, Flow> = {
             name: "approver",
             label: "Approver (if any)",
             type: "select",
-            options: ["Store Manager", "Finance Manager", "Regional Manager"],
+            optionsSource: "users",
           },
           { name: "active", label: "Activate on save", type: "toggle" },
           { name: "notes", label: "Description", type: "textarea", full: true },
@@ -1478,7 +1458,7 @@ export const flows: Record<string, Flow> = {
           { name: "name", label: "Rule Name", type: "text", placeholder: "Contractor discount ceiling", required: true },
           {
             name: "domain", label: "Domain", type: "select",
-            options: ["Pricing & Discount", "Refund & Return", "Credit & Payment", "Inventory Movement", "Approvals", "Compliance"],
+            options: ["Pricing & Discount", "Refund & Return", "Credit & Payment", "Inventory Movement", "POS", "Approvals", "Compliance"],
           },
           { name: "priority", label: "Priority", type: "select", options: ["Low", "Normal", "High", "Critical"] },
         ],
@@ -1500,7 +1480,7 @@ export const flows: Record<string, Flow> = {
             name: "action", label: "Then (action)", type: "select",
             options: ["Require Approval", "Block", "Warn & Log", "Auto-Apply Discount", "Notify Manager"],
           },
-          { name: "approver", label: "Approver (if any)", type: "select", options: ["Store Manager", "Finance Manager", "Regional Manager"] },
+          { name: "approver", label: "Approver (if any)", type: "select", optionsSource: "users" },
           { name: "active", label: "Active", type: "toggle" },
           { name: "notes", label: "Description", type: "textarea", full: true },
         ],
@@ -1578,7 +1558,7 @@ export const flows: Record<string, Flow> = {
         name: "Ticket",
         fields: [
           { name: "deviceOrModule", label: "Device / Module", type: "text", placeholder: "POS-03 Receipt Printer", required: true },
-          { name: "branch", label: "Branch", type: "select", options: ["All Branches", "Riyadh Main Yard", "Jeddah Industrial Branch"] },
+          { name: "branch", label: "Branch", type: "select", options: ["All Branches"], optionsSource: "branches" },
           { name: "severity", label: "Severity", type: "select", options: ["Info", "Warning", "Critical"], default: "Warning" },
           { name: "owner", label: "Assigned To", type: "text", placeholder: "IT Support", required: true },
           { name: "slaHours", label: "SLA (hours)", type: "number", placeholder: "24" },
@@ -1614,7 +1594,7 @@ export const flows: Record<string, Flow> = {
             name: "branch",
             label: "Branch",
             type: "select",
-            options: ["Riyadh Main", "Jeddah", "Dammam", "Makkah", "Madinah"],
+            optionsSource: "branches",
             required: true,
           },
           {
@@ -1655,70 +1635,9 @@ export const flows: Record<string, Flow> = {
     ],
   },
 
-  "Create Pricing Rule": {
-    key: "create-pricing-rule",
-    title: "Create Pricing Rule",
-    subtitle: "Trade tier, quantity discount, fee or coupon — goes live once approved",
-    icon: Percent,
-    steps: [
-      {
-        name: "Rule",
-        fields: [
-          {
-            name: "name",
-            label: "Rule Name",
-            type: "text",
-            placeholder: "e.g. Contractor Trade Price",
-            required: true,
-          },
-          {
-            name: "type",
-            label: "Type",
-            type: "select",
-            options: ["Trade Tier", "Quantity", "Fee", "Coupon", "Bundle", "Promo"],
-            required: true,
-          },
-          {
-            name: "scope",
-            label: "Scope",
-            type: "text",
-            placeholder: "e.g. Contractor customers, SKU: CEM-OPC-50KG",
-            required: true,
-          },
-          {
-            name: "condition",
-            label: "Condition",
-            type: "text",
-            placeholder: "e.g. >= 50 bags, Any",
-          },
-          {
-            name: "action",
-            label: "Action",
-            type: "text",
-            placeholder: "e.g. -8%, +10% fee, 150 ر.س off",
-            required: true,
-          },
-          { name: "priority", label: "Priority", type: "number", placeholder: "10" },
-          { name: "validUntil", label: "Valid Until", type: "date" },
-        ],
-      },
-      {
-        name: "Coupon (if Type = Coupon)",
-        desc: "Only needed for Type = Coupon — this is what a cashier types at checkout to redeem it.",
-        fields: [
-          { name: "code", label: "Coupon Code", type: "text", placeholder: "e.g. RAM26" },
-          {
-            name: "discountType",
-            label: "Discount Type",
-            type: "select",
-            options: ["Percentage", "Fixed"],
-            default: "Percentage",
-          },
-          { name: "value", label: "Discount Value", type: "number", placeholder: "10" },
-        ],
-      },
-    ],
-  },
+  // "Create Pricing Rule" is handled by the bespoke CreatePricingRuleDialog (see ModulePage.tsx),
+  // not this generic flow — Trade Tier/Quantity/Coupon rules need structured, type-specific fields
+  // a free-text Condition/Action pair can't drive.
 
   "New Return": {
     key: "new-return",
@@ -1780,16 +1699,31 @@ export const flows: Record<string, Flow> = {
     icon: PackageCheck,
     steps: [
       {
-        name: "Branch",
-        desc: "Non-damaged items are added back to this branch's own shelf stock.",
+        name: "Refund",
+        desc: "Non-damaged items restock to the branch's own shelf stock. Original splits the cashback proportionally across the original payment methods (BRD §3.2.4).",
         fields: [
           {
             name: "branch",
             label: "Restock To Branch",
             type: "select",
-            options: ["Riyadh Main Yard", "Jeddah Industrial Branch"],
+            optionsSource: "branches",
             required: true,
           },
+          {
+            name: "refundMethod",
+            label: "Refund Method",
+            type: "select",
+            options: ["Original", "Cash", "StoreCredit", "AccountCredit"],
+            default: "Original",
+          },
+        ],
+      },
+      {
+        name: "Dual Authorization",
+        desc: "Cash refunds above the configured threshold (Returns & Refunds → Return Policy) need a second supervisor confirming with their own PIN — leave blank otherwise.",
+        fields: [
+          { name: "secondAuthEmail", label: "Second Supervisor Email", type: "text", placeholder: "supervisor@…" },
+          { name: "secondAuthPin", label: "Second Supervisor PIN", type: "text", placeholder: "••••••" },
         ],
       },
     ],
@@ -1841,6 +1775,7 @@ export const flows: Record<string, Flow> = {
           },
           { name: "effectiveFrom", label: "Effective From", type: "date" },
           { name: "glAccount", label: "GL Account Code", type: "text", placeholder: "e.g. 24010" },
+          { name: "branch", label: "Branch", type: "select", options: ["All Branches"], optionsSource: "branches" },
         ],
       },
     ],
@@ -1862,6 +1797,7 @@ export const flows: Record<string, Flow> = {
           { name: "appliesTo", label: "Applies To", type: "text", required: true },
           { name: "effectiveFrom", label: "Effective From", type: "date" },
           { name: "glAccount", label: "GL Account Code", type: "text" },
+          { name: "branch", label: "Branch", type: "select", options: ["All Branches"], optionsSource: "branches" },
         ],
       },
     ],

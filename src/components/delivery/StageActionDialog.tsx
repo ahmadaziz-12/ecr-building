@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { useDeliveryStore, type DeliveryOrder, type Stage, allowedNext } from "@/lib/delivery/store";
 import { useHrStore, driverAvailable } from "@/lib/hr/store";
+import { useAuth } from "@/lib/api/auth";
 
 export function StageActionDialog({
   order,
@@ -28,10 +29,13 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
   const [saving, setSaving] = useState(false);
 
   const moveStage = useDeliveryStore((s) => s.moveStage);
+  const reserveStock = useDeliveryStore((s) => s.reserveStock);
   const updateOrder = useDeliveryStore((s) => s.updateOrder);
   const drivers = useDeliveryStore((s) => s.drivers);
   const vehicles = useDeliveryStore((s) => s.vehicles);
   const employees = useHrStore((s) => s.employees);
+  const { hasAccess } = useAuth();
+  const canMoveDirectly = hasAccess("Delivery", "Full");
 
   const next = useMemo(() => allowedNext(order.stage), [order.stage]);
   const driverEmp = employees.find((e) => e.id === driverEmpId);
@@ -54,8 +58,14 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
       }
       updateOrder(order.id, { driverEmpId, driverName: driverEmp ? `${driverEmp.firstName} ${driverEmp.lastName}` : undefined, vehicleId });
     }
-    if (target === "Loading") {
-      updateOrder(order.id, { stockReserved: true });
+    if (target === "Loading" && !order.stockReserved) {
+      setSaving(true);
+      const reserved = await reserveStock(order.id);
+      if (!reserved.ok) {
+        setSaving(false);
+        toast.error(reserved.error ?? "Could not reserve stock.");
+        return;
+      }
     }
     if (target === "Ready to Dispatch") {
       const lines = order.lines.map((l) => ({ ...l, loadedQty: linesLoaded[l.sku] ?? l.deliveryQty }));
@@ -87,6 +97,11 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
       toast.error(res.error ?? "Could not move stage.");
       return;
     }
+    if (!res.applied) {
+      toast.info(`Request to move ${order.id} → ${target} sent for approval.`);
+      onClose();
+      return;
+    }
     toast.success(`${order.id} → ${target}`);
     // Update driver / vehicle statuses
     if (target === "Dispatched" && order.driverEmpId) {
@@ -107,6 +122,11 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
           <DialogTitle>{order.id} · move to next stage</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
+          {!canMoveDirectly && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              You don't have direct move authority — this will be sent as a request for a Delivery supervisor to approve.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-3 rounded-lg border border-black/5 bg-canvas p-3 text-xs">
             <div><span className="text-muted-foreground">Current:</span> <strong>{order.stage}</strong></div>
             <div><span className="text-muted-foreground">Customer:</span> <strong>{order.customer}</strong></div>
@@ -209,7 +229,9 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
 
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button onClick={submit} disabled={!target || saving} className="bg-brand text-brand-foreground hover:bg-brand/90">{saving ? "Saving…" : "Confirm"}</Button>
+            <Button onClick={submit} disabled={!target || saving} className="bg-brand text-brand-foreground hover:bg-brand/90">
+              {saving ? "Saving…" : canMoveDirectly ? "Confirm" : "Send Request"}
+            </Button>
           </div>
         </div>
       </DialogContent>

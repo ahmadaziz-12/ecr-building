@@ -4,14 +4,20 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Pill } from "@/components/buildpos/sections";
 import { Input } from "@/components/ui/input";
 import { statusTone } from "./shared";
-import { useStockLevels } from "@/lib/api/inventory";
+import { useBranchStockLevels } from "@/lib/api/inventory";
+import { useAuth } from "@/lib/api/auth";
 
+// Branch-scoped, not warehouse-scoped: BranchStockLevel is the sellable pool checkout actually
+// deducts from (CatalogController's totalAvailable). Querying StockLevels (warehouse bin/batch
+// tracking) here used to show the cashier a completely different, often much lower, number.
 export function StockEnquiryDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const { data: stockLevels } = useStockLevels(open);
+  const { user } = useAuth();
+  const { data: stockLevels } = useBranchStockLevels(open);
   const [search, setSearch] = useState("");
 
+  const branchLevels = (stockLevels ?? []).filter((s) => user?.branchId == null || s.branchId === user.branchId);
   const matches = search.trim().length > 0
-    ? (stockLevels ?? []).filter((s) => s.sku.toLowerCase().includes(search.toLowerCase()) || s.productName.toLowerCase().includes(search.toLowerCase()))
+    ? branchLevels.filter((s) => s.sku.toLowerCase().includes(search.toLowerCase()) || s.productName.toLowerCase().includes(search.toLowerCase()))
     : [];
 
   return (
@@ -24,10 +30,10 @@ export function StockEnquiryDialog({ open, onOpenChange }: { open: boolean; onOp
         </div>
         <div className="max-h-80 overflow-y-auto rounded-lg border border-black/5">
           {matches.map((s) => (
-            <div key={`${s.productId}-${s.warehouseId}`} className="flex items-center justify-between border-b border-black/5 px-3 py-2 text-sm last:border-0">
+            <div key={`${s.productId}-${s.branchId}`} className="flex items-center justify-between border-b border-black/5 px-3 py-2 text-sm last:border-0">
               <div>
                 <p className="font-medium">{s.productName}</p>
-                <p className="text-xs text-muted-foreground">{s.sku} · {s.warehouseName}</p>
+                <p className="text-xs text-muted-foreground">{s.sku} · {s.branchName}</p>
               </div>
               <div className="text-right">
                 <p className="font-semibold text-foreground">{s.available} available</p>

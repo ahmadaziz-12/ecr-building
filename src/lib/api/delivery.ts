@@ -31,6 +31,11 @@ export type ApiVehicle = {
   currentLoad: number; status: string; deviceStatus: string;
 };
 export type ApiZone = { id: number; name: string; city: string; distanceKm: number; fee: number };
+export type ApiDeliveryApproval = {
+  id: number; deliveryOrderId: number; deliveryNo: string; requestedByName: string; approverName: string | null;
+  fromStage: string; toStage: string; reason: string; status: string; createdAt: string; resolvedAt: string | null;
+};
+export type ApiTransitionResponse = { applied: boolean; order: ApiDeliveryOrder; pendingApproval: ApiDeliveryApproval | null };
 
 const STAGE_TO_FRONTEND: Record<string, Stage> = {
   Pending: "Pending", Assigned: "Assigned", Loading: "Loading", ReadyToDispatch: "Ready to Dispatch",
@@ -78,7 +83,7 @@ export function mapApiOrder(o: ApiDeliveryOrder): DeliveryOrder {
       contactMobile: o.contactMobile, city: o.city, district: o.district ?? "", street: o.street ?? "",
       landmark: o.landmark ?? undefined, instructions: o.instructions ?? undefined,
     },
-    promisedDate: o.promisedDate, promisedTime: o.promisedTime, timeSlot: o.timeSlot ?? undefined,
+    promisedDate: o.promisedDate.slice(0, 10), promisedTime: o.promisedTime, timeSlot: o.timeSlot ?? undefined,
     priority: o.priority as Priority,
     driverEmpId: o.driverId ? `EMP-${o.driverId}` : undefined, driverName: o.driverName ?? undefined,
     vehicleId: o.vehicleRegistration ?? undefined, vehicleType: undefined, vehicleCapacity: undefined,
@@ -99,7 +104,7 @@ export function mapApiOrder(o: ApiDeliveryOrder): DeliveryOrder {
 export function mapApiDriver(d: ApiDriver): Driver {
   return {
     empId: `EMP-${d.id}`, name: d.name, branch: d.branchName, mobile: d.mobile, license: d.license,
-    licenseExpiry: d.licenseExpiry, vehicleId: d.vehicleId ? String(d.vehicleId) : undefined,
+    licenseExpiry: d.licenseExpiry.slice(0, 10), vehicleId: d.vehicleId ? String(d.vehicleId) : undefined,
     status: DRIVER_STATUS_TO_FRONTEND[d.status] ?? "Available", deliveriesToday: d.deliveriesToday,
     _backendId: d.id,
   } as Driver & { _backendId: number };
@@ -111,6 +116,19 @@ export function mapApiVehicle(v: ApiVehicle): Vehicle {
     capacityTons: v.capacityTons, currentLoad: v.currentLoad, status: VEHICLE_STATUS_TO_FRONTEND[v.status] ?? "Available",
     deviceStatus: v.deviceStatus as Vehicle["deviceStatus"], _backendId: v.id,
   } as Vehicle & { _backendId: number };
+}
+
+export type DeliveryApproval = {
+  id: number; deliveryOrderId: number; deliveryNo: string; requestedByName: string; approverName?: string;
+  fromStage: Stage; toStage: Stage; reason: string; status: "Pending" | "Approved" | "Rejected"; createdAt: number; resolvedAt?: number;
+};
+export function mapApiApproval(a: ApiDeliveryApproval): DeliveryApproval {
+  return {
+    id: a.id, deliveryOrderId: a.deliveryOrderId, deliveryNo: a.deliveryNo, requestedByName: a.requestedByName,
+    approverName: a.approverName ?? undefined, fromStage: STAGE_TO_FRONTEND[a.fromStage] ?? "Pending",
+    toStage: STAGE_TO_FRONTEND[a.toStage] ?? "Pending", reason: a.reason, status: a.status as DeliveryApproval["status"],
+    createdAt: new Date(a.createdAt).getTime(), resolvedAt: a.resolvedAt ? new Date(a.resolvedAt).getTime() : undefined,
+  };
 }
 
 export function mapApiZone(z: ApiZone): Zone {
@@ -145,10 +163,18 @@ export async function apiCreateDeliveryOrder(body: CreateDeliveryOrderRequest) {
   return apiPost<ApiDeliveryOrder>("/api/delivery/orders", body);
 }
 export async function apiTransitionDelivery(backendId: number, body: Record<string, unknown>) {
-  return apiPut<ApiDeliveryOrder>(`/api/delivery/orders/${backendId}/transition`, body);
+  return apiPut<ApiTransitionResponse>(`/api/delivery/orders/${backendId}/transition`, body);
 }
 export async function apiReserveStock(backendId: number) {
   return apiPut<ApiDeliveryOrder>(`/api/delivery/orders/${backendId}/reserve-stock`);
+}
+export const useDeliveryApprovalsApi = (enabled = true) =>
+  useQuery({ queryKey: ["delivery", "approvals"], queryFn: () => apiGet<ApiDeliveryApproval[]>("/api/delivery/orders/approvals"), enabled });
+export async function apiApproveDeliveryMove(approvalId: number) {
+  return apiPut<ApiTransitionResponse>(`/api/delivery/orders/approvals/${approvalId}/approve`);
+}
+export async function apiRejectDeliveryMove(approvalId: number) {
+  return apiPut<ApiDeliveryApproval>(`/api/delivery/orders/approvals/${approvalId}/reject`);
 }
 export async function apiCreateZone(body: { name: string; city: string; distanceKm: number; fee: number }) {
   return apiPost<ApiZone>("/api/delivery/zones", body);
