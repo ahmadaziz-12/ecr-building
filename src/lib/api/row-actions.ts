@@ -3,6 +3,9 @@ import { toast } from "sonner";
 import type { Field } from "@/lib/buildpos/flows";
 import { formatUomConversions, parseUomConversions } from "@/lib/buildpos/uom";
 import {
+  resolveParentCategory,
+  resolveProductCategoryId,
+  splitProductCategory,
   useCategories,
   useProducts,
   useSetCategoryStatus,
@@ -55,7 +58,7 @@ import {
   useUpdateExpenseStatus,
   useUpdateTaxCode,
 } from "./finance";
-import { usePricingRules, useUpdatePricingRuleStatus } from "./pos";
+import { usePricingRules, useUpdatePricingRuleStatus, useDeletePricingRule, type PricingRuleDto } from "./pos";
 import { useSubmitZatcaInvoice, useZatcaInvoices } from "./zatca";
 import { useInsightsReports, useSetReportStatus, useInsightsBi, useRetryBiFeed, useUpdateKpiTarget } from "./insights";
 import {
@@ -136,6 +139,7 @@ export function useRowActions(
     fieldOverrides?: Record<string, Partial<Field>>,
   ) => void,
   openKioskPairing?: (terminalId: number) => void,
+  openPricingRuleEditor?: (rule: PricingRuleDto) => void,
 ): (id: number | undefined, row: (string | number)[], statusText: string) => RowAction[] {
   const navigate = useNavigate();
 
@@ -198,6 +202,7 @@ export function useRowActions(
 
   const { data: pricingRules } = usePricingRules(pathname === "/finance/pricing");
   const updatePricingRuleStatus = useUpdatePricingRuleStatus();
+  const deletePricingRule = useDeletePricingRule();
 
   const { data: customerReturns } = useReturns(pathname === "/finance/returns");
   const approveReturn = useApproveReturn();
@@ -316,7 +321,7 @@ export function useRowActions(
                   barcode: product.barcode ?? "",
                   nameEn: product.nameEn,
                   nameAr: product.nameAr ?? "",
-                  category: product.categoryName,
+                  ...splitProductCategory(categories, product.categoryId),
                   brand: product.brand ?? "",
                   stockUom: product.stockUom,
                   sellUoms: product.sellUoms.join(", "),
@@ -338,10 +343,9 @@ export function useRowActions(
                 async (values) => {
                   if (!values.sku || !values.nameEn)
                     throw new Error("SKU and Name (English) are required.");
-                  const category = categories?.find(
-                    (c) => c.nameEn.toLowerCase() === (values.category ?? "").toLowerCase(),
-                  );
-                  const categoryId = category?.id ?? product.categoryId;
+                  const categoryId =
+                    resolveProductCategoryId(categories, values.category ?? "", values.subcategory) ??
+                    product.categoryId;
                   const vatRate =
                     values.vat === "Exempt" ? 0 : values.vat?.startsWith("0%") ? 0 : 15;
                   await updateProduct.mutateAsync({
@@ -419,7 +423,7 @@ export function useRowActions(
                   code: category.code,
                   nameEn: category.nameEn,
                   nameAr: category.nameAr ?? "",
-                  parent: category.parentName ?? "— None (top level) —",
+                  parent: category.parentName ?? "— This is a Main Category —",
                   attributes: category.attributes.join(", "),
                   returnRule: category.returnRule,
                   defaultUom: category.defaultUom,
@@ -430,15 +434,11 @@ export function useRowActions(
                   if (!values.code || !values.nameEn)
                     throw new Error("Code and Name (English) are required.");
                   const parentName =
-                    values.parent && values.parent !== "— None (top level) —"
+                    values.parent && values.parent !== "— This is a Main Category —"
                       ? values.parent
                       : null;
                   const parent = parentName
-                    ? categories?.find(
-                        (c) =>
-                          c.nameEn.toLowerCase() === parentName.toLowerCase() &&
-                          c.id !== category.id,
-                      )
+                    ? resolveParentCategory(categories, parentName, category.id)
                     : undefined;
                   const vatRate =
                     values.vat === "Exempt" ? 0 : values.vat?.startsWith("0%") ? 0 : 15;
@@ -968,7 +968,12 @@ export function useRowActions(
       case "/finance/pricing": {
         const rule = pricingRules?.find((r) => r.id === id);
         if (!rule) return [];
-        const actions: RowAction[] = [];
+        const actions: RowAction[] = [
+          {
+            label: "Edit",
+            onClick: () => openPricingRuleEditor?.(rule),
+          },
+        ];
         if (rule.status === "PendingApproval") {
           actions.push({
             label: "Approve",
@@ -997,6 +1002,15 @@ export function useRowActions(
             ),
           });
         }
+        actions.push({
+          label: "Delete",
+          onClick: confirmed(
+            `Delete pricing rule "${rule.name}"? This can't be undone.`,
+            () => deletePricingRule.mutateAsync(rule.id),
+            "Rule deleted",
+          ),
+          tone: "critical",
+        });
         return actions;
       }
 

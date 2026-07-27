@@ -279,7 +279,7 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
   if (field.type === "select") {
     return (
       <select className={base} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Select…</option>
+        <option value="">{field.placeholder ?? "Select…"}</option>
         {field.options?.map((o) => (
           <option key={o} value={o}>
             {o}
@@ -395,13 +395,15 @@ export function FlowDialog({
   }, [steps]);
   const { data: liveBranches } = useBranches(open && optionsSources.has("branches"));
   const { data: liveTerminals } = useTerminals(open && optionsSources.has("terminals"));
-  const { data: liveCategories } = useCategories(open && optionsSources.has("categories"));
+  const { data: liveCategories } = useCategories(
+    open && (optionsSources.has("topCategories") || optionsSources.has("subcategories")),
+  );
   const { data: liveUsers } = useUsers(open && optionsSources.has("users"));
   const { data: liveRoles } = useRoles(open && optionsSources.has("roles"));
-  const liveOptions: Record<NonNullable<Field["optionsSource"]>, string[] | undefined> = {
+  const liveOptions: Record<Exclude<NonNullable<Field["optionsSource"]>, "subcategories">, string[] | undefined> = {
     branches: liveBranches?.map((b) => b.nameEn),
     terminals: liveTerminals?.map((t) => t.code),
-    categories: liveCategories?.map((c) => c.nameEn),
+    topCategories: liveCategories?.filter((c) => c.parentId == null).map((c) => c.nameEn),
     users: liveUsers?.map((u) => u.name),
     roles: liveRoles?.map((r) => r.name),
   };
@@ -409,9 +411,24 @@ export function FlowDialog({
   function resolveField(f: Field): Field {
     const override = fieldOverrides?.[f.name];
     const merged = override ? { ...f, ...override } : f;
+    if (merged.optionsSource === "subcategories") {
+      // Narrowed live by whichever top-level category is currently picked in the sibling
+      // `dependsOn` field — e.g. picking "Electric" lists only Electric's own subcategories.
+      const parentName = merged.dependsOn ? values[merged.dependsOn] : undefined;
+      const parent = parentName
+        ? liveCategories?.find((c) => c.parentId == null && c.nameEn.toLowerCase() === parentName.toLowerCase())
+        : undefined;
+      const children = parent ? (liveCategories?.filter((c) => c.parentId === parent.id).map((c) => c.nameEn) ?? []) : [];
+      const placeholder = !parentName
+        ? "Pick a category first"
+        : children.length === 0
+          ? `No subcategories for "${parentName}" — leave blank`
+          : merged.placeholder;
+      return { ...merged, options: [...(merged.options ?? []), ...children], placeholder };
+    }
     if (!merged.optionsSource) return merged;
     // Static options on an optionsSource field are special leading entries ("Unassigned",
-    // "— None (top level) —"); the real choices come from the live list.
+    // "— This is a Main Category —"); the real choices come from the live list.
     return { ...merged, options: [...(merged.options ?? []), ...(liveOptions[merged.optionsSource] ?? [])] };
   }
 
@@ -631,7 +648,18 @@ export function FlowDialog({
                           <FieldControl
                             field={f}
                             value={values[f.name] ?? f.default ?? ""}
-                            onChange={(v) => setValues((s) => ({ ...s, [f.name]: v }))}
+                            onChange={(v) =>
+                              setValues((s) => {
+                                const next = { ...s, [f.name]: v };
+                                // A field this one narrows (e.g. Subcategory depends on Category)
+                                // may now hold a stale pick — clear it instead of silently keeping
+                                // a choice that no longer belongs under the new value.
+                                for (const other of current?.fields ?? []) {
+                                  if (other.dependsOn === f.name) next[other.name] = "";
+                                }
+                                return next;
+                              })
+                            }
                           />
                         )}
                         {f.hint && <p className="mt-1 text-[11px] text-muted-foreground">{f.hint}</p>}

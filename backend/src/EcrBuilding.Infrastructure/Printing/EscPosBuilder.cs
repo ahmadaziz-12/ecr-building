@@ -74,7 +74,12 @@ public static class EscPosBuilder
         {
             var itemName = line.Product?.NameEn ?? "Item";
             Text(itemName.Length > Width ? itemName[..Width] : itemName); Lf();
-            Row($"  {line.Qty:0.####} x SAR {line.UnitPrice:F2}", $"SAR {line.LineTotal:F2}");
+            var qtyPrice = $"  {line.Qty:0.####} x SAR {line.UnitPrice:F2}";
+            // Prints which discount (contractor/tier rate or a Quantity pricing rule threshold —
+            // whichever applied is already baked into DiscountPct) actually reduced this specific
+            // line, not just the order-wide total below.
+            if (line.DiscountPct > 0) qtyPrice += $" (-{line.DiscountPct:0.#}%)";
+            Row(qtyPrice, $"SAR {line.LineTotal:F2}");
         }
         Divider();
 

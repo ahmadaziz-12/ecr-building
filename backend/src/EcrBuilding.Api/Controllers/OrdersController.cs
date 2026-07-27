@@ -596,8 +596,12 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             // price without supervisor override — the contractor/tier % applies to plain lines only.
             // BRD §6.2 Quantity Discount: doesn't stack with the contractor/tier % either — this
             // line gets whichever is larger, same "larger of" rule used above for contractor vs loyalty.
+            // Sku is uppercased at rule creation (PricingRulesController.Create) but a product's own
+            // Sku is stored exactly as entered in the catalog — an ordinal match would silently never
+            // fire for any product whose real SKU isn't already all-caps (e.g. catalog SKU "Net12"
+            // vs. rule SKU "NET12"), so the comparison must ignore case.
             var quantityPct = quantityRules
-                .Where(r => (r.Sku == null || r.Sku == product.Sku) && stockQty >= r.MinQuantity)
+                .Where(r => (r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase)) && stockQty >= r.MinQuantity)
                 .Select(r => r.Value).DefaultIfEmpty(0m).Max();
             var lineDiscountPct = priced.BundleId is null ? Math.Max(discountPct, quantityPct) : 0m;
             var lineTotal = Math.Round(enteredQty * unitPrice * (1 - lineDiscountPct / 100), 2);

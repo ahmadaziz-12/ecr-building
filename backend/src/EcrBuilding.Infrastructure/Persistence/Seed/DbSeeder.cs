@@ -87,6 +87,11 @@ public static class DbSeeder
             await SeedPosDataAsync(db);
         }
 
+        // Same drift class as the Ensure* calls above (SeedPosDataAsync only runs once, on a totally
+        // empty Customers table, so a database seeded before these two rules' Value/MinQuantity/Sku
+        // fields existed never receives the backfill).
+        await EnsurePricingRuleSeedValuesBackfilledAsync(db);
+
         if (!await db.Drivers.AnyAsync())
         {
             await SeedDeliveryDataAsync(db);
@@ -735,6 +740,29 @@ public static class DbSeeder
         new Setting { Category = "Pos", Group = "Loyalty", Key = "BirthdayBonusMultiplier", Value = "2", Scope = SettingScope.Global },
         new Setting { Category = "Pos", Group = "Loyalty", Key = "PointsExpiryMonths", Value = "12", Scope = SettingScope.Global },
     ];
+
+    // Same drift class as EnsureBrdRolesAsync/EnsureUomConversionsAsync — a database seeded before
+    // MinQuantity/Sku/Value were added to these two PricingRule rows is stuck at their original
+    // all-default values (Value=0, MinQuantity/Sku=null), so OrdersController/QuotationsController's
+    // rule matching silently never fires even though the grid still shows the correct-looking Action
+    // string ("-8%", "-5% list"). Only touches a row while it's still in that drifted state, so an
+    // admin who genuinely re-zeroed one of these two rules on purpose is left alone.
+    internal static async Task EnsurePricingRuleSeedValuesBackfilledAsync(AppDbContext db)
+    {
+        var cementDeal = await db.PricingRules.FirstOrDefaultAsync(r => r.Name == "Cement Pallet Deal" && r.Type == "Quantity");
+        if (cementDeal is not null && (cementDeal.MinQuantity is null || cementDeal.Sku is null) && cementDeal.Value == 0)
+        {
+            cementDeal.MinQuantity = 50;
+            cementDeal.Sku = "CEM-OPC-50KG";
+            cementDeal.Value = 8;
+        }
+        var contractorRate = await db.PricingRules.FirstOrDefaultAsync(r => r.Name == "Contractor Trade Price" && r.Type == "Trade Tier");
+        if (contractorRate is not null && contractorRate.Value == 0)
+        {
+            contractorRate.Value = 5;
+        }
+        await db.SaveChangesAsync();
+    }
 
     // Same drift class as EnsureBrdCategoriesAsync/EnsureUomConversionsAsync: a database seeded
     // before the loyalty economics moved from LoyaltyRules constants to Settings rows has none of

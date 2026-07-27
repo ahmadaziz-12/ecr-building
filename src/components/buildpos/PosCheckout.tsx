@@ -38,7 +38,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { productImage } from "@/lib/buildpos/product-images";
-import { useProducts, type ProductUomConversionDto } from "@/lib/api/catalog";
+import { categoryDisplayLabel, useCategories, useProducts, type CategoryDto, type ProductUomConversionDto } from "@/lib/api/catalog";
 import { areaOf, factorToStock, sellableUoms, toStockQty, unitPriceFor } from "@/lib/buildpos/uom";
 import { nextTierProgress, qualifiesForFreeDelivery, tierDiscountPct, type LoyaltyTierConfig } from "@/lib/buildpos/loyalty";
 import { useBundles, type BundleDto } from "@/lib/api/bundles";
@@ -47,7 +47,7 @@ import { useCreateQuotation } from "@/lib/api/pos";
 import { apiPost } from "@/lib/api/client";
 import { useTerminals, useBranches } from "@/lib/api/admin";
 import {
-  useCustomers, useCheckout, useHoldSale, useResumeSale, useParkedSales, useCreateCustomer, useLoyaltyConfig,
+  useCustomers, useCheckout, useHoldSale, useResumeSale, useParkedSales, useCreateCustomer, useLoyaltyConfig, usePricingRules,
   lookupCustomerByPhone, validateCoupon, type CustomerDto, type ValidateCouponResponse, type PaymentInput, type DeliveryDetailsInput,
 } from "@/lib/api/pos";
 import { useZonesApi, useDriversApi, useVehiclesApi } from "@/lib/api/delivery";
@@ -117,6 +117,9 @@ const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 
 
 export function PosCheckout() {
   const [query, setQuery] = useState("");
+  // Selected category/subcategory chip in the product browser — null means "All". Picking a
+  // parent category (e.g. "Electric") also matches every one of its subcategories' products.
+  const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [bundleCart, setBundleCart] = useState<BundleCartEntry[]>([]);
   // Module 11: optional B2B PO reference + project code, carried to the tax invoice.
@@ -173,6 +176,9 @@ export function PosCheckout() {
   const [deliveryZoneId, setDeliveryZoneId] = useState<number | null>(null);
   const [deliveryDriverId, setDeliveryDriverId] = useState<number | null>(null);
   const [deliveryVehicleId, setDeliveryVehicleId] = useState<number | null>(null);
+  // Searchable "use a saved customer's address" combobox inside the delivery panel itself, so the
+  // cashier doesn't have to scroll up to the header search to attach/change the sale's customer.
+  const [deliveryCustomerSearch, setDeliveryCustomerSearch] = useState("");
 
   const { user } = useAuth();
   const { data: terminals } = useTerminals();
@@ -181,6 +187,10 @@ export function PosCheckout() {
   const { data: deliveryZones } = useZonesApi();
   const { data: deliveryDrivers } = useDriversApi();
   const { data: deliveryVehicles } = useVehiclesApi();
+  // BRD §5.1/§6.2: Finance > Pricing's Trade Tier / Quantity rules — read here too, not just at
+  // checkout submission, so the cart total the cashier sees while building the sale already matches
+  // what OrdersController.Checkout will actually charge (see contractorDiscountPct/lineDiscountPct below).
+  const { data: pricingRules } = usePricingRules();
   const checkout = useCheckout();
   const holdSale = useHoldSale();
   const resumeSale = useResumeSale();
@@ -189,6 +199,48 @@ export function PosCheckout() {
 
   const effectiveBranchId = user?.branchId ?? selectedBranchId ?? branches?.[0]?.id ?? null;
   const { data: liveProducts } = useProducts(true, effectiveBranchId ?? undefined);
+  const { data: categories } = useCategories();
+  const topLevelCategories = useMemo(() => (categories ?? []).filter((c) => c.parentId == null), [categories]);
+  const childCategoriesOf = useMemo(() => {
+    const map = new Map<number, CategoryDto[]>();
+    for (const c of categories ?? []) {
+      if (c.parentId == null) continue;
+      const list = map.get(c.parentId) ?? [];
+      list.push(c);
+      map.set(c.parentId, list);
+    }
+    return map;
+  }, [categories]);
+  // A selected parent category (e.g. "Electric") must also match every one of its subcategories'
+  // products, not just products filed directly under it — walk the whole descendant subtree.
+  const categoryFilterIds = useMemo(() => {
+    if (categoryFilter == null) return null;
+    const ids = new Set<number>([categoryFilter]);
+    const stack = [categoryFilter];
+    while (stack.length) {
+      const id = stack.pop()!;
+      for (const child of childCategoriesOf.get(id) ?? []) {
+        if (!ids.has(child.id)) {
+          ids.add(child.id);
+          stack.push(child.id);
+        }
+      }
+    }
+    return ids;
+  }, [categoryFilter, childCategoriesOf]);
+  const categoriesById = useMemo(() => new Map((categories ?? []).map((c) => [c.id, c])), [categories]);
+  const activeCategory = categoryFilter != null ? categoriesById.get(categoryFilter) ?? null : null;
+  // Whichever top-level chip owns the active selection stays highlighted, and its children render
+  // as the subcategory row — whether the cashier picked the parent itself or one of its children.
+  const categoryFilterActiveTopId = activeCategory ? activeCategory.parentId ?? activeCategory.id : null;
+  const activeSubcategories = categoryFilterActiveTopId != null ? childCategoriesOf.get(categoryFilterActiveTopId) ?? [] : [];
+  const activeCategoryName = activeCategory?.nameEn ?? "All";
+  // Shown on each product tile so the cashier can visually confirm it's the right one when several
+  // products share a name across categories (e.g. "Pipe" under both Electric and Plumbing).
+  const categoryLabelFor = (categoryId: number) => {
+    const c = categoriesById.get(categoryId);
+    return c ? categoryDisplayLabel(c) : "";
+  };
   useEffect(() => {
     if (user?.branchId === null && selectedBranchId === null && branches?.[0]) setSelectedBranchId(branches[0].id);
   }, [user?.branchId, selectedBranchId, branches]);
@@ -204,7 +256,7 @@ export function PosCheckout() {
   const products = useMemo(
     () =>
       (liveProducts ?? []).map((p) => ({
-        productId: p.id, sku: p.sku, barcode: p.barcode, name: p.nameEn, cat: p.categoryName, uom: p.stockUom,
+        productId: p.id, sku: p.sku, barcode: p.barcode, name: p.nameEn, cat: p.categoryName, categoryId: p.categoryId, uom: p.stockUom,
         price: p.sellingPrice, vatRate: p.vatRate, stock: p.totalAvailable, tone: toneForStock(p.totalAvailable),
         conversions: p.uomConversions ?? [], isCutToSize: p.isCutToSize ?? false,
       })),
@@ -213,15 +265,19 @@ export function PosCheckout() {
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return [];
+    // Browsing a category needs no typed text at all; typing with no category picked still searches
+    // every product as before. Neither one active means the idle scanning state (nothing shown).
+    if (!q && categoryFilterIds == null) return [];
     return products.filter(
       (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.sku.toLowerCase().includes(q) ||
-        p.cat.toLowerCase().includes(q) ||
-        (p.barcode?.toLowerCase().includes(q) ?? false),
+        (categoryFilterIds == null || categoryFilterIds.has(p.categoryId)) &&
+        (q === "" ||
+          p.name.toLowerCase().includes(q) ||
+          p.sku.toLowerCase().includes(q) ||
+          p.cat.toLowerCase().includes(q) ||
+          (p.barcode?.toLowerCase().includes(q) ?? false)),
     );
-  }, [query, products]);
+  }, [query, products, categoryFilterIds]);
 
   // Barcode scanners act as keyboards: they type the code then send Enter. A real POS should add
   // the item straight to the cart on that Enter, no manual click — this is what makes it "scan".
@@ -465,6 +521,7 @@ export function PosCheckout() {
     setDeliveryZoneId(null);
     setDeliveryDriverId(null);
     setDeliveryVehicleId(null);
+    setDeliveryCustomerSearch("");
   }
 
   async function handleFindCustomer() {
@@ -581,11 +638,48 @@ export function PosCheckout() {
   const { data: loyaltyConfig } = useLoyaltyConfig(Boolean(customer?.loyaltyEnrolled));
   const tierConfig: LoyaltyTierConfig | undefined = loyaltyConfig;
 
+  // BRD §5.1/§6.2, mirroring OrdersController.Checkout: Active rules scoped to this branch (or
+  // company-wide) and not past ValidUntil. Filtered here instead of trusting the API to pre-filter,
+  // since usePricingRules() returns every rule (the Finance > Pricing grid needs Expired/Pending
+  // ones too) and this cart preview must only ever apply what the server would actually apply.
+  const activePricingRules = useMemo(() => {
+    const now = Date.now();
+    return (pricingRules ?? []).filter((r) =>
+      r.status === "Active"
+      && (r.branchId == null || r.branchId === effectiveBranchId)
+      && (r.validUntil == null || new Date(r.validUntil).getTime() >= now));
+  }, [pricingRules, effectiveBranchId]);
+
   const isContractor = customer?.type === "Contractor";
+  // The best-matching active Trade Tier rule's own Value overrides the flat CONTRACTOR_DISCOUNT_PCT
+  // fallback when a manager has configured one — same branch-first-then-priority tiebreak the server
+  // uses, so a rule edited on the Pricing page is reflected here without a hardcoded number drifting.
+  const tradeTierRule = useMemo(() => {
+    if (!isContractor) return null;
+    return activePricingRules
+      .filter((r) => r.type === "Trade Tier")
+      .sort((a, b) => (Number(b.branchId != null) - Number(a.branchId != null)) || b.priority - a.priority)[0] ?? null;
+  }, [activePricingRules, isContractor]);
   // Module 7 (BRD §4.3.2): per-line discount is the LARGER of contractor trade % and the customer's
   // loyalty tier % — mirrors OrdersController.Checkout exactly, so the display total matches the charge.
   const loyaltyTierPct = tierDiscountPct(customer?.loyaltyTier, customer?.loyaltyEnrolled, tierConfig);
-  const contractorDiscountPct = Math.max(isContractor ? CONTRACTOR_DISCOUNT_PCT : 0, loyaltyTierPct);
+  const contractorDiscountPct = Math.max(isContractor ? (tradeTierRule?.value ?? CONTRACTOR_DISCOUNT_PCT) : 0, loyaltyTierPct);
+
+  // BRD §6.2 Quantity Discount: a per-SKU (or "any product" when Sku is null) quantity threshold —
+  // matched case-insensitively since a rule's Sku is uppercased at creation but a product's own Sku
+  // is stored exactly as entered in the catalog. Doesn't stack with the contractor/tier %; each line
+  // gets whichever is larger, same rule OrdersController.Checkout applies server-side.
+  const quantityRules = useMemo(
+    () => activePricingRules.filter((r) => r.type === "Quantity" && r.minQuantity != null),
+    [activePricingRules],
+  );
+  const quantityPctFor = (l: CartLine) => {
+    const stockQty = toStockQty(l.qty, l.factorToStock);
+    return quantityRules
+      .filter((r) => (!r.sku || r.sku.toUpperCase() === l.sku.toUpperCase()) && stockQty >= r.minQuantity!)
+      .reduce((max, r) => Math.max(max, r.value), 0);
+  };
+  const lineDiscountPct = (l: CartLine) => Math.max(contractorDiscountPct, quantityPctFor(l));
 
   // BRD §4.3.3: the points balance + SAR equivalent must be visible at checkout, not just inside
   // the Charge dialog — a cashier deciding whether to offer redemption needs it up front.
@@ -598,8 +692,11 @@ export function PosCheckout() {
   const bundleSavings = bundleCart.reduce((s, b) => s + Math.max(0, b.individualTotal - b.bundlePrice) * b.qty, 0);
 
   const subtotal = cart.reduce((s, l) => s + l.price * l.qty, 0) + bundleCart.reduce((s, b) => s + b.individualTotal * b.qty, 0);
-  const lineTotalsSum = cart.reduce((s, l) => s + l.price * l.qty * (1 - contractorDiscountPct / 100), 0) + bundleTaxable;
+  const lineTotalsSum = cart.reduce((s, l) => s + l.price * l.qty * (1 - lineDiscountPct(l) / 100), 0) + bundleTaxable;
   const contractorDiscount = subtotal - lineTotalsSum;
+  // True whenever at least one line's discount came entirely from a Quantity rule rather than the
+  // customer-level contractor/tier rate — drives which label the summary below shows.
+  const hasQuantityRuleDiscount = cart.some((l) => quantityPctFor(l) > contractorDiscountPct);
 
   const couponAmount = appliedCoupon?.valid
     ? appliedCoupon.discountType === "Percentage" ? (lineTotalsSum * appliedCoupon.value) / 100 : appliedCoupon.value
@@ -629,7 +726,7 @@ export function PosCheckout() {
     setDiscountApprovalId(null);
   }, [discountType, discountValue]);
 
-  const vat = cart.reduce((s, l) => s + l.price * l.qty * (1 - contractorDiscountPct / 100) * (1 - discountRatio) * (l.vatRate / 100), 0)
+  const vat = cart.reduce((s, l) => s + l.price * l.qty * (1 - lineDiscountPct(l) / 100) * (1 - discountRatio) * (l.vatRate / 100), 0)
     + bundleCart.reduce((s, b) => s + b.vatPerUnit * b.qty * (1 - discountRatio), 0);
   // Module 7 (BRD §4.3.2): Silver+ loyalty customers get delivery fees waived on orders over SAR 500
   // — must mirror the server's waiver exactly or the payment total won't match at checkout.
@@ -668,6 +765,7 @@ export function PosCheckout() {
     setDeliveryContactMobile((v) => v || customer.phone || "");
     setDeliveryCity((v) => v || customer.city || "");
     setDeliveryDistrict((v) => v || customer.district || "");
+    setDeliveryStreet((v) => v || customer.address || "");
   }, [customer]);
 
   const idle = query === "" && cart.length === 0 && bundleCart.length === 0;
@@ -684,6 +782,18 @@ export function PosCheckout() {
         || (c.phone ?? "").includes(term))
       .slice(0, 6);
   }, [phone, customers, customer]);
+
+  // Same substring match as the header search, but for the in-panel "Customer Address" combobox —
+  // lets the cashier find/attach a customer without leaving the delivery details block.
+  const deliveryCustomerSuggestions = useMemo(() => {
+    const term = deliveryCustomerSearch.trim().toLowerCase();
+    if (term.length < 2) return [];
+    return (customers ?? [])
+      .filter((c) => c.nameEn.toLowerCase().includes(term)
+        || (c.nameAr ?? "").toLowerCase().includes(term)
+        || (c.phone ?? "").includes(term))
+      .slice(0, 6);
+  }, [deliveryCustomerSearch, customers]);
 
   async function handleCharge(payments: PaymentInput[]) {
     if (!effectiveBranchId) throw new Error("No branch selected.");
@@ -984,14 +1094,65 @@ export function PosCheckout() {
           </div>
         )}
 
-        {/* Results appear UNDER the scanner only when searching */}
-        {query !== "" && (
+        {/* Category browser: pick a category to list its products (and every subcategory's), with
+            or without typed search text — same chip row the results panel below reacts to. */}
+        {topLevelCategories.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => setCategoryFilter(null)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                categoryFilter == null ? "bg-brand text-brand-foreground" : "bg-black/5 text-muted-foreground hover:bg-brand/10 hover:text-brand"
+              }`}
+            >
+              All Categories
+            </button>
+            {topLevelCategories.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setCategoryFilter(c.id)}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                  categoryFilterActiveTopId === c.id ? "bg-brand text-brand-foreground" : "bg-black/5 text-muted-foreground hover:bg-brand/10 hover:text-brand"
+                }`}
+              >
+                {c.nameEn}
+              </button>
+            ))}
+          </div>
+        )}
+        {activeSubcategories.length > 0 && (
+          <div className="-mt-1 flex flex-wrap gap-1.5 pl-2">
+            {activeSubcategories.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setCategoryFilter(c.id)}
+                className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
+                  categoryFilter === c.id
+                    ? "border-brand bg-brand/10 text-brand"
+                    : "border-black/10 text-muted-foreground hover:border-brand/40 hover:text-brand"
+                }`}
+              >
+                {c.nameEn}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Results appear UNDER the scanner when searching or browsing a category */}
+        {(query !== "" || categoryFilter != null) && (
           <div className="pos-slide-up rounded-2xl border border-black/5 bg-white p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
             <div className="mb-2 flex items-center justify-between px-1">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {shown.length} match{shown.length === 1 ? "" : "es"} for "{query}"
+                {query !== ""
+                  ? `${shown.length} match${shown.length === 1 ? "" : "es"} for "${query}"`
+                  : `${shown.length} product${shown.length === 1 ? "" : "s"} in ${activeCategoryName}`}
               </p>
-              <button onClick={() => setQuery("")} className="text-[11px] font-medium text-brand hover:underline">
+              <button
+                onClick={() => {
+                  setQuery("");
+                  setCategoryFilter(null);
+                }}
+                className="text-[11px] font-medium text-brand hover:underline"
+              >
                 Clear
               </button>
             </div>
@@ -1029,6 +1190,9 @@ export function PosCheckout() {
                       </div>
                       <p className="mt-2 text-sm font-medium text-foreground line-clamp-2">{p.name}</p>
                       <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{p.sku}</p>
+                      {categoryLabelFor(p.categoryId) && (
+                        <p className="mt-0.5 truncate text-[10px] text-brand">{categoryLabelFor(p.categoryId)}</p>
+                      )}
                       <p className="mt-2 font-display text-lg font-bold text-foreground">
                         {p.price.toFixed(2)} <span className="text-xs font-medium text-muted-foreground">ر.س / {p.uom}</span>
                       </p>
@@ -1446,6 +1610,50 @@ export function PosCheckout() {
                 <option value="Urgent">Urgent priority</option>
                 <option value="Low">Low priority</option>
               </select>
+              {deliveryAddressType === "Customer Address" && (
+                <div className="relative col-span-2">
+                  {customer ? (
+                    <div className="flex h-8 items-center justify-between gap-1.5 rounded-md border border-black/10 bg-white px-2">
+                      <span className="truncate text-[11px] font-medium text-foreground">
+                        {customer.nameEn}{customer.phone ? ` · ${customer.phone}` : ""}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => { setCustomer(null); setDeliveryCustomerSearch(""); }}
+                        className="flex-none text-[10px] font-medium text-brand hover:underline"
+                      >
+                        Change
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        value={deliveryCustomerSearch}
+                        onChange={(e) => setDeliveryCustomerSearch(e.target.value)}
+                        placeholder="Search saved customer by name or phone…"
+                        className="h-8 w-full rounded-md border border-black/10 bg-white px-2 outline-none focus:border-brand"
+                      />
+                      {deliveryCustomerSuggestions.length > 0 && (
+                        <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-black/10 bg-white shadow-sm">
+                          {deliveryCustomerSuggestions.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => { setCustomer(c); setDeliveryCustomerSearch(""); }}
+                              className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[11px] hover:bg-brand/5"
+                            >
+                              <span className="truncate font-medium text-foreground">{c.nameEn}</span>
+                              <span className="ml-2 flex-none text-[10px] text-muted-foreground">
+                                {c.type}{c.phone ? ` · ${c.phone}` : ""}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               <input
                 value={deliveryContactName} onChange={(e) => setDeliveryContactName(e.target.value)} placeholder="Contact name *"
                 className="h-8 rounded-md border border-black/10 bg-white px-2 outline-none focus:border-brand"
@@ -1621,10 +1829,13 @@ export function PosCheckout() {
             <span>Subtotal ({cart.length} lines)</span>
             <span>{money(subtotal)}</span>
           </div>
-          {contractorDiscountPct > 0 && (
+          {contractorDiscount > 0 && (
             <div className="flex justify-between text-muted-foreground">
               <span className="flex items-center gap-1">
-                <Percent className="h-3.5 w-3.5" /> Contractor discount {contractorDiscountPct}%
+                <Percent className="h-3.5 w-3.5" />
+                {contractorDiscountPct > 0 && !hasQuantityRuleDiscount
+                  ? `Contractor discount ${contractorDiscountPct}%`
+                  : "Pricing rule discount"}
               </span>
               <span>-{money(contractorDiscount)}</span>
             </div>

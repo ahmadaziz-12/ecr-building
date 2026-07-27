@@ -39,7 +39,7 @@ export function useRowDetails(
   pathname: string,
   selectedId?: number,
 ): (id: number | undefined, row: (string | number)[]) => RowDetail | null {
-  const detailPaths = ["/stock/inventory", "/stock/stocks", "/admin/categories"];
+  const detailPaths = ["/stock/inventory", "/stock/stocks", "/admin/categories", "/finance/pricing"];
   const { data: products } = useProducts(detailPaths.includes(pathname));
   const { data: categories } = useCategories(
     pathname === "/admin/categories" || pathname === "/stock/inventory",
@@ -564,11 +564,28 @@ export function useRowDetails(
       case "/finance/pricing": {
         const rule = pricingRules?.find((r) => r.id === id);
         if (!rule) return null;
+        const discountValue = rule.discountType === "Fixed" ? `${rule.value} ر.س` : `${rule.value}%`;
+        const skuProductName = rule.sku ? products?.find((p) => p.sku.toUpperCase() === rule.sku?.toUpperCase())?.nameEn : undefined;
+        // Plain-language restatement of what the rule actually does at checkout — same wording the
+        // create/edit dialog previews live, so a manager reviewing an approval doesn't have to decode
+        // the Scope/Condition/Action strings by hand.
+        const whatItDoes =
+          rule.type === "Trade Tier"
+            ? `Every Contractor customer automatically gets ${discountValue} off${rule.branchName ? ` at ${rule.branchName}` : ", at every branch"}.`
+            : rule.type === "Quantity"
+              ? `Once a cart line reaches ${rule.minQuantity ?? "—"}+ units of ${rule.sku ? `${rule.sku}${skuProductName ? ` (${skuProductName})` : ""}` : "any product"}, that line automatically gets ${discountValue} off.`
+              : rule.type === "Coupon"
+                ? `A customer who enters code "${rule.code ?? "—"}" at checkout gets ${discountValue} off their order.`
+                : `Recorded for staff reference only — this rule type isn't auto-applied at checkout or on quotations.`;
         return {
           title: rule.name,
           subtitle: `PR-${String(rule.id).padStart(3, "0")} · ${rule.type}`,
           statusText: rule.status,
           sections: [
+            {
+              heading: "What it does",
+              fields: [{ label: "Effect", value: whatItDoes }],
+            },
             {
               heading: "Rule",
               fields: [
@@ -580,22 +597,23 @@ export function useRowDetails(
                   label: "Valid Until",
                   value: rule.validUntil ? fmtDate(rule.validUntil) : "Ongoing",
                 },
+                { label: "Branch", value: rule.branchName ?? "All Branches" },
               ],
             },
-            ...(rule.type === "Coupon"
+            ...(rule.type === "Trade Tier" || rule.type === "Quantity" || rule.type === "Coupon"
               ? [
                   {
-                    heading: "Coupon",
+                    heading: "Discount",
                     fields: [
-                      { label: "Code", value: rule.code ?? "—" },
+                      ...(rule.type === "Coupon" ? [{ label: "Code", value: rule.code ?? "—" }] : []),
                       { label: "Discount Type", value: rule.discountType },
-                      {
-                        label: "Value",
-                        value:
-                          rule.discountType === "Percentage"
-                            ? `${rule.value}%`
-                            : `${rule.value} ر.س`,
-                      },
+                      { label: "Value", value: discountValue },
+                      ...(rule.type === "Quantity"
+                        ? [
+                            { label: "Minimum Quantity", value: rule.minQuantity != null ? String(rule.minQuantity) : "—" },
+                            { label: "Applies To", value: rule.sku ? `${rule.sku}${skuProductName ? ` — ${skuProductName}` : ""}` : "Any product" },
+                          ]
+                        : []),
                     ],
                   },
                 ]

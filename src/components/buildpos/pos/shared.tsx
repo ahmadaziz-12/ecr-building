@@ -10,7 +10,7 @@ import type { Severity } from "@/lib/buildpos/format";
 
 export function statusTone(status: string): Severity {
   const k = status.toLowerCase();
-  if (/critical|failed|overdue|rejected|expired|offline|breach|voided|needsreview|needs review/.test(k)) return "critical";
+  if (/critical|failed|overdue|rejected|expired|offline|breach|voided|cancelled|needsreview|needs review/.test(k)) return "critical";
   if (/warn|pending|queued|idle|needs|quarantine|delayed|degraded|draft|low|expiring|monitor|partial|awaiting/.test(k)) return "warning";
   if (/active|healthy|cleared|completed|reconciled|received|resolved|delivered|submitted|valid|ok|compliant|paid|accepted|approved|closed/.test(k)) return "success";
   if (/dispatched|posted|open|in transit|in progress|assigned|sent|converted/.test(k)) return "info";
