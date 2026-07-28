@@ -23,7 +23,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/inventory/stock-counts")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/stock/stock-count", PermissionAction.View)]
 public class StockCountsController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements) : ControllerBase
 {
     private int CurrentUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -65,7 +65,7 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
     // The "automatic" half of automatic stock counting: pick a warehouse + scope, get a fully
     // populated, pre-valued count sheet back. Nothing is typed by hand.
     [HttpPost("generate")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/stock-count", PermissionAction.Edit)]
     public async Task<ActionResult<StockCountDto>> Generate(GenerateStockCountRequest request, CancellationToken ct)
     {
         var warehouse = await db.Warehouses.Include(w => w.Branch).FirstOrDefaultAsync(w => w.Id == request.WarehouseId, ct);
@@ -161,7 +161,7 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
     // Bulk-save counted quantities. Sent as the counter works (autosave) rather than only at the
     // end, so a closed tab doesn't lose an hour of counting.
     [HttpPut("{id:int}/lines")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/stock-count", PermissionAction.Edit)]
     public async Task<ActionResult<StockCountDto>> SaveLines(int id, SaveStockCountLinesRequest request, CancellationToken ct)
     {
         var count = await BaseQuery().FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -194,7 +194,7 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
     // Barcode/SKU entry: each scan bumps the counted quantity for that line, so a counter can walk
     // the aisle with a scanner instead of hunting for rows in a table.
     [HttpPost("{id:int}/scan")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/stock-count", PermissionAction.Edit)]
     public async Task<ActionResult<StockCountDto>> Scan(int id, ScanStockCountRequest request, CancellationToken ct)
     {
         var count = await BaseQuery().FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -219,7 +219,7 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
     // Accept the system quantity for every line nobody has counted yet — the usual way a partial
     // cycle count is closed out ("everything I didn't get to was fine").
     [HttpPost("{id:int}/auto-fill")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/stock-count", PermissionAction.Edit)]
     public async Task<ActionResult<StockCountDto>> AutoFill(int id, CancellationToken ct)
     {
         var count = await BaseQuery().FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -245,7 +245,7 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
     // approve moving the stock" is what makes the variance auditable — the counter and the approver
     // are different people, and nothing touches stock until Post.
     [HttpPost("{id:int}/submit")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/stock-count", PermissionAction.Edit)]
     public async Task<ActionResult<StockCountDto>> Submit(int id, CancellationToken ct)
     {
         var count = await BaseQuery().FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -272,7 +272,7 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
     // single-warehouse-per-branch invariant StockAdjustmentsController establishes) and records one
     // StockAdjustment plus one StockMovement per non-zero variance.
     [HttpPost("{id:int}/post")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/stock-count", PermissionAction.Edit)]
     public async Task<ActionResult<StockCountDto>> Post(int id, PostStockCountRequest request, CancellationToken ct)
     {
         var count = await BaseQuery().FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -367,7 +367,7 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
     }
 
     [HttpPost("{id:int}/cancel")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/stock-count", PermissionAction.Edit)]
     public async Task<ActionResult<StockCountDto>> Cancel(int id, CancellationToken ct)
     {
         var count = await BaseQuery().FirstOrDefaultAsync(c => c.Id == id, ct);

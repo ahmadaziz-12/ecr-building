@@ -1,4 +1,5 @@
-using EcrBuilding.Api.Authorization;
+using System.Security.Claims;
+using EcrBuilding.Application.Auth;
 using EcrBuilding.Domain.Enums;
 using EcrBuilding.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
@@ -12,23 +13,38 @@ public record AuditLogDto(int Id, DateTime CreatedAt, string Module, string Even
 [ApiController]
 [Route("api/admin/audit-logs")]
 [Authorize]
-public class AuditLogsController(AppDbContext db) : ControllerBase
+public class AuditLogsController(AppDbContext db, IPermissionResolver permissionResolver) : ControllerBase
 {
-    // Scoped requests (e.g. Delivery's own Activity Logs page) only need View on that module —
-    // full, unfiltered log access (admin.audit-logs) requires Admin. Module strings that don't
-    // map to a real ModuleArea (e.g. "zatca") fall back to requiring Admin.
+    // AuditLog.Module is a free-text category (the string passed to IAuditService.LogAsync, e.g.
+    // "delivery", "pos", "finance") — not a page key. A scoped request (e.g. Delivery's own Activity
+    // Logs page passing module=delivery) only needs View on that category's representative page;
+    // the unfiltered admin.audit-logs list (no module, or an unrecognized one) requires View on the
+    // Audit Logs page itself.
+    private static readonly Dictionary<string, string> CategoryPage = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["pos"] = "/operate/pos-checkout",
+        ["orders"] = "/operate/orders",
+        ["inventory"] = "/stock/inventory",
+        ["finance"] = "/finance/expenses",
+        ["delivery"] = "/delivery/orders",
+        ["hr"] = "/hrms/employees",
+        ["insights"] = "/insights/reports",
+        ["suppliers"] = "/suppliers/suppliers",
+        ["network"] = "/network/branches",
+        ["admin"] = "/admin/audit-logs",
+    };
+
     [HttpGet]
     public async Task<ActionResult<List<AuditLogDto>>> List([FromQuery] string? module, CancellationToken ct)
     {
-        var requiredArea = !string.IsNullOrWhiteSpace(module) && Enum.TryParse<ModuleArea>(module, ignoreCase: true, out var parsedArea)
-            ? parsedArea
-            : ModuleArea.Admin;
+        var requiredPage = !string.IsNullOrWhiteSpace(module) && CategoryPage.TryGetValue(module, out var mapped)
+            ? mapped
+            : "/admin/audit-logs";
 
-        var claim = User.FindFirst($"perm:{requiredArea}")?.Value;
-        var level = Enum.TryParse<AccessLevel>(claim, out var parsedLevel) ? parsedLevel : AccessLevel.None;
-        if (level < AccessLevel.View)
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        if (!await permissionResolver.HasAsync(userId, requiredPage, PermissionAction.View, ct))
         {
-            return StatusCode(403, new { error = $"You don't have View access to {requiredArea}." });
+            return StatusCode(403, new { error = $"You don't have View access to {requiredPage}." });
         }
 
         var query = db.AuditLogs.AsQueryable();

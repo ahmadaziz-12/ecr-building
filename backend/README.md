@@ -53,23 +53,35 @@ dotnet ef migrations add <Name> \
 
 All seeded users share the password `Passw0rd!`:
 
+The role roster is capped at exactly the BRD §10.1 ladder — Cashier, Senior Cashier, Supervisor,
+Store Manager, System Admin. A few demo users below keep their original names/emails (referenced as
+FKs by other seed data, e.g. the Jeddah warehouse contact and the Riyadh delivery driver) but are
+assigned to their nearest ladder role rather than a standalone role of their own.
+
 | Email | Role |
 |---|---|
-| owner@ecr-building.local | Owner (full access) |
-| admin@ecr-building.local | Admin |
-| manager.ruh@ecr-building.local | Branch Manager (Riyadh) |
+| admin@ecr-building.local | System Admin |
+| manager.ruh@ecr-building.local | Store Manager (Riyadh) |
 | cashier.ruh@ecr-building.local | Cashier (Riyadh) |
-| warehouse.jed@ecr-building.local | Warehouse Staff (Jeddah) |
-| driver.ruh@ecr-building.local | Delivery Driver (Riyadh) |
-| hr@ecr-building.local | HR Officer |
-| accountant@ecr-building.local | Accountant |
+| senior-cashier.ruh@ecr-building.local | Senior Cashier (Riyadh) |
+| supervisor.ruh@ecr-building.local | Supervisor (Riyadh) |
+| warehouse.jed@ecr-building.local | Supervisor (Jeddah warehouse contact) |
+| driver.ruh@ecr-building.local | Supervisor (Riyadh delivery driver) |
+| hr@ecr-building.local | Supervisor (HR contact) |
+| accountant@ecr-building.local | Supervisor (finance contact) |
 
 ## Key architectural notes
 
 - **Auth**: JWT access token (15 min) + refresh token (14 days), both set as `httpOnly` cookies by
-  `AuthController` — the frontend never touches the token directly. Module-level permissions are
-  baked into the access token as `perm:{Module}` claims and enforced per-endpoint via
-  `[RequireModule(ModuleArea, AccessLevel)]` (`Api/Authorization/RequireModuleAttribute.cs`).
+  `AuthController` — the frontend never touches the token directly. Page permissions are NOT baked
+  into the token — `[RequireModule(pageKey, PermissionAction)]`
+  (`Api/Authorization/RequireModuleAttribute.cs`) resolves the caller's effective grid per request via
+  `IPermissionResolver` (role default + any per-user `UserPermissionOverride`, cached in-process and
+  invalidated by a global `PermissionsEpoch` bump), so a role edit or a per-user "Customize
+  Permissions" override takes effect on the very next request instead of waiting for a token refresh.
+  `pageKey` is a frontend route string (e.g. `/stock/warehouses`) — see
+  `Infrastructure/Persistence/Seed/PermissionCatalog.cs`, kept in sync by hand with `AppLayout.tsx`'s
+  nav array.
 - **GL posting** (`IGlPostingService`): every money-moving action (a completed sale, an approved
   expense, a received PO, an approved return) posts a balanced double-entry journal entry. See
   `Infrastructure/Services/GlPostingService.cs` — throws if debits ≠ credits.

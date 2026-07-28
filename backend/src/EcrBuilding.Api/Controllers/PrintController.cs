@@ -14,7 +14,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/print")]
 [Authorize]
-[RequireModule(ModuleArea.Pos, AccessLevel.View)]
+[RequireModule("/operate/pos-checkout", PermissionAction.View)]
 public class PrintController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet("jobs")]
@@ -25,7 +25,7 @@ public class PrintController(AppDbContext db, IAuditService audit) : ControllerB
     }
 
     [HttpPost("receipt")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/pos-checkout", PermissionAction.Edit)]
     public async Task<ActionResult<PrintJobDto>> PrintReceipt(PrintReceiptRequest request, CancellationToken ct)
     {
         var order = await db.Orders.Include(o => o.Branch).Include(o => o.Customer).Include(o => o.Payments).Include(o => o.Fees)
@@ -48,7 +48,7 @@ public class PrintController(AppDbContext db, IAuditService audit) : ControllerB
     }
 
     [HttpPost("label")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/inventory", PermissionAction.Edit)]
     public async Task<ActionResult<PrintJobDto>> PrintLabel(PrintLabelRequest request, CancellationToken ct)
     {
         var product = await db.Products.FirstOrDefaultAsync(p => p.Id == request.ProductId, ct);
@@ -67,7 +67,7 @@ public class PrintController(AppDbContext db, IAuditService audit) : ControllerB
     }
 
     [HttpPost("test")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/pos-checkout", PermissionAction.Edit)]
     public async Task<ActionResult<PrintJobDto>> TestPrint([FromBody] TestPrintRequest request, CancellationToken ct)
     {
         var device = await db.Devices.Include(d => d.Terminal).ThenInclude(t => t!.Branch).FirstOrDefaultAsync(d => d.Id == request.DeviceId, ct);

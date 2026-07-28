@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
-import { Barcode, Check, ChevronLeft, ChevronRight, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Barcode, Check, ChevronLeft, ChevronRight, ImageOff, Loader2, Lock, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { Field, Flow, LineItemColumn } from "@/lib/buildpos/flows";
 import { useCategories, useProducts } from "@/lib/api/catalog";
 import { useBranches, useTerminals, useUsers, useRoles } from "@/lib/api/admin";
+import { useAuth } from "@/lib/api/auth";
 import { useStockLevels, useBranchStockLevels } from "@/lib/api/inventory";
 import { sellableUoms, unitPriceFor, factorToStock } from "@/lib/buildpos/uom";
+import { fileToCompressedDataUrl } from "@/lib/buildpos/image";
 import { SearchableSelect } from "@/components/buildpos/SearchableSelect";
 
 type LineItemRow = Record<string, string>;
@@ -249,9 +251,56 @@ function LineItemsField({
   );
 }
 
-function FieldControl({ field, value, onChange }: { field: Field; value: string; onChange: (v: string) => void }) {
+// Product photo picker: compresses the chosen file client-side into a base64 JPEG data URL (see
+// lib/buildpos/image.ts — there's no file-upload/blob-storage backend, Product.ImageUrl stores the
+// data URL directly) and previews it as a thumbnail. "Remove" clears the field back to no photo.
+function ImagePickerField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleFile(file: File | undefined) {
+    if (!file) return;
+    setLoading(true);
+    try {
+      onChange(await fileToCompressedDataUrl(file));
+    } catch {
+      toast.error("Could not read that image — try a different file.");
+    } finally {
+      setLoading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-lg border border-black/10 bg-canvas">
+        {value ? (
+          <img src={value} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <ImageOff className="h-5 w-5 text-muted-foreground" />
+        )}
+      </div>
+      <div className="flex gap-2">
+        <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => inputRef.current?.click()}>
+          {loading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+          {value ? "Change photo" : "Upload photo"}
+        </Button>
+        {value && (
+          <Button type="button" size="sm" variant="ghost" className="text-critical hover:text-critical" onClick={() => onChange("")}>
+            Remove
+          </Button>
+        )}
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+    </div>
+  );
+}
+
+function FieldControl({
+  field, value, onChange, disabled,
+}: { field: Field; value: string; onChange: (v: string) => void; disabled?: boolean }) {
   const base =
-    "h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15";
+    "h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15 disabled:cursor-not-allowed disabled:bg-black/[0.03] disabled:text-muted-foreground";
 
   if (field.scannable) {
     return (
@@ -263,6 +312,7 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
           placeholder={field.placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
           autoFocus
         />
       </div>
@@ -276,12 +326,13 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
         placeholder={field.placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
       />
     );
   }
   if (field.type === "select") {
     return (
-      <select className={base} value={value} onChange={(e) => onChange(e.target.value)}>
+      <select className={base} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
         <option value="">{field.placeholder ?? "Select…"}</option>
         {field.options?.map((o) => (
           <option key={o} value={o}>
@@ -296,10 +347,11 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
     return (
       <button
         type="button"
-        onClick={() => onChange(on ? "" : "on")}
+        onClick={() => !disabled && onChange(on ? "" : "on")}
+        disabled={disabled}
         className={`inline-flex h-8 w-14 items-center rounded-full border transition ${
           on ? "border-brand/40 bg-brand" : "border-black/10 bg-canvas"
-        }`}
+        } disabled:cursor-not-allowed disabled:opacity-50`}
       >
         <span
           className={`h-6 w-6 rounded-full bg-white shadow transition ${on ? "translate-x-7" : "translate-x-1"}`}
@@ -314,8 +366,12 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
         placeholder={field.placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
       />
     );
+  }
+  if (field.type === "image") {
+    return <ImagePickerField value={value} onChange={onChange} />;
   }
   return (
     <input
@@ -324,6 +380,7 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
       placeholder={field.placeholder}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
     />
   );
 }
@@ -347,6 +404,7 @@ export function FlowDialog({
    *  "lines" lineItems field's "line" column options, since those choices aren't static. */
   fieldOverrides?: Record<string, Partial<Field>>;
 }) {
+  const { user } = useAuth();
   const [step, setStep] = useState(0);
   const [values, setValues] = useState<Record<string, string>>({});
   const [done, setDone] = useState(false);
@@ -464,7 +522,9 @@ export function FlowDialog({
         .map((rawF) => {
           const f = resolveField(rawF);
           const raw = values[f.name];
-          const val = f.type === "lineItems" ? summarizeLineItems(f, raw ?? "") : raw;
+          // An image field's value is a giant base64 data URL — never worth dumping into the
+          // review step as text.
+          const val = f.type === "lineItems" ? summarizeLineItems(f, raw ?? "") : f.type === "image" ? (raw ? "Photo attached" : "") : raw;
           return { label: f.label, val };
         })
         .filter((x) => x.val && x.val.trim().length > 0),
@@ -695,11 +755,13 @@ export function FlowDialog({
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   {current?.fields.map((rawF) => {
                     const f = resolveField(rawF);
+                    const locked = f.requiresCeiling ? !(user?.posCeilings[f.requiresCeiling] ?? false) : false;
                     return (
                       <div key={f.name} className={f.full ? "md:col-span-2" : ""}>
                         <label className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                           {f.label}
                           {f.required && <span className="text-critical">*</span>}
+                          {locked && <Lock className="h-3 w-3 text-muted-foreground" aria-label="Locked by permission" />}
                         </label>
                         {f.type === "lineItems" ? (
                           <LineItemsField
@@ -713,6 +775,7 @@ export function FlowDialog({
                             field={f}
                             value={values[f.name] ?? f.default ?? ""}
                             onChange={(v) => handleFieldChange(f.name, v)}
+                            disabled={locked}
                           />
                         )}
                         {f.hint && <p className="mt-1 text-[11px] text-muted-foreground">{f.hint}</p>}

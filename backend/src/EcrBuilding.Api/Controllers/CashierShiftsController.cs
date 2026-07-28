@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
+using EcrBuilding.Application.Auth;
 using EcrBuilding.Application.Pos;
 using EcrBuilding.Domain.Entities;
 using EcrBuilding.Domain.Enums;
@@ -14,7 +15,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/pos/cashier-shifts")]
 [Authorize]
-[RequireModule(ModuleArea.Pos, AccessLevel.View)]
+[RequireModule("/operate/cashier-shift", PermissionAction.View)]
 public class CashierShiftsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     // CashSales is only frozen onto the row at close time; while a shift is OPEN the stored value
@@ -45,7 +46,7 @@ public class CashierShiftsController(AppDbContext db, IAuditService audit) : Con
     }
 
     [HttpPost("open")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/cashier-shift", PermissionAction.Create)]
     public async Task<ActionResult<CashierShiftDto>> Open(OpenShiftRequest request, CancellationToken ct)
     {
         var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -69,24 +70,43 @@ public class CashierShiftsController(AppDbContext db, IAuditService audit) : Con
     }
 
     [HttpPut("{id:int}/cash-movement")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/cashier-shift", PermissionAction.Edit)]
     public async Task<ActionResult<CashierShiftDto>> CashMovement(int id, [FromQuery] string direction, CashMovementRequest request, CancellationToken ct)
     {
         var shift = await db.CashierShifts.Include(s => s.Terminal).Include(s => s.Cashier).FirstOrDefaultAsync(s => s.Id == id, ct);
         if (shift is null) return NotFound();
         if (shift.Status != CashierShiftStatus.Open) return BadRequest(new { error = "Shift is not open." });
 
-        if (direction.Equals("in", StringComparison.OrdinalIgnoreCase)) shift.CashIn += request.Amount;
-        else shift.CashOut += request.Amount;
+        var isIn = direction.Equals("in", StringComparison.OrdinalIgnoreCase);
+        if (isIn) shift.CashIn += request.Amount; else shift.CashOut += request.Amount;
+
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        // CashIn/CashOut above stay the running totals ExpectedCash already reads — this itemizes
+        // each individual event behind them so a till reconciliation can drill into WHAT made up
+        // that total, not just the aggregate (the same gap StockMovement closed for stock counts).
+        db.CashMovements.Add(new CashMovement
+        {
+            CashierShiftId = id, Direction = isIn ? CashMovementDirection.In : CashMovementDirection.Out,
+            Amount = request.Amount, Reason = request.Reason, CreatedByUserId = userId,
+        });
 
         await db.SaveChangesAsync(ct);
-        await audit.LogAsync("pos", direction.Equals("in", StringComparison.OrdinalIgnoreCase) ? "SHIFT_CASH_IN" : "SHIFT_CASH_OUT",
+        await audit.LogAsync("pos", isIn ? "SHIFT_CASH_IN" : "SHIFT_CASH_OUT",
             id.ToString(), reason: request.Reason, cancellationToken: ct);
         return Ok(Map(shift, await LiveCashSalesAsync(shift, ct)));
     }
 
+    [HttpGet("{id:int}/movements")]
+    public async Task<ActionResult<List<CashMovementDto>>> Movements(int id, CancellationToken ct)
+    {
+        var rows = await db.CashMovements.Include(m => m.CreatedByUser).Where(m => m.CashierShiftId == id)
+            .OrderBy(m => m.CreatedAt).ToListAsync(ct);
+        return Ok(rows.Select(m => new CashMovementDto(
+            m.Id, m.Direction.ToString(), m.Amount, m.Reason, m.CreatedAt, m.CreatedByUser?.Name)).ToList());
+    }
+
     [HttpPut("{id:int}/close")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/cashier-shift", PermissionAction.Edit)]
     public async Task<ActionResult<CashierShiftDto>> Close(int id, CloseShiftRequest request, CancellationToken ct)
     {
         var shift = await db.CashierShifts.Include(s => s.Terminal).Include(s => s.Cashier).FirstOrDefaultAsync(s => s.Id == id, ct);
@@ -154,8 +174,8 @@ public class CashierShiftsController(AppDbContext db, IAuditService audit) : Con
 [ApiController]
 [Route("api/finance/pricing-rules")]
 [Authorize]
-[RequireModule(ModuleArea.Finance, AccessLevel.View)]
-public class PricingRulesController(AppDbContext db, IAuditService audit) : ControllerBase
+[RequireModule("/finance/pricing", PermissionAction.View)]
+public class PricingRulesController(AppDbContext db, IAuditService audit, IPermissionResolver permissionResolver) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<PricingRuleDto>>> List(CancellationToken ct)
@@ -165,7 +185,7 @@ public class PricingRulesController(AppDbContext db, IAuditService audit) : Cont
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/pricing", PermissionAction.Create)]
     public async Task<ActionResult<PricingRuleDto>> Create(UpsertPricingRuleRequest request, CancellationToken ct)
     {
         if (request.BranchId is not null && !await db.Branches.AnyAsync(b => b.Id == request.BranchId, ct))
@@ -175,7 +195,7 @@ public class PricingRulesController(AppDbContext db, IAuditService audit) : Cont
         var rule = new PricingRule
         {
             Name = request.Name, Type = request.Type, BranchId = request.BranchId, Scope = request.Scope, Condition = request.Condition,
-            Action = request.Action, Priority = request.Priority, ValidUntil = request.ValidUntil,
+            Action = request.Action, Priority = request.Priority, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil,
             Code = request.Code?.ToUpperInvariant(), DiscountType = Enum.Parse<RuleDiscountType>(request.DiscountType), Value = request.Value,
             MinQuantity = request.MinQuantity, Sku = request.Sku?.ToUpperInvariant(),
             // Every rule created through the UI needs a manager sign-off before it can discount a
@@ -191,7 +211,7 @@ public class PricingRulesController(AppDbContext db, IAuditService audit) : Cont
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/pricing", PermissionAction.Edit)]
     public async Task<ActionResult<PricingRuleDto>> UpdateStatus(int id, EcrBuilding.Application.Catalog.SetStatusRequest request, CancellationToken ct)
     {
         var rule = await db.PricingRules.Include(r => r.Branch).FirstOrDefaultAsync(r => r.Id == id, ct);
@@ -207,9 +227,8 @@ public class PricingRulesController(AppDbContext db, IAuditService audit) : Cont
         if (rule.Status == PricingRuleStatus.PendingApproval && newStatus == PricingRuleStatus.Active && rule.CreatedByUserId is not null)
         {
             var userId = int.Parse(User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier)!);
-            var financeClaim = User.FindFirst($"perm:{ModuleArea.Finance}")?.Value;
-            var financeLevel = Enum.TryParse<AccessLevel>(financeClaim, out var parsed) ? parsed : AccessLevel.None;
-            if (userId == rule.CreatedByUserId && financeLevel < AccessLevel.Full)
+            var canSelfApprove = await permissionResolver.HasAsync(userId, "/finance/pricing", PermissionAction.Approve, ct);
+            if (userId == rule.CreatedByUserId && !canSelfApprove)
             {
                 return BadRequest(new { error = "You cannot approve your own pricing rule — a different user must activate it." });
             }
@@ -222,7 +241,7 @@ public class PricingRulesController(AppDbContext db, IAuditService audit) : Cont
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/pricing", PermissionAction.Edit)]
     public async Task<ActionResult<PricingRuleDto>> Update(int id, UpsertPricingRuleRequest request, CancellationToken ct)
     {
         var rule = await db.PricingRules.Include(r => r.Branch).FirstOrDefaultAsync(r => r.Id == id, ct);
@@ -234,7 +253,8 @@ public class PricingRulesController(AppDbContext db, IAuditService audit) : Cont
 
         var before = new { rule.Name, rule.Scope, rule.Condition, rule.Action, rule.Value, rule.Status };
         rule.Name = request.Name; rule.Type = request.Type; rule.BranchId = request.BranchId; rule.Scope = request.Scope;
-        rule.Condition = request.Condition; rule.Action = request.Action; rule.Priority = request.Priority; rule.ValidUntil = request.ValidUntil;
+        rule.Condition = request.Condition; rule.Action = request.Action; rule.Priority = request.Priority;
+        rule.ValidFrom = request.ValidFrom; rule.ValidUntil = request.ValidUntil;
         rule.Code = request.Code?.ToUpperInvariant(); rule.DiscountType = Enum.Parse<RuleDiscountType>(request.DiscountType); rule.Value = request.Value;
         rule.MinQuantity = request.MinQuantity; rule.Sku = request.Sku?.ToUpperInvariant();
         // Editing a live rule's terms (discount %, threshold, code…) re-opens the same manager
@@ -249,7 +269,7 @@ public class PricingRulesController(AppDbContext db, IAuditService audit) : Cont
     }
 
     [HttpDelete("{id:int}")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/finance/pricing", PermissionAction.Delete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var rule = await db.PricingRules.FirstOrDefaultAsync(r => r.Id == id, ct);
@@ -265,7 +285,7 @@ public class PricingRulesController(AppDbContext db, IAuditService audit) : Cont
 
     private static PricingRuleDto Map(PricingRule r) => new(
         r.Id, r.Name, r.Type, r.Scope, r.Condition, r.Action, r.Priority, r.ValidUntil, r.Status.ToString(), r.Code, r.DiscountType.ToString(), r.Value,
-        r.BranchId, r.Branch?.NameEn, r.MinQuantity, r.Sku);
+        r.BranchId, r.Branch?.NameEn, r.MinQuantity, r.Sku, r.ValidFrom);
 }
 
 // Separate controller (no Finance-module gate) — any authenticated POS role needs to redeem a

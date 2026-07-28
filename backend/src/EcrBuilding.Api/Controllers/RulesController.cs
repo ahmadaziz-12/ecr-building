@@ -13,7 +13,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/admin/rules")]
 [Authorize]
-[RequireModule(ModuleArea.Admin, AccessLevel.View)]
+[RequireModule("/admin/rules", PermissionAction.View)]
 public class RulesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -26,7 +26,7 @@ public class RulesController(AppDbContext db, IAuditService audit) : ControllerB
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/rules", PermissionAction.Create)]
     public async Task<ActionResult<RuleDto>> Create(UpsertRuleRequest request, CancellationToken ct)
     {
         var rule = new RuleDefinition
@@ -43,7 +43,7 @@ public class RulesController(AppDbContext db, IAuditService audit) : ControllerB
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/rules", PermissionAction.Edit)]
     public async Task<ActionResult<RuleDto>> Update(int id, UpsertRuleRequest request, CancellationToken ct)
     {
         var rule = await db.RuleDefinitions.FirstOrDefaultAsync(r => r.Id == id, ct);
@@ -67,7 +67,7 @@ public class RulesController(AppDbContext db, IAuditService audit) : ControllerB
     }
 
     [HttpPost("{id:int}/test")]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/rules", PermissionAction.Edit)]
     public async Task<ActionResult<RuleTestResultDto>> Test(int id, CancellationToken ct)
     {
         var rule = await db.RuleDefinitions.FirstOrDefaultAsync(r => r.Id == id, ct);

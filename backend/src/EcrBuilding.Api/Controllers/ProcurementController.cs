@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
@@ -16,8 +17,8 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/procurement/suppliers")]
 [Authorize]
-[RequireModule(ModuleArea.Suppliers, AccessLevel.View)]
-public class SuppliersController(AppDbContext db, IAuditService audit) : ControllerBase
+[RequireModule("/suppliers/suppliers", PermissionAction.View)]
+public class SuppliersController(AppDbContext db, IAuditService audit, IGlPostingService gl) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<SupplierDto>>> List(CancellationToken ct)
@@ -27,7 +28,7 @@ public class SuppliersController(AppDbContext db, IAuditService audit) : Control
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/suppliers/suppliers", PermissionAction.Create)]
     public async Task<ActionResult<SupplierDto>> Create(UpsertSupplierRequest request, CancellationToken ct)
     {
         var supplier = new Supplier
@@ -44,7 +45,7 @@ public class SuppliersController(AppDbContext db, IAuditService audit) : Control
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/suppliers/suppliers", PermissionAction.Edit)]
     public async Task<ActionResult<SupplierDto>> Update(int id, UpsertSupplierRequest request, CancellationToken ct)
     {
         var supplier = await db.Suppliers.FirstOrDefaultAsync(s => s.Id == id, ct);
@@ -69,7 +70,7 @@ public class SuppliersController(AppDbContext db, IAuditService audit) : Control
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/suppliers/suppliers", PermissionAction.Delete)]
     public async Task<ActionResult<SupplierDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
     {
         var supplier = await db.Suppliers.FirstOrDefaultAsync(s => s.Id == id, ct);
@@ -87,7 +88,8 @@ public class SuppliersController(AppDbContext db, IAuditService audit) : Control
     {
         var poNos = await db.PurchaseOrders.Where(p => p.SupplierId == id).Select(p => p.PoNo).ToListAsync(ct);
         var rtsNos = await db.ReturnToSuppliers.Where(r => r.SupplierId == id).Select(r => r.RtsNo).ToListAsync(ct);
-        var references = poNos.Concat(rtsNos).ToList();
+        var paymentNos = await db.SupplierPayments.Where(p => p.SupplierId == id).Select(p => p.PaymentNo).ToListAsync(ct);
+        var references = poNos.Concat(rtsNos).Concat(paymentNos).ToList();
         if (references.Count == 0) return Ok(new List<SupplierLedgerLineDto>());
 
         var entries = await db.JournalEntries.Include(e => e.Lines).ThenInclude(l => l.Account)
@@ -98,6 +100,34 @@ public class SuppliersController(AppDbContext db, IAuditService audit) : Control
         return Ok(rows);
     }
 
+    // Settles what a PO receipt built up against Accounts Payable (2000) — the missing counterpart
+    // to the ledger above, which until now could only go UP (receive) or down via a credit note
+    // (RTS), never via an actual payment out. PaymentNo becomes a new reference the Ledger query
+    // above already picks up, same as a PO/RTS number.
+    [HttpPost("{id:int}/payments")]
+    [RequireModule("/suppliers/suppliers", PermissionAction.Create)]
+    public async Task<ActionResult<SupplierDto>> Pay(int id, RecordSupplierPaymentRequest request, CancellationToken ct)
+    {
+        var supplier = await db.Suppliers.FindAsync([id], ct);
+        if (supplier is null) return NotFound();
+        if (request.Amount <= 0) return BadRequest(new { error = "Payment amount must be greater than zero." });
+
+        var paymentNo = $"PAY-S{id}-{DateTime.UtcNow:yyyy}-{await db.SupplierPayments.CountAsync(p => p.SupplierId == id, ct) + 1:D4}";
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        db.SupplierPayments.Add(new SupplierPayment
+        {
+            SupplierId = id, PaymentNo = paymentNo, Amount = request.Amount, Method = request.Method,
+            ReferenceNo = request.ReferenceNo, Notes = request.Notes, CreatedByUserId = userId,
+        });
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("suppliers", "SUPPLIER_PAYMENT_RECORDED", id.ToString(), userId: userId, newValue: request, cancellationToken: ct);
+
+        await gl.PostAsync(paymentNo, $"Payment to {supplier.NameEn}",
+            [new GlLine("2000", request.Amount, 0), new GlLine("1000", 0, request.Amount)], ct);
+
+        return Ok(Map(supplier));
+    }
+
     private static SupplierDto Map(Supplier s) => new(
         s.Id, s.Code, s.NameEn, s.NameAr, s.Type, s.VatNo, s.Phone, s.Email,
         JsonSerializer.Deserialize<string[]>(s.CategoriesJson) ?? [], s.Terms, s.Currency, s.LeadTimeDays, s.Iban, s.Status.ToString());
@@ -106,7 +136,7 @@ public class SuppliersController(AppDbContext db, IAuditService audit) : Control
 [ApiController]
 [Route("api/procurement/purchase-orders")]
 [Authorize]
-[RequireModule(ModuleArea.Suppliers, AccessLevel.View)]
+[RequireModule("/finance/purchase-orders", PermissionAction.View)]
 public class PurchaseOrdersController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements, IGlPostingService gl) : ControllerBase
 {
     private IQueryable<PurchaseOrder> WithIncludes() => db.PurchaseOrders.Include(p => p.Supplier)
@@ -122,7 +152,7 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, ISto
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/finance/purchase-orders", PermissionAction.Create)]
     public async Task<ActionResult<PurchaseOrderDto>> Create(CreatePurchaseOrderRequest request, CancellationToken ct)
     {
         if (request.Lines.Count == 0) return BadRequest(new { error = "At least one PO line is required." });
@@ -191,24 +221,24 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, ISto
     }
 
     [HttpPut("{id:int}/submit")]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/finance/purchase-orders", PermissionAction.Edit)]
     public Task<ActionResult<PurchaseOrderDto>> Submit(int id, CancellationToken ct) =>
         Transition(id, PurchaseOrderStatus.Draft, PurchaseOrderStatus.PendingApproval, "PO_SUBMITTED", null, ct);
 
     [HttpPut("{id:int}/approve")]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/finance/purchase-orders", PermissionAction.Approve)]
     public Task<ActionResult<PurchaseOrderDto>> Approve(int id, ApprovePurchaseOrderRequest request, CancellationToken ct) =>
         Transition(id, PurchaseOrderStatus.PendingApproval, PurchaseOrderStatus.Sent, "PO_APPROVED",
             po => po.ApproverUserId = request.ApproverUserId ?? po.ApproverUserId, ct);
 
     [HttpPut("{id:int}/dispatch")]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/finance/purchase-orders", PermissionAction.Edit)]
     public Task<ActionResult<PurchaseOrderDto>> Dispatch(int id, DispatchPurchaseOrderRequest request, CancellationToken ct) =>
         Transition(id, PurchaseOrderStatus.Sent, PurchaseOrderStatus.InTransit, "PO_DISPATCHED",
             po => { po.Carrier = request.Carrier; po.TrackingRef = request.TrackingRef; }, ct);
 
     [HttpPut("{id:int}/cancel")]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/finance/purchase-orders", PermissionAction.Delete)]
     public async Task<ActionResult<PurchaseOrderDto>> Cancel(int id, CancellationToken ct)
     {
         var po = await WithIncludes().FirstOrDefaultAsync(p => p.Id == id, ct);
@@ -237,7 +267,7 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, ISto
     }
 
     [HttpPut("{id:int}/receive")]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/finance/purchase-orders", PermissionAction.Edit)]
     public async Task<ActionResult<PurchaseOrderDto>> Receive(int id, ReceivePurchaseOrderRequest request, CancellationToken ct)
     {
         var po = await WithIncludes().FirstOrDefaultAsync(p => p.Id == id, ct);
@@ -295,6 +325,28 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, ISto
             }
             branchLevel.OnHand += stockQty;
             movements.Add((line.ProductId, line.BranchId, stockQty));
+
+            // The branch always gets the physical goods regardless of whether a warehouse is linked
+            // (see the comment above), so a shelf-life-sensitive receipt needs its expiry tracked at
+            // the branch too — independent of the warehouse-side StockBatch bookkeeping below, which
+            // only runs when a warehouse happens to be linked.
+            var branchBatchNo = receiveLine.BatchNo ?? line.BatchNo;
+            var branchExpiryDate = receiveLine.ExpiryDate ?? line.ExpiryDate;
+            if (!string.IsNullOrWhiteSpace(branchBatchNo) && branchExpiryDate is not null)
+            {
+                var branchBatch = await db.BranchStockBatches.FirstOrDefaultAsync(
+                    b => b.ProductId == line.ProductId && b.BranchId == line.BranchId && b.BatchNo == branchBatchNo, ct);
+                if (branchBatch is null)
+                {
+                    branchBatch = new BranchStockBatch
+                    {
+                        ProductId = line.ProductId, BranchId = line.BranchId, BatchNo = branchBatchNo,
+                        ReceivedDate = DateTime.UtcNow, ExpiryDate = branchExpiryDate.Value,
+                    };
+                    db.BranchStockBatches.Add(branchBatch);
+                }
+                branchBatch.Qty += stockQty;
+            }
 
             // No warehouse linked to this line's branch — the branch's sellable stock above is already
             // credited, so there's nothing warehouse-side (bin/batch/expiry) left to track.
@@ -384,7 +436,7 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, ISto
 [ApiController]
 [Route("api/procurement/rts")]
 [Authorize]
-[RequireModule(ModuleArea.Suppliers, AccessLevel.View)]
+[RequireModule("/suppliers/rts", PermissionAction.View)]
 public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements, IGlPostingService gl) : ControllerBase
 {
     private IQueryable<ReturnToSupplier> WithIncludes() => db.ReturnToSuppliers.Include(r => r.Supplier)
@@ -399,7 +451,7 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IS
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/suppliers/rts", PermissionAction.Create)]
     public async Task<ActionResult<ReturnToSupplierDto>> Create(CreateRtsRequest request, CancellationToken ct)
     {
         if (request.Lines.Count == 0) return BadRequest(new { error = "At least one return line is required." });
@@ -448,7 +500,7 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IS
     }
 
     [HttpPut("{id:int}/dispatch")]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/suppliers/rts", PermissionAction.Edit)]
     public async Task<ActionResult<ReturnToSupplierDto>> Dispatch(int id, CancellationToken ct)
     {
         var rts = await WithIncludes().FirstOrDefaultAsync(r => r.Id == id, ct);
@@ -491,7 +543,7 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IS
     }
 
     [HttpPut("{id:int}/credit")]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/suppliers/rts", PermissionAction.Edit)]
     public async Task<ActionResult<ReturnToSupplierDto>> Credit(int id, CreditRtsRequest request, CancellationToken ct)
     {
         var rts = await WithIncludes().FirstOrDefaultAsync(r => r.Id == id, ct);
@@ -516,7 +568,7 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IS
     }
 
     [HttpPut("{id:int}/reject")]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/suppliers/rts", PermissionAction.Edit)]
     public async Task<ActionResult<ReturnToSupplierDto>> Reject(int id, CancellationToken ct)
     {
         var rts = await WithIncludes().FirstOrDefaultAsync(r => r.Id == id, ct);
@@ -565,7 +617,7 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IS
     }
 
     [HttpPut("{id:int}/cancel")]
-    [RequireModule(ModuleArea.Suppliers, AccessLevel.Edit)]
+    [RequireModule("/suppliers/rts", PermissionAction.Delete)]
     public async Task<ActionResult<ReturnToSupplierDto>> Cancel(int id, CancellationToken ct)
     {
         var rts = await WithIncludes().FirstOrDefaultAsync(r => r.Id == id, ct);

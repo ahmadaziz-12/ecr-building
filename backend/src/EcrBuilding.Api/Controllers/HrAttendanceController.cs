@@ -13,7 +13,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/hr/attendance")]
 [Authorize]
-[RequireModule(ModuleArea.Hr, AccessLevel.View)]
+[RequireModule("/hrms/attendance", PermissionAction.View)]
 public class AttendanceController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -24,7 +24,7 @@ public class AttendanceController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPost("check-in")]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/attendance", PermissionAction.Create)]
     public async Task<ActionResult<AttendanceDto>> CheckIn(CheckInRequest request, CancellationToken ct)
     {
         var employee = await db.Employees.Include(e => e.Shift).FirstOrDefaultAsync(e => e.Id == request.EmployeeId, ct);
@@ -69,7 +69,7 @@ public class AttendanceController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPost("check-out")]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/attendance", PermissionAction.Edit)]
     public async Task<ActionResult<AttendanceDto>> CheckOut(CheckOutRequest request, CancellationToken ct)
     {
         var today = DateTime.UtcNow.Date;
@@ -88,7 +88,7 @@ public class AttendanceController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}/adjust")]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/attendance", PermissionAction.Edit)]
     public async Task<ActionResult<AttendanceDto>> Adjust(int id, AdjustAttendanceRequest request, CancellationToken ct)
     {
         var record = await db.Attendances.Include(a => a.Employee).FirstOrDefaultAsync(a => a.Id == id, ct);
@@ -110,7 +110,7 @@ public class AttendanceController(AppDbContext db, IAuditService audit) : Contro
 [ApiController]
 [Route("api/hr/leaves")]
 [Authorize]
-[RequireModule(ModuleArea.Hr, AccessLevel.View)]
+[RequireModule("/hrms/leave", PermissionAction.View)]
 public class LeavesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -122,7 +122,7 @@ public class LeavesController(AppDbContext db, IAuditService audit) : Controller
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/leave", PermissionAction.Create)]
     public async Task<ActionResult<LeaveDto>> Create(CreateLeaveRequest request, CancellationToken ct)
     {
         var leave = new Leave
@@ -140,7 +140,7 @@ public class LeavesController(AppDbContext db, IAuditService audit) : Controller
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/leave", PermissionAction.Approve)]
     public async Task<ActionResult<LeaveDto>> UpdateStatus(int id, UpdateLeaveStatusRequest request, CancellationToken ct)
     {
         var leave = await db.Leaves.Include(l => l.Employee).Include(l => l.HandoverTo).Include(l => l.Approver).FirstOrDefaultAsync(l => l.Id == id, ct);
@@ -179,7 +179,7 @@ public class LeavesController(AppDbContext db, IAuditService audit) : Controller
 [ApiController]
 [Route("api/hr/documents")]
 [Authorize]
-[RequireModule(ModuleArea.Hr, AccessLevel.View)]
+[RequireModule("/hrms/documents", PermissionAction.View)]
 public class EmployeeDocsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -190,7 +190,7 @@ public class EmployeeDocsController(AppDbContext db, IAuditService audit) : Cont
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/documents", PermissionAction.Create)]
     public async Task<ActionResult<EmployeeDocDto>> Create(CreateEmployeeDocRequest request, CancellationToken ct)
     {
         var doc = new EmployeeDoc
@@ -207,7 +207,7 @@ public class EmployeeDocsController(AppDbContext db, IAuditService audit) : Cont
     }
 
     [HttpPut("{id:int}/verify")]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/documents", PermissionAction.Approve)]
     public async Task<ActionResult<EmployeeDocDto>> Verify(int id, VerifyDocRequest request, CancellationToken ct)
     {
         var doc = await db.EmployeeDocs.Include(d => d.Employee).Include(d => d.VerifiedBy).FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -229,7 +229,7 @@ public class EmployeeDocsController(AppDbContext db, IAuditService audit) : Cont
 [ApiController]
 [Route("api/hr/contracts")]
 [Authorize]
-[RequireModule(ModuleArea.Hr, AccessLevel.View)]
+[RequireModule("/hrms/documents", PermissionAction.View)]
 public class ContractsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -241,7 +241,7 @@ public class ContractsController(AppDbContext db, IAuditService audit) : Control
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/documents", PermissionAction.Create)]
     public async Task<ActionResult<ContractDto>> Create(CreateContractRequest request, CancellationToken ct)
     {
         var contract = new Contract
@@ -259,7 +259,7 @@ public class ContractsController(AppDbContext db, IAuditService audit) : Control
     }
 
     [HttpPut("{id:int}/renew")]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/documents", PermissionAction.Edit)]
     public async Task<ActionResult<ContractDto>> Renew(int id, CreateContractRequest request, CancellationToken ct)
     {
         var old = await db.Contracts.FindAsync([id], ct);

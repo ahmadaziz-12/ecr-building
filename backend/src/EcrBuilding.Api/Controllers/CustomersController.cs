@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
 using EcrBuilding.Application.Pos;
@@ -14,8 +15,8 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/pos/customers")]
 [Authorize]
-[RequireModule(ModuleArea.Orders, AccessLevel.View)]
-public class CustomersController(AppDbContext db, IAuditService audit) : ControllerBase
+[RequireModule("/operate/customers", PermissionAction.View)]
+public class CustomersController(AppDbContext db, IAuditService audit, IGlPostingService gl) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<CustomerDto>>> List([FromQuery] string? type, [FromQuery] string? search, CancellationToken ct)
@@ -60,8 +61,64 @@ public class CustomersController(AppDbContext db, IAuditService audit) : Control
             orders.Select(o => OrdersController.MapOrder(o)).ToList()));
     }
 
+    // Every event that ever moves Outstanding — checkout AccountCredit, a StoreCredit/AccountCredit
+    // return, or a direct RecordPayment below — posts to GL account 1100 (Accounts Receivable) under
+    // the order/return/payment's own reference number. Reconstructing from those postings (same
+    // pattern as SuppliersController.Ledger) means the ledger and Outstanding can never drift apart —
+    // there is only ever one source of truth, unlike the old order-only "statement" view.
+    [HttpGet("{id:int}/ledger")]
+    public async Task<ActionResult<List<CustomerLedgerLineDto>>> Ledger(int id, CancellationToken ct)
+    {
+        var orderNos = await db.Orders.Where(o => o.CustomerId == id).Select(o => o.OrderNo).ToListAsync(ct);
+        var returnNos = await db.Returns.Where(r => r.CustomerId == id).Select(r => r.ReturnNo).ToListAsync(ct);
+        var paymentNos = await db.CustomerPayments.Where(p => p.CustomerId == id).Select(p => p.PaymentNo).ToListAsync(ct);
+        var references = orderNos.Concat(returnNos).Concat(paymentNos).ToList();
+        if (references.Count == 0) return Ok(new List<CustomerLedgerLineDto>());
+
+        var entries = await db.JournalEntries.Include(e => e.Lines).ThenInclude(l => l.Account)
+            .Where(e => references.Contains(e.Reference)).OrderBy(e => e.Date).ToListAsync(ct);
+
+        var rows = entries.SelectMany(e => e.Lines.Where(l => l.Account?.Code == "1100")
+            .Select(l => new CustomerLedgerLineDto(e.Date, e.Reference, e.Description, l.Debit, l.Credit))).ToList();
+        return Ok(rows);
+    }
+
+    // A direct settlement against Outstanding that isn't tied to a sale or a return — e.g. a B2B
+    // customer wiring in against their running account. Restricted to B2B/Contractor for the same
+    // reason checkout's AccountCredit tender is: Outstanding is only ever built up for those types,
+    // so it's the only case a payment against it is meaningful.
+    [HttpPost("{id:int}/payments")]
+    [RequireModule("/operate/customers", PermissionAction.Create)]
+    public async Task<ActionResult<CustomerDto>> RecordPayment(int id, RecordCustomerPaymentRequest request, CancellationToken ct)
+    {
+        var customer = await db.Customers.FindAsync([id], ct);
+        if (customer is null) return NotFound();
+        if (customer.Type is not (CustomerType.B2B or CustomerType.Contractor))
+        {
+            return BadRequest(new { error = "Only B2B / Contractor accounts carry an outstanding balance to pay down." });
+        }
+        if (request.Amount <= 0) return BadRequest(new { error = "Payment amount must be greater than zero." });
+
+        var paymentNo = $"PAY-C{id}-{DateTime.UtcNow:yyyy}-{await db.CustomerPayments.CountAsync(p => p.CustomerId == id, ct) + 1:D4}";
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        db.CustomerPayments.Add(new CustomerPayment
+        {
+            CustomerId = id, PaymentNo = paymentNo, Amount = request.Amount, Method = request.Method,
+            ReferenceNo = request.ReferenceNo, Notes = request.Notes, CreatedByUserId = userId,
+        });
+        customer.Outstanding -= request.Amount;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("orders", "CUSTOMER_PAYMENT_RECORDED", id.ToString(), userId: userId, newValue: request, cancellationToken: ct);
+
+        await gl.PostAsync(paymentNo, $"Payment received from {customer.NameEn}",
+            [new GlLine("1000", request.Amount, 0), new GlLine("1100", 0, request.Amount)], ct);
+
+        var expiryMonths = (await db.GetLoyaltyConfigAsync(ct)).PointsExpiryMonths;
+        return Ok(Map(customer, expiryMonths));
+    }
+
     [HttpPost]
-    [RequireModule(ModuleArea.Orders, AccessLevel.Edit)]
+    [RequireModule("/operate/customers", PermissionAction.Create)]
     public async Task<ActionResult<CustomerDto>> Create(UpsertCustomerRequest request, CancellationToken ct)
     {
         var customer = new Customer
@@ -71,7 +128,7 @@ public class CustomersController(AppDbContext db, IAuditService audit) : Control
             City = request.City, District = request.District, Address = request.Address, LoyaltyEnrolled = request.LoyaltyEnrolled,
             ProjectName = request.ProjectName, CreditTermDays = request.CreditTermDays,
             AccountManagerUserId = request.AccountManagerUserId, PriorityBilling = request.PriorityBilling,
-            DateOfBirth = request.DateOfBirth,
+            DateOfBirth = request.DateOfBirth, PriceListType = Enum.Parse<PriceListType>(request.PriceListType),
         };
         db.Customers.Add(customer);
         await db.SaveChangesAsync(ct);
@@ -81,7 +138,7 @@ public class CustomersController(AppDbContext db, IAuditService audit) : Control
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Orders, AccessLevel.Edit)]
+    [RequireModule("/operate/customers", PermissionAction.Edit)]
     public async Task<ActionResult<CustomerDto>> Update(int id, UpsertCustomerRequest request, CancellationToken ct)
     {
         var customer = await db.Customers.FindAsync([id], ct);
@@ -92,7 +149,7 @@ public class CustomersController(AppDbContext db, IAuditService audit) : Control
         customer.City = request.City; customer.District = request.District; customer.Address = request.Address;
         customer.LoyaltyEnrolled = request.LoyaltyEnrolled; customer.ProjectName = request.ProjectName; customer.CreditTermDays = request.CreditTermDays;
         customer.AccountManagerUserId = request.AccountManagerUserId; customer.PriorityBilling = request.PriorityBilling;
-        customer.DateOfBirth = request.DateOfBirth;
+        customer.DateOfBirth = request.DateOfBirth; customer.PriceListType = Enum.Parse<PriceListType>(request.PriceListType);
 
         await db.SaveChangesAsync(ct);
         await audit.LogAsync("orders", "CUSTOMER_UPDATED", id.ToString(), newValue: request, cancellationToken: ct);
@@ -101,7 +158,7 @@ public class CustomersController(AppDbContext db, IAuditService audit) : Control
     }
 
     [HttpPut("{id:int}/archive")]
-    [RequireModule(ModuleArea.Orders, AccessLevel.Edit)]
+    [RequireModule("/operate/customers", PermissionAction.Delete)]
     public async Task<ActionResult<CustomerDto>> Archive(int id, CancellationToken ct)
     {
         var customer = await db.Customers.FindAsync([id], ct);
@@ -119,5 +176,5 @@ public class CustomersController(AppDbContext db, IAuditService audit) : Control
         c.City, c.District, c.Address, c.LoyaltyEnrolled, c.LoyaltyPoints, c.LoyaltyLifetimePoints, c.LoyaltyTier.ToString(),
         c.Status.ToString(), c.LastPurchaseAt, c.ProjectName, c.CreditTermDays, c.CreatedAt,
         c.LoyaltyLifetimeSpend, c.AccountManagerUserId, c.AccountManager?.Name, c.PriorityBilling,
-        c.DateOfBirth, LoyaltyRules.PointsExpiringSoon(c.LastPurchaseAt, DateTime.UtcNow, expiryMonths));
+        c.DateOfBirth, LoyaltyRules.PointsExpiringSoon(c.LastPurchaseAt, DateTime.UtcNow, expiryMonths), c.PriceListType.ToString());
 }

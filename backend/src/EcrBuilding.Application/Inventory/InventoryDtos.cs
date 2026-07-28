@@ -13,8 +13,11 @@ public record CreateWarehouseBinRequest(string BinCode, string Label, decimal Ca
 public record StockLevelDto(int ProductId, string Sku, string ProductName, string CategoryName, int WarehouseId, string WarehouseName, decimal OnHand, decimal Reserved, decimal Available, int ReorderLevel, decimal Value, string Status);
 public record BranchStockLevelDto(int ProductId, string Sku, string ProductName, string CategoryName, int BranchId, string BranchName, decimal OnHand, decimal Reserved, decimal Available, int ReorderLevel, decimal Value, string Status);
 
-public record StockBatchDto(int Id, string Sku, string ProductName, string BatchNo, DateTime ReceivedDate, DateTime ExpiryDate, int DaysLeft, decimal Qty, string WarehouseName, string Status);
+// WarehouseName doubles as a generic "where this batch physically sits" label — for a branch batch
+// (Scope="Branch") it holds the branch's display name, not a warehouse's.
+public record StockBatchDto(int Id, string Sku, string ProductName, string BatchNo, DateTime ReceivedDate, DateTime ExpiryDate, int DaysLeft, decimal Qty, string WarehouseName, string Status, string Scope = "Warehouse");
 public record CreateStockBatchRequest(int ProductId, int WarehouseId, string BatchNo, DateTime ReceivedDate, DateTime ExpiryDate, decimal Qty);
+public record CreateBranchStockBatchRequest(int ProductId, int BranchId, string BatchNo, DateTime ReceivedDate, DateTime ExpiryDate, decimal Qty);
 
 public record StockTransferLineDto(
     int Id, int ProductId, string Sku, string ProductName, decimal Qty, decimal UnitCost,

@@ -14,7 +14,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/insights")]
 [Authorize]
-[RequireModule(ModuleArea.Insights, AccessLevel.View)]
+[RequireModule("/insights/kpi", PermissionAction.View)]
 public class InsightsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet("sales")]
@@ -89,7 +89,7 @@ public class InsightsController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPut("kpi/{id:int}/target")]
-    [RequireModule(ModuleArea.Insights, AccessLevel.Edit)]
+    [RequireModule("/insights/kpi", PermissionAction.Edit)]
     public async Task<ActionResult> UpdateKpiTarget(int id, UpdateKpiTargetRequest request, CancellationToken ct)
     {
         var kpi = await db.Kpis.FirstOrDefaultAsync(k => k.Id == id, ct);
@@ -109,7 +109,7 @@ public class InsightsController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPut("reports/{id:int}/status")]
-    [RequireModule(ModuleArea.Insights, AccessLevel.Edit)]
+    [RequireModule("/insights/reports", PermissionAction.Edit)]
     public async Task<ActionResult<ReportDefinitionDto>> SetReportStatus(int id, SetStatusRequest request, CancellationToken ct)
     {
         var report = await db.ReportDefinitions.FirstOrDefaultAsync(r => r.Id == id, ct);
@@ -130,7 +130,7 @@ public class InsightsController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPost("bi/{id:int}/retry")]
-    [RequireModule(ModuleArea.Insights, AccessLevel.Edit)]
+    [RequireModule("/insights/bi", PermissionAction.Edit)]
     public async Task<ActionResult<BiFeedDto>> RetryBiFeed(int id, CancellationToken ct)
     {
         var feed = await db.BiFeeds.FirstOrDefaultAsync(f => f.Id == id, ct);
@@ -148,7 +148,7 @@ public class InsightsController(AppDbContext db, IAuditService audit) : Controll
 [ApiController]
 [Route("api/admin/overview")]
 [Authorize]
-[RequireModule(ModuleArea.Admin, AccessLevel.View)]
+[RequireModule("/admin/overview", PermissionAction.View)]
 public class AdminOverviewController(AppDbContext db) : ControllerBase
 {
     [HttpGet]

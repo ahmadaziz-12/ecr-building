@@ -11,6 +11,7 @@ import { resolveDateRangeBounds, type DateRangeValue } from "@/components/buildp
 import { OpenShiftDialog } from "./OpenShiftDialog";
 import { CloseShiftDialog } from "./CloseShiftDialog";
 import { CashMovementDialog } from "./CashMovementDialog";
+import { CashMovementsDialog } from "./CashMovementsDialog";
 import { ShiftReportDialog } from "./ShiftReportDialog";
 import { useCashierShifts, type CashierShiftDto } from "@/lib/api/pos";
 import { useAuth } from "@/lib/api/auth";
@@ -45,6 +46,7 @@ export function CashierShiftPage() {
   const [closingShift, setClosingShift] = useState<CashierShiftDto | null>(null);
   const [movementShift, setMovementShift] = useState<(CashierShiftDto & { direction: "in" | "out" }) | null>(null);
   const [reportTarget, setReportTarget] = useState<{ shiftId: number; type: "X" | "Z" } | null>(null);
+  const [movementsShiftId, setMovementsShiftId] = useState<number | null>(null);
 
   const terminalBranch = useMemo(() => new Map((terminals ?? []).map((t) => [t.id, t.branchId])), [terminals]);
 
@@ -157,6 +159,7 @@ export function CashierShiftPage() {
                         { label: "Cash Out", onClick: () => setMovementShift({ ...s, direction: "out" }), disabled: s.status !== "Open" },
                         { label: "Close Shift", onClick: () => setClosingShift(s), disabled: s.status !== "Open" },
                         "separator",
+                        { label: "View Cash Movements", onClick: () => setMovementsShiftId(s.id) },
                         { label: "Print X-Report", onClick: () => setReportTarget({ shiftId: s.id, type: "X" }) },
                         { label: "Print Z-Report", onClick: () => setReportTarget({ shiftId: s.id, type: "Z" }), disabled: s.status === "Open" },
                       ]}
@@ -178,6 +181,7 @@ export function CashierShiftPage() {
       <OpenShiftDialog open={opening} onOpenChange={setOpening} branchId={effectiveBranchId} />
       <CloseShiftDialog shift={closingShift} onClose={() => setClosingShift(null)} />
       <CashMovementDialog shift={movementShift} onClose={() => setMovementShift(null)} />
+      <CashMovementsDialog shiftId={movementsShiftId} onClose={() => setMovementsShiftId(null)} />
       <ShiftReportDialog target={reportTarget} onClose={() => setReportTarget(null)} />
     </div>
   );

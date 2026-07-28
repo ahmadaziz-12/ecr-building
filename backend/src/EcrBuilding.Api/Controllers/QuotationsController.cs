@@ -14,11 +14,9 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/pos/quotations")]
 [Authorize]
-[RequireModule(ModuleArea.Orders, AccessLevel.View)]
+[RequireModule("/operate/orders", PermissionAction.View)]
 public class QuotationsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
-    private const decimal ContractorDiscountPct = 5m;
-
     [HttpGet]
     public async Task<ActionResult<List<QuotationDto>>> List([FromQuery] string? status, CancellationToken ct)
     {
@@ -42,7 +40,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Create)]
     public async Task<ActionResult<QuotationDto>> Create(CreateQuotationRequest request, CancellationToken ct)
     {
         if (request.Lines.Count == 0) return BadRequest(new { error = "A quotation needs at least one line." });
@@ -54,7 +52,13 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
 
         var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         var customer = request.CustomerId is null ? null : await db.Customers.FindAsync([request.CustomerId], ct);
-        var (discountPct, quantityRules) = await ResolveDiscountAsync(request.BranchId, customer, request.DiscountPct, ct);
+        var (discountPct, isManualDiscount, quantityRules, promoRules) = await ResolvePricingAsync(request.BranchId, customer, request.DiscountPct, ct);
+
+        if (request.Lines.Any(l => l.ManualUnitPrice is not null))
+        {
+            var priceError = await ValidatePriceOverrideAsync(request.BranchId, request.PriceOverrideApprovalRequestId, ct);
+            if (priceError is not null) return BadRequest(new { error = priceError });
+        }
 
         var quotation = new Quotation
         {
@@ -68,7 +72,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
             Notes = request.Notes,
         };
 
-        var linesResult = await BuildLines(request.Lines, discountPct, quantityRules, ct);
+        var linesResult = await BuildLines(request.Lines, customer, discountPct, isManualDiscount, quantityRules, promoRules, ct);
         if (linesResult.Error is not null) return BadRequest(new { error = linesResult.Error });
         ApplyLines(quotation, linesResult.Lines!, discountPct);
 
@@ -81,7 +85,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Edit)]
     public async Task<ActionResult<QuotationDto>> Update(int id, UpdateQuotationRequest request, CancellationToken ct)
     {
         var quotation = await Query().FirstOrDefaultAsync(q => q.Id == id, ct);
@@ -97,9 +101,15 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
         if (request.DiscountPct is < 0 or > 100) return BadRequest(new { error = "Discount must be between 0 and 100%." });
 
         var customer = request.CustomerId is null ? null : await db.Customers.FindAsync([request.CustomerId], ct);
-        var (discountPct, quantityRules) = await ResolveDiscountAsync(quotation.BranchId, customer, request.DiscountPct, ct);
+        var (discountPct, isManualDiscount, quantityRules, promoRules) = await ResolvePricingAsync(quotation.BranchId, customer, request.DiscountPct, ct);
 
-        var linesResult = await BuildLines(request.Lines, discountPct, quantityRules, ct);
+        if (request.Lines.Any(l => l.ManualUnitPrice is not null))
+        {
+            var priceError = await ValidatePriceOverrideAsync(quotation.BranchId, request.PriceOverrideApprovalRequestId, ct);
+            if (priceError is not null) return BadRequest(new { error = priceError });
+        }
+
+        var linesResult = await BuildLines(request.Lines, customer, discountPct, isManualDiscount, quantityRules, promoRules, ct);
         if (linesResult.Error is not null) return BadRequest(new { error = linesResult.Error });
 
         var before = new { quotation.ProjectCode, quotation.CustomerReference, quotation.DiscountPct, quotation.GrandTotal };
@@ -123,7 +133,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpDelete("{id:int}")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Delete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var quotation = await db.Quotations.FirstOrDefaultAsync(q => q.Id == id, ct);
@@ -145,19 +155,19 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}/send")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Edit)]
     public Task<ActionResult<QuotationDto>> Send(int id, CancellationToken ct) => Transition(id, QuotationStatus.Draft, QuotationStatus.Sent, "QUOTATION_SENT", ct);
 
     [HttpPut("{id:int}/accept")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Edit)]
     public Task<ActionResult<QuotationDto>> Accept(int id, CancellationToken ct) => Transition(id, QuotationStatus.Sent, QuotationStatus.Accepted, "QUOTATION_ACCEPTED", ct);
 
     [HttpPut("{id:int}/reject")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Edit)]
     public Task<ActionResult<QuotationDto>> Reject(int id, CancellationToken ct) => Transition(id, QuotationStatus.Sent, QuotationStatus.Rejected, "QUOTATION_REJECTED", ct);
 
     [HttpPost("{id:int}/convert")]
-    [RequireModule(ModuleArea.Pos, AccessLevel.Edit)]
+    [RequireModule("/operate/orders", PermissionAction.Create)]
     public async Task<ActionResult<OrderDto>> Convert(int id, CancellationToken ct)
     {
         var quotation = await Query().FirstOrDefaultAsync(q => q.Id == id, ct);
@@ -237,33 +247,53 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
         .Include(q => q.Customer).Include(q => q.CreatedBy).Include(q => q.ConvertedOrder)
         .Include(q => q.Lines).ThenInclude(l => l.Product);
 
-    // BRD §5.1/§6.2, mirroring OrdersController.Checkout: the Trade Tier rule's own Value overrides
-    // the flat ContractorDiscountPct fallback when one is configured, and a manual DiscountPct
-    // override (typed on the quotation form) always wins over either. Quantity rules are returned
-    // separately since they apply per-line (by SKU + qty), not as a single blanket rate.
-    private async Task<(decimal DiscountPct, List<PricingRule> QuantityRules)> ResolveDiscountAsync(
+    // BRD §5.1/§6.2/§7, mirroring OrdersController.Checkout: the contractor rate comes only from an
+    // actual active "Trade Tier" pricing rule (no rule configured means no automatic discount), and a
+    // manual DiscountPct override (typed on the quotation form) always wins over it. Quantity and
+    // Promotional rules are returned separately since they apply per-line (by SKU + qty / date
+    // window), not as a single blanket rate. IsManualDiscount tells BuildLines whether DiscountPct
+    // came from an explicit human choice (never suppressed) or the automatic contractor rate
+    // (suppressed once a line prices off a real segment list price, to avoid double-dipping).
+    private async Task<(decimal DiscountPct, bool IsManualDiscount, List<PricingRule> QuantityRules, List<PricingRule> PromoRules)> ResolvePricingAsync(
         int branchId, Customer? customer, decimal? manualOverride, CancellationToken ct)
     {
         var activePricingRules = await db.PricingRules
             .Where(r => r.Status == PricingRuleStatus.Active
                 && (r.BranchId == null || r.BranchId == branchId)
+                && (r.ValidFrom == null || r.ValidFrom <= DateTime.UtcNow)
                 && (r.ValidUntil == null || r.ValidUntil >= DateTime.UtcNow))
             .ToListAsync(ct);
         var tradeTierRule = customer?.Type == CustomerType.Contractor
             ? activePricingRules.Where(r => r.Type == "Trade Tier")
                 .OrderByDescending(r => r.BranchId != null).ThenByDescending(r => r.Priority).FirstOrDefault()
             : null;
-        var contractorPct = customer?.Type == CustomerType.Contractor ? (tradeTierRule?.Value ?? ContractorDiscountPct) : 0m;
+        var contractorPct = tradeTierRule?.Value ?? 0m;
         var quantityRules = activePricingRules.Where(r => r.Type == "Quantity" && r.MinQuantity is not null).ToList();
-        return (manualOverride ?? contractorPct, quantityRules);
+        var promoRules = activePricingRules.Where(r => r.Type == "Promotional").ToList();
+        return (manualOverride ?? contractorPct, manualOverride is not null, quantityRules, promoRules);
     }
 
-    // Shared by Create and Update: resolves each line's product and prices it at the larger of the
-    // quotation's blanket discount and any matching per-SKU Quantity rule — same "larger of, doesn't
-    // stack" behavior as OrdersController.Checkout. Returns an error string instead of throwing so
-    // both callers can turn it into a 400.
+    // BRD §7 (CR-039), mirroring OrdersController.Checkout's identical gate: an absolute per-line
+    // price override on a quotation needs the same authorization as one at the till.
+    private async Task<string?> ValidatePriceOverrideAsync(int branchId, int? approvalRequestId, CancellationToken ct)
+    {
+        var canOverridePrice = string.Equals(User.FindFirst("posCeiling:canOverrideItemPrice")?.Value, "True", StringComparison.OrdinalIgnoreCase);
+        if (canOverridePrice) return null;
+        var hasApproval = approvalRequestId is int id && await db.ApprovalRequests.AnyAsync(a =>
+            a.Id == id && a.Type == ApprovalType.PriceOverride && a.Status == ApprovalStatus.Approved && a.BranchId == branchId, ct);
+        return hasApproval ? null : "Overriding an item's price requires supervisor approval. Request approval before checkout.";
+    }
+
+    // Shared by Create and Update: resolves each line's product, prices it at the customer's assigned
+    // price list (BRD §7 CR-038 — falls back to Retail SellingPrice when no segment override is
+    // configured), and applies the larger of the quotation's blanket discount / matching per-SKU
+    // Quantity rule / matching Promotional rule — same "larger of, doesn't stack" behavior as
+    // OrdersController.Checkout. A manual per-line price override (CR-039) replaces the resolved
+    // price entirely, exempt from further discount, exactly like checkout. Returns an error string
+    // instead of throwing so both callers can turn it into a 400.
     private async Task<(List<QuotationLine>? Lines, string? Error)> BuildLines(
-        List<CartLineInput> requestLines, decimal discountPct, List<PricingRule> quantityRules, CancellationToken ct)
+        List<CartLineInput> requestLines, Customer? customer, decimal discountPct, bool isManualDiscount,
+        List<PricingRule> quantityRules, List<PricingRule> promoRules, CancellationToken ct)
     {
         var lines = new List<QuotationLine>();
         foreach (var line in requestLines)
@@ -271,17 +301,47 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
             var product = await db.Products.FindAsync([line.ProductId], ct);
             if (product is null) return (null, $"Unknown product {line.ProductId}.");
 
+            // BRD §7 (CR-038): quote at the customer's assigned price list — a Contractor/Wholesale/
+            // Project customer's formal quotation must match what checkout would actually charge them,
+            // not silently revert to Retail SellingPrice.
+            var listPrice = product.SellingPrice;
+            var listPriceApplied = false;
+            if (customer is not null)
+            {
+                var segmentPrice = customer.PriceListType switch
+                {
+                    PriceListType.Contractor => product.ContractorPrice,
+                    PriceListType.Wholesale => product.WholesalePrice,
+                    PriceListType.Project => product.ProjectPrice,
+                    _ => null,
+                };
+                if (segmentPrice is not null) { listPrice = segmentPrice.Value; listPriceApplied = true; }
+            }
+
+            if (line.ManualUnitPrice is <= 0) return (null, $"Manual price override for {product.Sku} must be positive.");
+            var manualPriceOverride = line.ManualUnitPrice is not null;
+            var unitPrice = manualPriceOverride ? line.ManualUnitPrice!.Value : listPrice;
+
             // Quotation lines are always priced/quantified in stock UOM (no UOM selector on the
             // quotation builder), so line.Qty is directly comparable to MinQuantity.
             var quantityPct = quantityRules
                 .Where(r => (r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase)) && line.Qty >= r.MinQuantity)
                 .Select(r => r.Value).DefaultIfEmpty(0m).Max();
-            var lineDiscountPct = Math.Max(discountPct, quantityPct);
+            // BRD §7 (CR-040): Promotional rules auto-apply within their date window, in the same
+            // "larger of" group as everything else — never stacked on top.
+            var promoPct = promoRules
+                .Where(r => r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase))
+                .Select(r => r.Value).DefaultIfEmpty(0m).Max();
+            // Once a real segment list price was actually used, the automatic contractor trade %
+            // would double-dip on top of an already-negotiated price (same suppression as checkout) —
+            // but an explicit DiscountPct the user typed on the quotation form always still applies.
+            var effectiveDiscountPct = listPriceApplied && !isManualDiscount ? 0m : discountPct;
+            var lineDiscountPct = manualPriceOverride ? 0m : Math.Max(Math.Max(effectiveDiscountPct, quantityPct), promoPct);
 
-            var lineTotal = Math.Round(line.Qty * product.SellingPrice * (1 - lineDiscountPct / 100), 2);
+            var lineTotal = Math.Round(line.Qty * unitPrice * (1 - lineDiscountPct / 100), 2);
             lines.Add(new QuotationLine
             {
-                ProductId = product.Id, Qty = line.Qty, UnitPrice = product.SellingPrice,
+                ProductId = product.Id, Qty = line.Qty, UnitPrice = unitPrice,
                 DiscountPct = lineDiscountPct, VatRate = product.VatRate, LineTotal = lineTotal,
             });
         }

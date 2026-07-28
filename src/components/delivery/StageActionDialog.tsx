@@ -35,7 +35,7 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
   const vehicles = useDeliveryStore((s) => s.vehicles);
   const employees = useHrStore((s) => s.employees);
   const { hasAccess } = useAuth();
-  const canMoveDirectly = hasAccess("Delivery", "Full");
+  const canMoveDirectly = hasAccess("/delivery/orders", "Approve");
 
   const next = useMemo(() => allowedNext(order.stage), [order.stage]);
   const driverEmp = employees.find((e) => e.id === driverEmpId);

@@ -51,6 +51,20 @@ public class Module5UomMathTests
         Assert.Equal(2.000m, UomMath.AreaOf(0.5m, 4m)); // non-square: same area, different shape
         Assert.Equal(0.563m, UomMath.AreaOf(0.75m, 0.75m)); // rounds to 3dp (0.5625 → 0.563)
     }
+
+    [Fact]
+    public void Cut_to_size_length_is_the_entered_length_rounded_to_3dp()
+    {
+        Assert.Equal(4.5m, UomMath.LengthOf(4.5m));
+        Assert.Equal(0.563m, UomMath.LengthOf(0.5625m));
+    }
+
+    [Fact]
+    public void Cut_to_size_volume_is_length_times_width_times_height()
+    {
+        Assert.Equal(6.000m, UomMath.VolumeOf(2m, 1.5m, 2m));
+        Assert.Equal(0.563m, UomMath.VolumeOf(0.75m, 0.75m, 1m)); // rounds to 3dp
+    }
 }
 
 public class Module5UomEngineTests : IAsyncLifetime
@@ -186,6 +200,88 @@ public class Module5UomEngineTests : IAsyncLifetime
 
         var stock = await db.BranchStockLevels.AsNoTracking().FirstAsync(s => s.ProductId == product.Id);
         Assert.Equal(97m, stock.OnHand);
+    }
+
+    [Fact]
+    public async Task Cut_to_size_length_mode_bills_the_entered_length_with_no_width_needed()
+    {
+        using var db = _factory.CreateDbContext();
+        // Cable at 4 SAR/m, stocked in m (linear length only — no width, unlike glass's area mode).
+        var branch = TestDataSeeder.AddBranch(db);
+        var category = TestDataSeeder.AddCategory(db, code: "ELC", nameEn: "Electrical", defaultUom: "m");
+        var product = TestDataSeeder.AddProduct(db, category, sku: "CABLE-CUT", nameEn: "Cut Cable",
+            sellingPrice: 4m, vatRate: 0m, stockUom: "m", isCutToSize: true, cutToSizeUnit: "Length");
+        TestDataSeeder.AddBranchStock(db, product, branch, 200m);
+        TestDataSeeder.AddStandardGlAccounts(db);
+        var role = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders]);
+        var user = TestDataSeeder.AddUser(db, role, "cable-cashier@test.local", branchId: branch.Id);
+        var client = _factory.CreateAuthenticatedClient(user);
+
+        // 12.5m × 4 SAR = 50 SAR — no widthM sent at all.
+        var response = await client.PostAsJsonAsync("/api/pos/orders", CheckoutRequest(branch.Id,
+            [new { productId = product.Id, qty = 0m, lengthM = 12.5m }], payAmount: 50m));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var order = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var line = order.GetProperty("lines")[0];
+        Assert.Equal(12.5m, line.GetProperty("qty").GetDecimal());
+        Assert.Equal(50m, line.GetProperty("lineTotal").GetDecimal());
+        Assert.Equal(12.5m, line.GetProperty("lengthM").GetDecimal());
+        Assert.True(line.GetProperty("widthM").ValueKind is JsonValueKind.Null);
+
+        var stock = await db.BranchStockLevels.AsNoTracking().FirstAsync(s => s.ProductId == product.Id);
+        Assert.Equal(187.5m, stock.OnHand);
+    }
+
+    [Fact]
+    public async Task Cut_to_size_volume_mode_bills_length_times_width_times_height()
+    {
+        using var db = _factory.CreateDbContext();
+        // Sand at 50 SAR/m³, stocked in m³.
+        var branch = TestDataSeeder.AddBranch(db);
+        var category = TestDataSeeder.AddCategory(db, code: "SND", nameEn: "Aggregates", defaultUom: "m³");
+        var product = TestDataSeeder.AddProduct(db, category, sku: "SAND-CUT", nameEn: "Bulk Sand",
+            sellingPrice: 50m, vatRate: 0m, stockUom: "m³", isCutToSize: true, cutToSizeUnit: "Volume");
+        TestDataSeeder.AddBranchStock(db, product, branch, 100m);
+        TestDataSeeder.AddStandardGlAccounts(db);
+        var role = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders]);
+        var user = TestDataSeeder.AddUser(db, role, "sand-cashier@test.local", branchId: branch.Id);
+        var client = _factory.CreateAuthenticatedClient(user);
+
+        // 2m × 1.5m × 2m = 6 m³ × 50 SAR = 300 SAR
+        var response = await client.PostAsJsonAsync("/api/pos/orders", CheckoutRequest(branch.Id,
+            [new { productId = product.Id, qty = 0m, lengthM = 2m, widthM = 1.5m, heightM = 2m }], payAmount: 300m));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var order = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var line = order.GetProperty("lines")[0];
+        Assert.Equal(6m, line.GetProperty("qty").GetDecimal());
+        Assert.Equal(300m, line.GetProperty("lineTotal").GetDecimal());
+        Assert.Equal(2m, line.GetProperty("heightM").GetDecimal());
+
+        var stock = await db.BranchStockLevels.AsNoTracking().FirstAsync(s => s.ProductId == product.Id);
+        Assert.Equal(94m, stock.OnHand);
+    }
+
+    [Fact]
+    public async Task Cut_to_size_volume_mode_rejects_a_missing_height()
+    {
+        using var db = _factory.CreateDbContext();
+        var branch = TestDataSeeder.AddBranch(db);
+        var category = TestDataSeeder.AddCategory(db, code: "SND2", nameEn: "Aggregates 2", defaultUom: "m³");
+        var product = TestDataSeeder.AddProduct(db, category, sku: "SAND-CUT-2", nameEn: "Bulk Sand 2",
+            sellingPrice: 50m, vatRate: 0m, stockUom: "m³", isCutToSize: true, cutToSizeUnit: "Volume");
+        TestDataSeeder.AddBranchStock(db, product, branch, 100m);
+        TestDataSeeder.AddStandardGlAccounts(db);
+        var role = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders]);
+        var user = TestDataSeeder.AddUser(db, role, "sand-cashier-2@test.local", branchId: branch.Id);
+        var client = _factory.CreateAuthenticatedClient(user);
+
+        var response = await client.PostAsJsonAsync("/api/pos/orders", CheckoutRequest(branch.Id,
+            [new { productId = product.Id, qty = 0m, lengthM = 2m, widthM = 1.5m }], payAmount: 0m));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("must be positive", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]

@@ -64,7 +64,7 @@ const emptyDraft: UpsertZatcaSettingsRequest = {
 
 export function ZatcaSettingsPage() {
   const { hasAccess } = useAuth();
-  const canEdit = hasAccess("Finance", "Edit");
+  const canEdit = hasAccess("/admin/zatca-settings", "Edit");
 
   const { data: branches } = useBranches();
   const [branchId, setBranchId] = useState<number | null>(null);

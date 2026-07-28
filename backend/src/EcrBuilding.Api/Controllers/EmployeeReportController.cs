@@ -37,7 +37,7 @@ public record EmployeeReportRow(
 [ApiController]
 [Route("api/insights/reports")]
 [Authorize]
-[RequireModule(ModuleArea.Insights, AccessLevel.View)]
+[RequireModule("/insights/reports", PermissionAction.View)]
 public class EmployeeReportController(AppDbContext db) : ReportControllerBase
 {
     [HttpGet("employee-report")]

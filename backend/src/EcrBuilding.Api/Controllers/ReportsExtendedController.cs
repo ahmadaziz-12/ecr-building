@@ -119,7 +119,7 @@ public record ReportFilterOptionsDto(
 [ApiController]
 [Route("api/insights/reports")]
 [Authorize]
-[RequireModule(ModuleArea.Insights, AccessLevel.View)]
+[RequireModule("/insights/reports", PermissionAction.View)]
 public class ReportFilterOptionsController(AppDbContext db) : ControllerBase
 {
     [HttpGet("filter-options")]
@@ -205,7 +205,7 @@ public record ExpiryReportRow(
 [ApiController]
 [Route("api/insights/reports")]
 [Authorize]
-[RequireModule(ModuleArea.Insights, AccessLevel.View)]
+[RequireModule("/insights/reports", PermissionAction.View)]
 public class InventoryReportsController(AppDbContext db) : ReportControllerBase
 {
     // Item Report — the catalog master joined to stock, sales and returns for the window, so one
@@ -540,7 +540,7 @@ public record SupplierPerformanceRow(
 [ApiController]
 [Route("api/insights/reports")]
 [Authorize]
-[RequireModule(ModuleArea.Insights, AccessLevel.View)]
+[RequireModule("/insights/reports", PermissionAction.View)]
 public class ProcurementReportsController(AppDbContext db) : ReportControllerBase
 {
     [HttpGet("purchase-orders")]
@@ -741,7 +741,7 @@ public record CategoryPerformanceRow(
 [ApiController]
 [Route("api/insights/reports")]
 [Authorize]
-[RequireModule(ModuleArea.Insights, AccessLevel.View)]
+[RequireModule("/insights/reports", PermissionAction.View)]
 public class OperationsReportsController(AppDbContext db) : ReportControllerBase
 {
     [HttpGet("customer-returns")]

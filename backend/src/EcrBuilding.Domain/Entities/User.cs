@@ -20,4 +20,5 @@ public class User : BaseEntity
     public DateTime? LastLoginAt { get; set; }
 
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+    public ICollection<UserPermissionOverride> PermissionOverrides { get; set; } = new List<UserPermissionOverride>();
 }

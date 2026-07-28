@@ -12,5 +12,6 @@ public interface IStockMovementService
         string? refTable = null,
         string? refId = null,
         int? userId = null,
+        int? warehouseId = null,
         CancellationToken cancellationToken = default);
 }

@@ -367,6 +367,56 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.ToTable("Branches");
                 });
 
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.BranchStockBatch", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BatchNo")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<int>("BranchId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime>("ExpiryDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("ManualStatus")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<bool>("OnPromo")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Qty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime>("ReceivedDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("ProductId");
+
+                    b.ToTable("BranchStockBatches");
+                });
+
             modelBuilder.Entity("EcrBuilding.Domain.Entities.BranchStockLevel", b =>
                 {
                     b.Property<int>("Id")
@@ -430,6 +480,48 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProductId");
 
                     b.ToTable("BundleLines");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.CashMovement", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("CashierShiftId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CashierShiftId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.ToTable("CashMovements");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.CashierShift", b =>
@@ -798,6 +890,11 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<string>("Phone")
                         .HasColumnType("longtext");
 
+                    b.Property<string>("PriceListType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
                     b.Property<bool>("PriorityBilling")
                         .HasColumnType("tinyint(1)");
 
@@ -825,6 +922,56 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("AccountManagerUserId");
 
                     b.ToTable("Customers");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.CustomerPayment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("PaymentNo")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("ReferenceNo")
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("CustomerId");
+
+                    b.ToTable("CustomerPayments");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.DeliveryHistory", b =>
@@ -1952,6 +2099,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<decimal?>("HeightM")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<decimal?>("LengthM")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
@@ -1959,6 +2110,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<decimal>("LineTotal")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("longtext");
 
                     b.Property<int>("OrderId")
                         .HasColumnType("int");
@@ -2113,6 +2267,22 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProductId");
 
                     b.ToTable("ParkedSaleLines");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.PermissionsEpoch", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Value")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PermissionsEpochs");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Plan", b =>
@@ -2271,6 +2441,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
 
+                    b.Property<DateTime?>("ValidFrom")
+                        .HasColumnType("datetime(6)");
+
                     b.Property<DateTime?>("ValidUntil")
                         .HasColumnType("datetime(6)");
 
@@ -2349,12 +2522,20 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<int>("CategoryId")
                         .HasColumnType("int");
 
+                    b.Property<decimal?>("ContractorPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<decimal>("CostPrice")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
+
+                    b.Property<string>("CutToSizeUnit")
+                        .IsRequired()
+                        .HasColumnType("longtext");
 
                     b.Property<string>("ImageUrl")
                         .HasColumnType("longtext");
@@ -2368,6 +2549,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<string>("NameEn")
                         .IsRequired()
                         .HasColumnType("longtext");
+
+                    b.Property<decimal?>("ProjectPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<int>("ReorderLevel")
                         .HasColumnType("int");
@@ -2410,6 +2595,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<decimal>("Weight")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("WholesalePrice")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
@@ -2911,6 +3100,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<bool>("IsNoReceipt")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<decimal>("NetCashback")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
@@ -2975,6 +3167,53 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("Returns");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.ReturnExchangeLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("LineTotal")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Qty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("ReturnId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("StockQty")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Uom")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<decimal>("VatRate")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("ReturnId");
+
+                    b.ToTable("ReturnExchangeLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ReturnLine", b =>
@@ -3207,22 +3446,35 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("Level")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
+                    b.Property<bool>("CanApprove")
+                        .HasColumnType("tinyint(1)");
 
-                    b.Property<string>("Module")
+                    b.Property<bool>("CanCreate")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("CanDelete")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("CanEdit")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("CanExport")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("CanView")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("ModuleKey")
                         .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
 
                     b.Property<int>("RoleId")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("RoleId", "Module")
+                    b.HasIndex("RoleId", "ModuleKey")
                         .IsUnique();
 
                     b.ToTable("RolePermissions");
@@ -3664,11 +3916,16 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<int?>("UserId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("WarehouseId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
                     b.HasIndex("BranchId");
 
                     b.HasIndex("ProductId");
+
+                    b.HasIndex("WarehouseId");
 
                     b.ToTable("StockMovements");
                 });
@@ -3844,6 +4101,56 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("Suppliers");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.SupplierPayment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("PaymentNo")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("ReferenceNo")
+                        .HasColumnType("longtext");
+
+                    b.Property<int>("SupplierId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("SupplierId");
+
+                    b.ToTable("SupplierPayments");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.TaxCode", b =>
@@ -4046,6 +4353,48 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("RoleId");
 
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.UserPermissionOverride", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool?>("CanApprove")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool?>("CanCreate")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool?>("CanDelete")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool?>("CanEdit")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool?>("CanExport")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool?>("CanView")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("ModuleKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "ModuleKey")
+                        .IsUnique();
+
+                    b.ToTable("UserPermissionOverrides");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Vehicle", b =>
@@ -4527,6 +4876,25 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Shift");
                 });
 
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.BranchStockBatch", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EcrBuilding.Domain.Entities.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("Product");
+                });
+
             modelBuilder.Entity("EcrBuilding.Domain.Entities.BranchStockLevel", b =>
                 {
                     b.HasOne("EcrBuilding.Domain.Entities.Branch", "Branch")
@@ -4563,6 +4931,23 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Bundle");
 
                     b.Navigation("Product");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.CashMovement", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.CashierShift", "CashierShift")
+                        .WithMany()
+                        .HasForeignKey("CashierShiftId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EcrBuilding.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId");
+
+                    b.Navigation("CashierShift");
+
+                    b.Navigation("CreatedByUser");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.CashierShift", b =>
@@ -4645,6 +5030,23 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("AccountManager");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.CustomerPayment", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId");
+
+                    b.HasOne("EcrBuilding.Domain.Entities.Customer", "Customer")
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Customer");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.DeliveryHistory", b =>
@@ -5258,6 +5660,25 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Order");
                 });
 
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.ReturnExchangeLine", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EcrBuilding.Domain.Entities.Return", "Return")
+                        .WithMany("ExchangeLines")
+                        .HasForeignKey("ReturnId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Product");
+
+                    b.Navigation("Return");
+                });
+
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ReturnLine", b =>
                 {
                     b.HasOne("EcrBuilding.Domain.Entities.Product", "Product")
@@ -5480,9 +5901,15 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("EcrBuilding.Domain.Entities.Warehouse", "Warehouse")
+                        .WithMany()
+                        .HasForeignKey("WarehouseId");
+
                     b.Navigation("Branch");
 
                     b.Navigation("Product");
+
+                    b.Navigation("Warehouse");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockTransfer", b =>
@@ -5535,6 +5962,23 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Transfer");
                 });
 
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.SupplierPayment", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId");
+
+                    b.HasOne("EcrBuilding.Domain.Entities.Supplier", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Supplier");
+                });
+
             modelBuilder.Entity("EcrBuilding.Domain.Entities.TaxCode", b =>
                 {
                     b.HasOne("EcrBuilding.Domain.Entities.Branch", "Branch")
@@ -5583,6 +6027,17 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Branch");
 
                     b.Navigation("Role");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.UserPermissionOverride", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.User", "User")
+                        .WithMany("PermissionOverrides")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Vehicle", b =>
@@ -5717,6 +6172,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Return", b =>
                 {
+                    b.Navigation("ExchangeLines");
+
                     b.Navigation("Lines");
                 });
 
@@ -5754,6 +6211,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.User", b =>
                 {
+                    b.Navigation("PermissionOverrides");
+
                     b.Navigation("RefreshTokens");
                 });
 

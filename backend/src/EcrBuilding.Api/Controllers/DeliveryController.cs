@@ -13,7 +13,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/delivery/drivers")]
 [Authorize]
-[RequireModule(ModuleArea.Delivery, AccessLevel.View)]
+[RequireModule("/delivery/drivers", PermissionAction.View)]
 public class DriversController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -24,7 +24,7 @@ public class DriversController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Delivery, AccessLevel.Edit)]
+    [RequireModule("/delivery/drivers", PermissionAction.Create)]
     public async Task<ActionResult<DriverDto>> Create(UpsertDriverRequest request, CancellationToken ct)
     {
         var driver = new Driver { Name = request.Name, BranchId = request.BranchId, Mobile = request.Mobile, License = request.License, LicenseExpiry = request.LicenseExpiry };
@@ -36,7 +36,7 @@ public class DriversController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Delivery, AccessLevel.Edit)]
+    [RequireModule("/delivery/drivers", PermissionAction.Edit)]
     public async Task<ActionResult<DriverDto>> Update(int id, UpdateDriverRequest request, CancellationToken ct)
     {
         var driver = await db.Drivers.Include(d => d.Branch).FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -70,7 +70,7 @@ public class DriversController(AppDbContext db, IAuditService audit) : Controlle
 [ApiController]
 [Route("api/delivery/vehicles")]
 [Authorize]
-[RequireModule(ModuleArea.Delivery, AccessLevel.View)]
+[RequireModule("/delivery/vehicles", PermissionAction.View)]
 public class VehiclesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -81,7 +81,7 @@ public class VehiclesController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Delivery, AccessLevel.Edit)]
+    [RequireModule("/delivery/vehicles", PermissionAction.Create)]
     public async Task<ActionResult<VehicleDto>> Create(UpsertVehicleRequest request, CancellationToken ct)
     {
         var vehicle = new Vehicle { Registration = request.Registration, Type = Enum.Parse<VehicleType>(request.Type), BranchId = request.BranchId, CapacityTons = request.CapacityTons };
@@ -93,7 +93,7 @@ public class VehiclesController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Delivery, AccessLevel.Edit)]
+    [RequireModule("/delivery/vehicles", PermissionAction.Edit)]
     public async Task<ActionResult<VehicleDto>> Update(int id, UpdateVehicleRequest request, CancellationToken ct)
     {
         var vehicle = await db.Vehicles.Include(v => v.Branch).FirstOrDefaultAsync(v => v.Id == id, ct);
@@ -118,7 +118,7 @@ public class VehiclesController(AppDbContext db, IAuditService audit) : Controll
 [ApiController]
 [Route("api/delivery/zones")]
 [Authorize]
-[RequireModule(ModuleArea.Delivery, AccessLevel.View)]
+[RequireModule("/delivery/zones", PermissionAction.View)]
 public class DeliveryZonesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -129,7 +129,7 @@ public class DeliveryZonesController(AppDbContext db, IAuditService audit) : Con
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Delivery, AccessLevel.Edit)]
+    [RequireModule("/delivery/zones", PermissionAction.Create)]
     public async Task<ActionResult<ZoneDto>> Create(UpsertZoneRequest request, CancellationToken ct)
     {
         var zone = new DeliveryZone { Name = request.Name, City = request.City, DistanceKm = request.DistanceKm, Fee = request.Fee };
@@ -140,7 +140,7 @@ public class DeliveryZonesController(AppDbContext db, IAuditService audit) : Con
     }
 
     [HttpDelete("{id:int}")]
-    [RequireModule(ModuleArea.Delivery, AccessLevel.Edit)]
+    [RequireModule("/delivery/zones", PermissionAction.Delete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var zone = await db.DeliveryZones.FindAsync([id], ct);

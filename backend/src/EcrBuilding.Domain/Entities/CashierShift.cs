@@ -21,3 +21,20 @@ public class CashierShift : BaseEntity
     public decimal? Variance => CountedCash is null ? null : CountedCash - ExpectedCash;
     public CashierShiftStatus Status { get; set; } = CashierShiftStatus.Open;
 }
+
+public enum CashMovementDirection { In = 0, Out = 1 }
+
+// One row per cash-in/cash-out event on a shift — CashierShift.CashIn/CashOut are just the running
+// totals used by ExpectedCash; this is the itemized trail that lets a till reconciliation drill down
+// into WHICH events made up that total (till-safe drop, change fund top-up, petty cash, etc.), the
+// same way StockMovement itemizes what only used to be an aggregate stock count.
+public class CashMovement : BaseEntity
+{
+    public int CashierShiftId { get; set; }
+    public CashierShift? CashierShift { get; set; }
+    public CashMovementDirection Direction { get; set; }
+    public decimal Amount { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public int? CreatedByUserId { get; set; }
+    public User? CreatedByUser { get; set; }
+}

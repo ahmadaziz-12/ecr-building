@@ -9,13 +9,22 @@ export type CategoryDto = {
 // BRD §2.3: "1 {uom} = {factorToStock} {stockUom}" — drives the POS cart's UOM dropdown; the backend
 // refuses to sell in any UOM without a row here, so the dropdown only ever offers configured units.
 export type ProductUomConversionDto = { uom: string; factorToStock: number };
+// BRD §2.2: a structured custom attribute (Grade, Size, Colour, Diameter…) — the category's
+// Attribute Template suggests names, this is the actual value on one product.
+export type ProductAttributeDto = { name: string; value: string };
+// BRD §2.3 items 5-6: which dimensions the POS asks for on a cut-to-size line.
+export type CutToSizeUnit = "Length" | "Area" | "Volume";
 
 export type ProductDto = {
   id: number; sku: string; barcode: string | null; nameEn: string; nameAr: string | null; categoryId: number; categoryName: string;
   brand: string | null; costPrice: number; sellingPrice: number; vatRate: number; stockUom: string; sellUoms: string[];
   weight: number; returnable: boolean; reorderLevel: number; reorderQty: number; imageUrl: string | null; status: string;
   totalOnHand: number; totalAvailable: number;
-  uomConversions: ProductUomConversionDto[]; isCutToSize: boolean;
+  uomConversions: ProductUomConversionDto[]; isCutToSize: boolean; cutToSizeUnit: CutToSizeUnit;
+  attributes: ProductAttributeDto[];
+  // BRD §7 (CR-038): distinct list prices for Contractor/Wholesale/Project — null = not configured,
+  // checkout falls back to sellingPrice (the Retail price) for that segment.
+  contractorPrice?: number | null; wholesalePrice?: number | null; projectPrice?: number | null;
 };
 
 export const useCategories = (enabled = true) => useQuery({ queryKey: ["catalog", "categories"], queryFn: () => apiGet<CategoryDto[]>("/api/catalog/categories"), enabled });
@@ -81,7 +90,9 @@ export type CreateProductRequest = {
   sku: string; barcode: string | null; nameEn: string; nameAr: string | null; categoryId: number; brand: string | null;
   costPrice: number; sellingPrice: number; vatRate: number; stockUom: string; sellUoms: string[]; weight: number;
   returnable: boolean; reorderLevel: number; reorderQty: number; imageUrl: string | null;
-  uomConversions?: ProductUomConversionDto[]; isCutToSize?: boolean;
+  uomConversions?: ProductUomConversionDto[]; isCutToSize?: boolean; cutToSizeUnit?: CutToSizeUnit;
+  attributes?: ProductAttributeDto[];
+  contractorPrice?: number | null; wholesalePrice?: number | null; projectPrice?: number | null;
 };
 
 export function useCreateProduct() {
@@ -179,12 +190,13 @@ export function mapCategories(rows: CategoryDto[]): LiveTable {
 
 export function mapProducts(rows: ProductDto[]): LiveTable {
   return {
-    columns: ["SKU", "Barcode", "Name EN/AR", "Category", "Brand", "Price (ر.س)", "VAT", "Stock UOM", "Selling UOMs", "Stock", "Status"],
-    statusCol: 10,
+    columns: ["SKU", "Barcode", "Name EN/AR", "Category", "Brand", "Price (ر.س)", "VAT", "Stock UOM", "Selling UOMs", "Attributes", "Stock", "Status"],
+    statusCol: 11,
     ids: rows.map((p) => p.id),
     rows: rows.map((p) => [
       p.sku, p.barcode ?? "—", `${p.nameEn}${p.nameAr ? ` / ${p.nameAr}` : ""}`, p.categoryName, p.brand ?? "—",
       p.sellingPrice.toFixed(2), `${p.vatRate}%`, p.stockUom, p.sellUoms.length ? p.sellUoms.join(", ") : p.stockUom,
+      p.attributes.length ? p.attributes.map((a) => `${a.name}: ${a.value}`).join(", ") : "—",
       p.totalOnHand, p.returnable ? p.status : "Non-Returnable",
     ]),
     kpis: [

@@ -14,12 +14,14 @@ public class StockMovementService(AppDbContext db) : IStockMovementService
         string? refTable = null,
         string? refId = null,
         int? userId = null,
+        int? warehouseId = null,
         CancellationToken cancellationToken = default)
     {
         db.StockMovements.Add(new StockMovement
         {
             ProductId = productId,
             BranchId = branchId,
+            WarehouseId = warehouseId,
             Type = type,
             Qty = qty,
             RefTable = refTable,

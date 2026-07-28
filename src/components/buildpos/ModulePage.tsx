@@ -21,7 +21,9 @@ import { FlowDialog } from "@/components/buildpos/FlowDialog";
 import { CreatePricingRuleDialog } from "@/components/buildpos/CreatePricingRuleDialog";
 import type { PricingRuleDto } from "@/lib/api/pos";
 import { ReturnPolicySettingsDialog } from "@/components/buildpos/pos/ReturnPolicySettingsDialog";
-import { useReturnPolicyConfig, type ReturnPolicyConfigDto } from "@/lib/api/finance";
+import { useReturnPolicyConfig, type ReturnPolicyConfigDto, type ReturnDto } from "@/lib/api/finance";
+import { ApproveExchangeDialog } from "@/components/buildpos/pos/ApproveExchangeDialog";
+import { NoReceiptReturnDialog } from "@/components/buildpos/pos/NoReceiptReturnDialog";
 import { useModuleLiveData } from "@/lib/api/module-live-data";
 import { useFlowSubmitHandlers } from "@/lib/api/flow-submit-handlers";
 import { useRowActions, type RowAction } from "@/lib/api/row-actions";
@@ -125,6 +127,14 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
   // Finance > Customer Returns' "Return Policy" gets a bespoke settings dialog for the dual-auth
   // cash threshold + return windows — same pattern as Pricing's rule dialog above.
   const [returnPolicyDialogOpen, setReturnPolicyDialogOpen] = useState(false);
+  // BRD §3.2.1: approving an Exchange-type return needs a real payment step (the net difference
+  // between the return's credit and the replacement item(s)) — set by the "Complete Exchange" row
+  // action instead of the generic text-field "Approve Return" flow every other return type uses.
+  const [approvingExchangeReturn, setApprovingExchangeReturn] = useState<ReturnDto | null>(null);
+  // BRD §3.2.2 (no-receipt returns): "New Return" used to open a mock free-text flow (a plain "SKU ·
+  // Qty · Refund Amount" tags field with no real backing) — replaced with a real customer/product
+  // picker that actually creates a return with no original order.
+  const [noReceiptDialogOpen, setNoReceiptDialogOpen] = useState(false);
   const { data: returnPolicyConfig } = useReturnPolicyConfig(pathname === "/finance/returns");
   const [activeTab, setActiveTab] = useState(0);
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
@@ -150,7 +160,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
     setActiveFlow({ flow: f, initialValues, onSubmit, fieldOverrides });
   }
 
-  const rowActionsFor = useRowActions(pathname, openFlow, onOpenKioskPairing, setEditingPricingRule);
+  const rowActionsFor = useRowActions(pathname, openFlow, onOpenKioskPairing, setEditingPricingRule, setApprovingExchangeReturn);
   const rowDetailFor = useRowDetails(pathname, detailRow?.id);
   const showDetail = (id: number, row: (string | number)[]) => setDetailRow({ id, row });
   const bulkActions = useBulkActions(pathname, openFlow, showDetail);
@@ -304,6 +314,7 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
     if (label === "Download Invoice") { handleExport(); return; }
     if (pathname === "/finance/pricing" && label === "Create Pricing Rule") { setPricingRuleDialogOpen(true); return; }
     if (pathname === "/finance/returns" && label === "Return Policy") { setReturnPolicyDialogOpen(true); return; }
+    if (pathname === "/finance/returns" && label === "New Return") { setNoReceiptDialogOpen(true); return; }
     if (label === m?.primaryAction && flow) { openFlow(label, {}, submitHandlers[flow.key]); return; }
     // A row-scoped action (Approve, Dispatch, Activate…) with no single row selected here opens a
     // picker over the live-eligible records instead of silently no-opping.
@@ -723,6 +734,14 @@ export function ModulePage({ onOpenKioskPairing }: { onOpenKioskPairing?: (termi
         open={returnPolicyDialogOpen}
         onOpenChange={setReturnPolicyDialogOpen}
         config={returnPolicyConfig ?? DEFAULT_RETURN_POLICY_CONFIG}
+      />
+      <ApproveExchangeDialog
+        returnRecord={approvingExchangeReturn}
+        onClose={() => setApprovingExchangeReturn(null)}
+      />
+      <NoReceiptReturnDialog
+        open={noReceiptDialogOpen}
+        onClose={() => setNoReceiptDialogOpen(false)}
       />
       <BulkActionSheet
         config={activeBulkLabel ? bulkActions?.[activeBulkLabel] ?? null : null}

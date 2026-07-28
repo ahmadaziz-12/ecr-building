@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Boxes, Check, ChevronDown, Handshake, Percent, Sparkles, Ticket, X } from "lucide-react";
+import { Boxes, Calendar, Check, ChevronDown, Handshake, Percent, Sparkles, Tag, Ticket, X } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -7,17 +7,20 @@ import { useBranches } from "@/lib/api/admin";
 import { useProducts } from "@/lib/api/catalog";
 import { useCreatePricingRule, useUpdatePricingRule, type PricingRuleDto, type UpsertPricingRuleRequest } from "@/lib/api/pos";
 
-type RuleKind = "Trade Tier" | "Quantity" | "Coupon" | "Manual";
-// "Manual" covers Bundle/Fee/Promo rows — reference-only today (Bundle pricing really lives on
-// /stock/bundles, restocking fees in the returns workflow, promos are informational) — kept
-// available so the grid can still record them, but visually set apart from the 3 automatic types.
-type ManualType = "Bundle" | "Fee" | "Promo";
+type RuleKind = "Trade Tier" | "Quantity" | "Coupon" | "Promotional" | "Manual";
+// "Manual" covers Bundle/Fee rows — reference-only today (Bundle pricing really lives on
+// /stock/bundles, restocking fees in the returns workflow) — kept available so the grid can still
+// record them, but visually set apart from the 4 automatic types. Promo used to live here too
+// ("informational, staff apply the benefit manually") — it's now its own real auto-applied kind
+// (BRD §7 CR-040), see "Promotional" above.
+type ManualType = "Bundle" | "Fee";
 
 const KIND_META: Record<RuleKind, { icon: typeof Percent; title: string; blurb: string }> = {
   "Trade Tier": { icon: Handshake, title: "Trade Tier", blurb: "Automatic % off for contractor accounts" },
   Quantity: { icon: Boxes, title: "Quantity Discount", blurb: "Auto-applies once a cart line hits a threshold" },
   Coupon: { icon: Ticket, title: "Coupon Code", blurb: "Customer enters a code at checkout" },
-  Manual: { icon: Sparkles, title: "Other / Manual", blurb: "Bundle, fee or promo — recorded for reference" },
+  Promotional: { icon: Tag, title: "Promotional", blurb: "Auto-applies within a date range — no code needed" },
+  Manual: { icon: Sparkles, title: "Other / Manual", blurb: "Bundle or fee — recorded for reference" },
 };
 
 const inputClass =
@@ -49,6 +52,7 @@ export function CreatePricingRuleDialog({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [branchName, setBranchName] = useState("All Branches");
   const [priority, setPriority] = useState("10");
+  const [validFrom, setValidFrom] = useState("");
   const [validUntil, setValidUntil] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -56,7 +60,7 @@ export function CreatePricingRuleDialog({
     setKind("Trade Tier"); setManualType("Bundle"); setName(""); setValuePct(""); setSku(""); setProductSearch("");
     setMinQuantity(""); setCouponCode(""); setCouponKind("Percentage"); setCouponValue("");
     setManualScope(""); setManualCondition(""); setManualAction(""); setAdvancedOpen(false);
-    setBranchName("All Branches"); setPriority("10"); setValidUntil("");
+    setBranchName("All Branches"); setPriority("10"); setValidFrom(""); setValidUntil("");
   }
 
   function handleClose(v: boolean) {
@@ -69,26 +73,27 @@ export function CreatePricingRuleDialog({
   useEffect(() => {
     if (!open || !editingRule) return;
     const r = editingRule;
-    if (r.type === "Trade Tier" || r.type === "Quantity" || r.type === "Coupon") {
+    if (r.type === "Trade Tier" || r.type === "Quantity" || r.type === "Coupon" || r.type === "Promotional") {
       setKind(r.type);
     } else {
       setKind("Manual");
-      setManualType((["Bundle", "Fee", "Promo"] as const).includes(r.type as ManualType) ? (r.type as ManualType) : "Bundle");
+      setManualType((["Bundle", "Fee"] as const).includes(r.type as ManualType) ? (r.type as ManualType) : "Bundle");
     }
     setName(r.name);
-    setValuePct(r.type === "Trade Tier" || r.type === "Quantity" ? String(r.value) : "");
-    setSku(r.type === "Quantity" ? r.sku ?? "" : "");
+    setValuePct(r.type === "Trade Tier" || r.type === "Quantity" || r.type === "Promotional" ? String(r.value) : "");
+    setSku(r.type === "Quantity" || r.type === "Promotional" ? r.sku ?? "" : "");
     setProductSearch("");
     setMinQuantity(r.type === "Quantity" && r.minQuantity != null ? String(r.minQuantity) : "");
     setCouponCode(r.type === "Coupon" ? r.code ?? "" : "");
     setCouponKind(r.discountType === "Fixed" ? "Fixed" : "Percentage");
     setCouponValue(r.type === "Coupon" ? String(r.value) : "");
-    const isManual = !["Trade Tier", "Quantity", "Coupon"].includes(r.type);
+    const isManual = !["Trade Tier", "Quantity", "Coupon", "Promotional"].includes(r.type);
     setManualScope(isManual ? r.scope : "");
     setManualCondition(isManual ? r.condition : "");
     setManualAction(isManual ? r.action : "");
     setBranchName(r.branchName ?? "All Branches");
     setPriority(String(r.priority));
+    setValidFrom(r.validFrom ? r.validFrom.slice(0, 10) : "");
     setValidUntil(r.validUntil ? r.validUntil.slice(0, 10) : "");
   }, [open, editingRule]);
 
@@ -125,6 +130,13 @@ export function CreatePricingRuleDialog({
       if (!couponCode || !val) return null;
       return `A customer who enters code "${couponCode.toUpperCase()}" at checkout gets ${couponKind === "Percentage" ? `${val}% off their order` : `${val} ر.س off their order`}.`;
     }
+    if (kind === "Promotional") {
+      const pct = Number(valuePct);
+      if (!pct) return null;
+      const window = validFrom && validUntil ? ` from ${validFrom} to ${validUntil}`
+        : validUntil ? ` through ${validUntil}` : validFrom ? ` starting ${validFrom}` : "";
+      return `Every sale of ${sku ? `${sku}${product ? ` (${product.nameEn})` : ""}` : "any product"} automatically gets ${pct}% off${window} — no code needed.`;
+    }
     if (!manualScope && !manualCondition && !manualAction) return null;
     return `Recorded for staff reference — ${[manualScope, manualCondition, manualAction].filter(Boolean).join(" · ")}. This type isn't auto-applied at checkout yet.`;
   })();
@@ -135,6 +147,7 @@ export function CreatePricingRuleDialog({
     (kind === "Trade Tier" ? Number(valuePct) > 0
       : kind === "Quantity" ? Number(valuePct) > 0 && Number(minQuantity) > 0
       : kind === "Coupon" ? !!couponCode.trim() && Number(couponValue) > 0
+      : kind === "Promotional" ? Number(valuePct) > 0
       : !!manualAction.trim());
 
   async function handleSave() {
@@ -142,6 +155,7 @@ export function CreatePricingRuleDialog({
     const base = {
       name: name.trim(),
       priority: Number(priority) || 10,
+      validFrom: validFrom || null,
       validUntil: validUntil || null,
       branchId: branch?.id ?? null,
     };
@@ -167,6 +181,13 @@ export function CreatePricingRuleDialog({
         condition: `Code: ${couponCode.toUpperCase()}`,
         action: couponKind === "Percentage" ? `${val}% off` : `${val} ر.س off`,
         code: couponCode.toUpperCase(), discountType: couponKind, value: val,
+      };
+    } else if (kind === "Promotional") {
+      const pct = Number(valuePct);
+      request = {
+        ...base, type: "Promotional", scope: sku ? `SKU: ${sku}` : "All products",
+        condition: validFrom || validUntil ? `${validFrom || "Now"} → ${validUntil || "No end date"}` : "Active immediately",
+        action: `-${pct}%`, code: null, discountType: "Percentage", value: pct, sku: sku || null,
       };
     } else {
       request = {
@@ -215,9 +236,9 @@ export function CreatePricingRuleDialog({
           </div>
 
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
-            {/* Type picker — 3 automatic types front and center, "manual" set apart */}
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              {(["Trade Tier", "Quantity", "Coupon"] as const).map((k) => {
+            {/* Type picker — 4 automatic types front and center, "manual" set apart */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {(["Trade Tier", "Quantity", "Coupon", "Promotional"] as const).map((k) => {
                 const meta = KIND_META[k];
                 const Icon = meta.icon;
                 const active = kind === k;
@@ -247,7 +268,7 @@ export function CreatePricingRuleDialog({
               }`}
             >
               <span className="flex items-center gap-2">
-                <Sparkles className="h-3.5 w-3.5" /> Other rule type (Bundle, Restocking Fee, Promo) — recorded for reference only
+                <Sparkles className="h-3.5 w-3.5" /> Other rule type (Bundle, Restocking Fee) — recorded for reference only
               </span>
               <ChevronDown className={`h-3.5 w-3.5 transition ${kind === "Manual" ? "rotate-180" : ""}`} />
             </button>
@@ -385,10 +406,82 @@ export function CreatePricingRuleDialog({
               </div>
             )}
 
+            {kind === "Promotional" && (
+              <div className="rounded-xl border border-black/5 bg-canvas/50 p-4 space-y-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="relative">
+                    <label className={labelClass}>Product (optional)</label>
+                    {sku ? (
+                      <div className={`${inputClass} flex items-center justify-between gap-2`}>
+                        <span className="truncate">{sku}{product ? ` — ${product.nameEn}` : ""}</span>
+                        <button
+                          type="button"
+                          onClick={() => { setSku(""); setProductSearch(""); }}
+                          className="grid h-5 w-5 flex-none place-items-center rounded-full text-muted-foreground hover:bg-black/5 hover:text-foreground"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <input
+                        className={inputClass}
+                        placeholder="Any product — search SKU or name"
+                        value={productSearch}
+                        onChange={(e) => setProductSearch(e.target.value)}
+                      />
+                    )}
+                    {!sku && productSuggestions.length > 0 && (
+                      <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-black/10 bg-white shadow-sm">
+                        {productSuggestions.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => { setSku(p.sku); setProductSearch(""); }}
+                            className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-brand/5"
+                          >
+                            <span className="truncate font-medium text-foreground">{p.sku} — {p.nameEn}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className={labelClass}>Discount %</label>
+                    <div className="relative">
+                      <input
+                        type="number" min={0} max={100} step={0.5} className={`${inputClass} pr-8`} placeholder="15"
+                        value={valuePct} onChange={(e) => setValuePct(e.target.value)}
+                      />
+                      <Percent className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className={labelClass}>Starts</label>
+                    <div className="relative">
+                      <input type="date" className={`${inputClass} pr-8`} value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
+                      <Calendar className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Ends</label>
+                    <div className="relative">
+                      <input type="date" className={`${inputClass} pr-8`} value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+                      <Calendar className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    </div>
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Leave both dates blank to start immediately with no expiry. Unlike Coupon, no code is needed — it discounts automatically within the window.
+                </p>
+              </div>
+            )}
+
             {kind === "Manual" && (
               <div className="rounded-xl border border-black/5 bg-canvas/50 p-4 space-y-3">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  {(["Bundle", "Fee", "Promo"] as const).map((t) => (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {(["Bundle", "Fee"] as const).map((t) => (
                     <button
                       key={t}
                       type="button"
@@ -416,9 +509,7 @@ export function CreatePricingRuleDialog({
                 <p className="text-[11px] text-muted-foreground">
                   {manualType === "Bundle"
                     ? "Real bundle pricing is set up on Stock → Bundles — this row just cross-references it here for reporting."
-                    : manualType === "Fee"
-                      ? "Restocking fees are applied during a Surplus Return — this row records the policy for staff to see."
-                      : "Promo rows are informational today — staff apply the benefit manually."}
+                    : "Restocking fees are applied during a Surplus Return — this row records the policy for staff to see."}
                 </p>
               </div>
             )}

@@ -7,7 +7,20 @@ import { API_BASE, apiPost, apiPut, ApiError, refreshSession } from "./client";
 // should only ever see a login screen after two real weeks of inactivity, not every 15 minutes.
 const PROACTIVE_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
-export type ModulePermission = { module: string; level: "None" | "View" | "Edit" | "Full" };
+// module is a page route key (e.g. "stock/warehouses", "admin/roles") — the same string used as
+// `to` in AppLayout.tsx's nav array. Each of the 6 actions is independently grantable (a role can
+// have View+Export without Edit), so this mirrors the backend's RolePermission/effective-permission
+// shape exactly instead of a single ordinal level.
+export type PermissionActionName = "View" | "Create" | "Edit" | "Delete" | "Approve" | "Export";
+export type ModulePermission = {
+  module: string;
+  canView: boolean;
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canApprove: boolean;
+  canExport: boolean;
+};
 
 // Mirrors backend PosCeilingsDto (BRD §10.1 Cashier→Senior Cashier→Supervisor→Store Manager→System
 // Admin ladder) — null on a decimal ceiling means "no cap".
@@ -38,8 +51,6 @@ export type CurrentUser = {
   posCeilings: PosCeilings;
 };
 
-const LEVEL_RANK: Record<ModulePermission["level"], number> = { None: 0, View: 1, Edit: 2, Full: 3 };
-
 type AuthContextValue = {
   user: CurrentUser | null;
   isLoading: boolean;
@@ -47,7 +58,7 @@ type AuthContextValue = {
   // BRD §10.2 (Module 15): PIN quick-login for POS terminals — same session as password login.
   pinLogin: (email: string, pin: string) => Promise<CurrentUser>;
   logout: () => Promise<void>;
-  hasAccess: (module: string, minLevel?: ModulePermission["level"]) => boolean;
+  hasAccess: (module: string, action?: PermissionActionName) => boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -146,9 +157,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login: (email, password) => loginMutation.mutateAsync({ email, password }),
       pinLogin: (email, pin) => pinLoginMutation.mutateAsync({ email, pin }),
       logout: () => logoutMutation.mutateAsync(),
-      hasAccess: (module, minLevel = "View") => {
+      hasAccess: (module, action = "View") => {
         const perm = user?.permissions.find((p) => p.module === module);
-        return (LEVEL_RANK[perm?.level ?? "None"] ?? 0) >= LEVEL_RANK[minLevel];
+        if (!perm) return false;
+        switch (action) {
+          case "View":
+            return perm.canView;
+          case "Create":
+            return perm.canCreate;
+          case "Edit":
+            return perm.canEdit;
+          case "Delete":
+            return perm.canDelete;
+          case "Approve":
+            return perm.canApprove;
+          case "Export":
+            return perm.canExport;
+        }
       },
     }),
     [user, meQuery.isLoading, loginMutation, pinLoginMutation, logoutMutation],

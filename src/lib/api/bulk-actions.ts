@@ -4,7 +4,7 @@ import {
   useBranches, useSetBranchStatus, useUpdateBranch, useTerminals, useAssignCashier, useForceSyncTerminal, mapTerminals,
   useDevices, useOpenDrawer, mapDevices, useRules, useTestRule, useUpdateRule, useUsers, useUpdateUser, useResetPin,
   useMaintenance, useAssignMaintenance, useUpdateMaintenanceStatus, useCreateMaintenance, useCompliance, useUpdateCompliance, useSignOffCompliance,
-  useRoles, useUpdateRole, useSettings, useUpsertSetting, posCeilingsFromTier,
+  useSettings, useUpsertSetting,
 } from "./admin";
 import type { Field } from "@/lib/buildpos/flows";
 import type { BulkActionConfig } from "@/components/buildpos/BulkActionSheet";
@@ -14,14 +14,13 @@ import {
 import {
   usePurchaseOrders, useSubmitPurchaseOrder, useApprovePurchaseOrder, useDispatchPurchaseOrder,
   useReceivePurchaseOrder, useCancelPurchaseOrder, useReturnsToSupplier, useDispatchRts, useRejectRts,
-  useSuppliers, mapSuppliers,
+  useSuppliers, mapSuppliers, useRecordSupplierPayment,
 } from "./procurement";
 import { useWarehouses, useCreateStockTransfer, useCreateStockAdjustment } from "./inventory";
 import { useProducts } from "./catalog";
 import { usePricingRules, useUpdatePricingRuleStatus } from "./pos";
 import { useTestPrint } from "./print";
 import { useZatcaInvoices, useSubmitZatcaInvoice } from "./zatca";
-import { permFieldValues, permissionsFromValues } from "./row-actions";
 import {
   useInsightsSales, useInsightsReports, useSetReportStatus, useInsightsKpi, useUpdateKpiTarget, mapKpis,
   useInsightsBi, useRetryBiFeed, mapBiFeeds, useAdminOverview,
@@ -113,9 +112,8 @@ export function useBulkActions(
   const createStockAdjustment = useCreateStockAdjustment();
   const { data: products } = useProducts(pathname === "/stock/warehouses");
 
-  const { data: roles } = useRoles(pathname === "/admin/roles");
-  const updateRole = useUpdateRole();
   const { data: suppliers } = useSuppliers(pathname === "/suppliers/suppliers");
+  const recordSupplierPayment = useRecordSupplierPayment();
   const { data: systemSettings } = useSettings("System", pathname === "/admin/settings");
   const { data: posSettings } = useSettings("Pos", pathname === "/admin/pos-settings");
   const upsertSetting = useUpsertSetting();
@@ -438,31 +436,6 @@ export function useBulkActions(
       };
     }
 
-    case "/admin/roles": {
-      const list = roles ?? [];
-      return {
-        "Assign Permissions": {
-          title: "Assign Permissions", mode: "single", confirmLabel: "Open Editor",
-          rows: list.map((r) => ({ id: r.id, primary: r.name, secondary: `${r.userCount} users`, status: r.status })),
-          emptyMessage: "No roles found.",
-          run: async (id) => {
-            const r = list.find((x) => x.id === id);
-            if (!r) throw new Error("Role not found.");
-            openFlow("Edit Role", permFieldValues(r), async (values) => {
-              if (!values.name) throw new Error("Role name is required.");
-              await updateRole.mutateAsync({
-                id: r.id,
-                request: {
-                  name: values.name, description: values.description || null, approvalCap: Number(values.approvalCap || 0),
-                  permissions: permissionsFromValues(values), posCeilings: posCeilingsFromTier(values.posTier),
-                },
-              });
-            });
-          },
-        },
-      };
-    }
-
     case "/suppliers/suppliers": {
       const list = suppliers ?? [];
       return {
@@ -475,6 +448,23 @@ export function useBulkActions(
             const idx = table.ids?.indexOf(id) ?? -1;
             if (idx < 0) throw new Error("Supplier not found.");
             showDetail(id, table.rows[idx]);
+          },
+        },
+        "Pay Supplier": {
+          title: "Pay Supplier", mode: "single", confirmLabel: "Record Payment",
+          rows: list.map((s) => ({ id: s.id, primary: s.nameEn, secondary: s.code, status: s.status })),
+          emptyMessage: "No suppliers found.",
+          run: async (id) => {
+            const s = list.find((x) => x.id === id);
+            if (!s) throw new Error("Supplier not found.");
+            openFlow("Pay Supplier", { method: "BankTransfer" }, async (values) => {
+              const amount = Number(values.amount);
+              if (!amount || amount <= 0) throw new Error("Enter a payment amount greater than zero.");
+              await recordSupplierPayment.mutateAsync({
+                supplierId: s.id, amount, method: values.method || "BankTransfer",
+                referenceNo: values.referenceNo || null, notes: values.notes || null,
+              });
+            });
           },
         },
       };
