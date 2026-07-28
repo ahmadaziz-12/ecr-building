@@ -22,7 +22,8 @@ public record DeliveryOrderDto(
     int? DriverId, string? DriverName, int? VehicleId, string? VehicleRegistration,
     decimal Amount, decimal FeeCharge, decimal HandlingCharge, decimal HeavyCharge, decimal DiscountCharge, decimal VatCharge,
     bool StockReserved, string Stage, DateTime? DispatchedAt, DateTime? DeliveredAt, string? ReceivedBy, string? Proof,
-    string? FailureReason, string? NextAction, string? Notes, IReadOnlyList<DeliveryLineDto> Lines, IReadOnlyList<DeliveryHistoryDto> History, bool Overdue);
+    string? FailureReason, string? NextAction, string? Notes, IReadOnlyList<DeliveryLineDto> Lines, IReadOnlyList<DeliveryHistoryDto> History, bool Overdue,
+    int? SourceDeliveryOrderId, string? SourceDeliveryNo);
 
 public record DeliveryLineInput(int ProductId, decimal DeliveryQty);
 public record AddressInput(string Type, string ContactName, string ContactMobile, string City, string? District, string? Street, string? Landmark, string? Instructions);
@@ -35,6 +36,11 @@ public record CreateDeliveryOrderRequest(
 
 public record LineProgressInput(int ProductId, decimal? LoadedQty, decimal? DeliveredQty, decimal? MissingQty, decimal? DamagedQty);
 public record TransitionRequest(string ToStage, int? DriverId, int? VehicleId, List<LineProgressInput>? Lines, string? ReceivedBy, string? Proof, string? FailureReason, string? NextAction, string? Note);
+
+// Split: creates a brand-new DeliveryOrder carrying the undelivered remainder (Ordered - DeliveredQty -
+// DamagedQty per line) of a Failed / PartiallyDelivered / ReturnedToBranch order, for redelivery.
+// Address/customer/project are copied from the source; only schedule and driver/vehicle are re-entered.
+public record CreateDeliverySplitRequest(DateTime PromisedDate, string PromisedTime, string? TimeSlot, int? DriverId, int? VehicleId, string? Note);
 
 // Permission model: Delivery:Edit can only file a move request (Applied=false, PendingApproval set);
 // Delivery:Full moves the order directly (Applied=true) and is also who can approve/reject someone

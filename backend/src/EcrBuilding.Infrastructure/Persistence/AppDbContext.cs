@@ -461,6 +461,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasOne(x => x.Branch).WithMany().HasForeignKey(x => x.BranchId);
             b.HasOne(x => x.Driver).WithMany().HasForeignKey(x => x.DriverId);
             b.HasOne(x => x.Vehicle).WithMany().HasForeignKey(x => x.VehicleId);
+            b.HasOne(x => x.SourceDeliveryOrder).WithMany().HasForeignKey(x => x.SourceDeliveryOrderId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<DeliveryOrderLine>(b =>

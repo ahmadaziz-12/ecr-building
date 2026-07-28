@@ -3,7 +3,7 @@ import { useAuditStore } from "@/lib/store/audit";
 import {
   apiCreateDeliveryOrder, apiCreateZone, apiDeleteZone, apiReserveStock, apiTransitionDelivery,
   apiCreateDriver, apiUpdateDriver, apiCreateVehicle, apiUpdateVehicle,
-  apiApproveDeliveryMove, apiRejectDeliveryMove,
+  apiApproveDeliveryMove, apiRejectDeliveryMove, apiSplitDeliveryOrder,
   mapApiDriver, mapApiOrder, mapApiVehicle, mapApiZone, mapApiApproval, type DeliveryApproval,
   STAGE_TO_BACKEND, VEHICLE_TYPE_TO_BACKEND, DRIVER_STATUS_TO_BACKEND, VEHICLE_STATUS_TO_BACKEND,
 } from "@/lib/api/delivery";
@@ -95,6 +95,9 @@ export type DeliveryOrder = {
   nextAction?: string;
   notes?: string;
   history: { at: number; from: Stage; to: Stage; by: string; note?: string }[];
+  // Set when this order was created by splitting off the undelivered remainder of another order.
+  sourceDeliveryOrderId?: number;
+  sourceDeliveryNo?: string;
   _backendId?: number;
 };
 
@@ -153,6 +156,7 @@ type LookupMaps = {
 
 export type ActionResult = { ok: boolean; error?: string };
 
+export type SplitInput = { promisedDate: string; promisedTime: string; timeSlot?: string; driverEmpId?: string; vehicleId?: string; note?: string };
 export type DriverInput = { name: string; branch: string; mobile: string; license: string; licenseExpiry: string };
 export type DriverEditInput = DriverInput & { vehicleId?: string; status: Driver["status"] };
 export type VehicleInput = { registration: string; type: Vehicle["type"]; branch: string; capacityTons: number };
@@ -172,6 +176,7 @@ type S = {
   updateOrder: (id: string, patch: Partial<DeliveryOrder>) => void;
   reserveStock: (id: string) => Promise<ActionResult>;
   moveStage: (id: string, to: Stage, by: string, note?: string) => Promise<ActionResult & { applied?: boolean; pendingApproval?: DeliveryApproval }>;
+  splitOrder: (id: string, input: SplitInput) => Promise<ActionResult & { applied?: boolean; pendingApproval?: DeliveryApproval; newOrder?: DeliveryOrder }>;
   approveMove: (approvalId: number) => Promise<ActionResult>;
   rejectMove: (approvalId: number) => Promise<ActionResult>;
   addDriver: (input: DriverInput) => Promise<ActionResult>;
@@ -225,6 +230,20 @@ function validate(o: DeliveryOrder, to: Stage): string | null {
 
 function errMsg(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
+}
+
+const SPLITTABLE_STAGES: Stage[] = ["Failed", "Partially Delivered", "Returned to Branch"];
+
+export function remainingLines(o: DeliveryOrder) {
+  return o.lines
+    .map((l) => ({ ...l, remaining: l.ordered - (l.deliveredQty ?? 0) - (l.damagedQty ?? 0) }))
+    .filter((l) => l.remaining > 0);
+}
+
+export function canSplit(o: DeliveryOrder, allOrders: DeliveryOrder[]): boolean {
+  if (!SPLITTABLE_STAGES.includes(o.stage)) return false;
+  if (remainingLines(o).length === 0) return false;
+  return !allOrders.some((x) => x.sourceDeliveryOrderId === o._backendId && x.stage !== "Cancelled");
 }
 
 export const useDeliveryStore = create<S>()((set, get) => ({
@@ -371,6 +390,45 @@ export const useDeliveryStore = create<S>()((set, get) => ({
     }
   },
 
+  // Carries the undelivered remainder (Ordered - DeliveredQty - DamagedQty per line) of a Failed /
+  // Partially Delivered / Returned to Branch order into a brand-new order for redelivery. Same
+  // request/approve split as moveStage above, reusing the same ApprovalRequest pipeline server-side.
+  splitOrder: async (id, input) => {
+    const o = get().orders.find((x) => x.id === id);
+    if (!o) return { ok: false, error: "Not found" };
+    if (!o._backendId) return { ok: false, error: "This order has no backend record to split." };
+    if (!canSplit(o, get().orders)) return { ok: false, error: "This order cannot be split — check its stage, remaining quantity, and whether it's already been split." };
+
+    const driverBackendId = input.driverEmpId ? Number(input.driverEmpId.replace("EMP-", "")) : null;
+    const vehicleBackendId = input.vehicleId ? (get().vehicles.find((v) => v.id === input.vehicleId)?._backendId ?? null) : null;
+
+    try {
+      const result = await apiSplitDeliveryOrder(o._backendId, {
+        promisedDate: input.promisedDate, promisedTime: input.promisedTime, timeSlot: input.timeSlot ?? null,
+        driverId: driverBackendId, vehicleId: vehicleBackendId, note: input.note ?? null,
+      });
+
+      if (!result.applied) {
+        const pendingApproval = result.pendingApproval ? mapApiApproval(result.pendingApproval) : undefined;
+        if (pendingApproval) set((s) => ({ pendingApprovals: [pendingApproval, ...s.pendingApprovals] }));
+        useAuditStore.getState().log({
+          module: "delivery", event: "DELIVERY_SPLIT_REQUESTED", recordId: id, branch: o.branch, reason: input.note, severity: "info",
+        });
+        return { ok: true, applied: false, pendingApproval };
+      }
+
+      const newOrder = mapApiOrder(result.order);
+      set((s) => ({ orders: [newOrder, ...s.orders] }));
+      useAuditStore.getState().log({
+        module: "delivery", event: "DELIVERY_SPLIT_CREATED", recordId: newOrder.id, branch: newOrder.branch,
+        oldValue: o.id, newValue: newOrder.id, severity: "info",
+      });
+      return { ok: true, applied: true, newOrder };
+    } catch (err) {
+      return { ok: false, error: errMsg(err, "Could not split this delivery order.") };
+    }
+  },
+
   // Delivery:Full only (enforced server-side) — approves someone else's pending move request and
   // actually applies the stage change; self-approval is rejected by the server regardless.
   approveMove: async (approvalId) => {
@@ -378,7 +436,11 @@ export const useDeliveryStore = create<S>()((set, get) => ({
       const result = await apiApproveDeliveryMove(approvalId);
       const doc = mapApiOrder(result.order);
       set((s) => ({
-        orders: s.orders.map((x) => (x._backendId === result.order.id ? doc : x)),
+        // A split approval creates a brand-new order the client has never seen — prepend it instead
+        // of trying (and failing) to find a matching existing row.
+        orders: s.orders.some((x) => x._backendId === result.order.id)
+          ? s.orders.map((x) => (x._backendId === result.order.id ? doc : x))
+          : [doc, ...s.orders],
         pendingApprovals: s.pendingApprovals.filter((a) => a.id !== approvalId),
       }));
       useAuditStore.getState().log({

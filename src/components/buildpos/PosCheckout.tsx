@@ -41,6 +41,7 @@ import {
   StickyNote,
   PenLine,
   Play,
+  MoreVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -52,6 +53,12 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { productImage } from "@/lib/buildpos/product-images";
 import {
   categoryDisplayLabel,
@@ -2540,48 +2547,49 @@ export function PosCheckout() {
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-0.5">
-                  <button
-                    onClick={() => setNotesEditingSku((cur) => (cur === l.sku ? null : l.sku))}
-                    title="Add a note to this item"
-                    aria-pressed={notesEditingSku === l.sku}
-                    className={`grid h-7 w-7 place-items-center rounded-md transition ${
-                      l.notes
-                        ? "bg-brand/10 text-brand"
-                        : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
-                    }`}
-                  >
-                    <StickyNote className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setPriceEditingSku((cur) => (cur === l.sku ? null : l.sku))}
-                    title="Override this item's price"
-                    aria-pressed={priceEditingSku === l.sku}
-                    className={`grid h-7 w-7 place-items-center rounded-md transition ${
-                      l.manualUnitPrice != null
-                        ? "bg-brand/10 text-brand"
-                        : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
-                    }`}
-                  >
-                    <PenLine className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => toggleDelivery(l.sku)}
-                    title="Deliver this line instead of counter pickup"
-                    aria-pressed={Boolean(l.requiresDelivery)}
-                    className={`grid h-7 w-7 place-items-center rounded-md transition ${
-                      l.requiresDelivery
-                        ? "bg-brand/10 text-brand"
-                        : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
-                    }`}
-                  >
-                    <Truck className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => removeLine(l.sku)}
-                    className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-critical/10 hover:text-critical"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {/* A single labeled menu instead of a row of unlabeled icon buttons — cashiers
+                      couldn't tell what the icons did; text menu items are self-explanatory and
+                      only take up space while open. */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        title="More actions"
+                        aria-label={`More actions for ${l.name}`}
+                        className={`grid h-7 w-7 shrink-0 place-items-center rounded-md transition ${
+                          l.notes || l.manualUnitPrice != null || l.requiresDelivery
+                            ? "bg-brand/10 text-brand"
+                            : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
+                        }`}
+                      >
+                        <MoreVertical className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuItem onSelect={() => setNotesEditingSku(l.sku)}>
+                        <StickyNote className="h-4 w-4" />
+                        {l.notes ? "Edit note" : "Add a note"}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setPriceEditingSku(l.sku)}>
+                        <PenLine className="h-4 w-4" />
+                        {l.manualUnitPrice != null
+                          ? "Edit price override"
+                          : "Override this item's price"}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => toggleDelivery(l.sku)}>
+                        <Truck className="h-4 w-4" />
+                        {l.requiresDelivery
+                          ? "Switch to counter pickup"
+                          : "Deliver this item instead of counter pickup"}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => removeLine(l.sku)}
+                        className="text-critical focus:text-critical"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Remove item
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
               {l.requiresDelivery && (

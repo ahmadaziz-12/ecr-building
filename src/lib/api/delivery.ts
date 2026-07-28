@@ -21,6 +21,7 @@ export type ApiDeliveryOrder = {
   stockReserved: boolean; stage: string; dispatchedAt: string | null; deliveredAt: string | null; receivedBy: string | null;
   proof: string | null; failureReason: string | null; nextAction: string | null; notes: string | null;
   lines: ApiDeliveryLine[]; history: ApiHistory[]; overdue: boolean;
+  sourceDeliveryOrderId: number | null; sourceDeliveryNo: string | null;
 };
 export type ApiDriver = {
   id: number; name: string; branchId: number; branchName: string; mobile: string; license: string; licenseExpiry: string;
@@ -97,6 +98,7 @@ export function mapApiOrder(o: ApiDeliveryOrder): DeliveryOrder {
       at: new Date(h.at).getTime(), from: STAGE_TO_FRONTEND[h.fromStage] ?? "Pending", to: STAGE_TO_FRONTEND[h.toStage] ?? "Pending",
       by: h.byName, note: h.note ?? undefined,
     })),
+    sourceDeliveryOrderId: o.sourceDeliveryOrderId ?? undefined, sourceDeliveryNo: o.sourceDeliveryNo ?? undefined,
     _backendId: o.id,
   } as DeliveryOrder & { _backendId: number };
 }
@@ -120,13 +122,14 @@ export function mapApiVehicle(v: ApiVehicle): Vehicle {
 
 export type DeliveryApproval = {
   id: number; deliveryOrderId: number; deliveryNo: string; requestedByName: string; approverName?: string;
-  fromStage: Stage; toStage: Stage; reason: string; status: "Pending" | "Approved" | "Rejected"; createdAt: number; resolvedAt?: number;
+  fromStage: Stage; toStage: Stage | "Split"; reason: string; status: "Pending" | "Approved" | "Rejected"; createdAt: number; resolvedAt?: number;
 };
 export function mapApiApproval(a: ApiDeliveryApproval): DeliveryApproval {
   return {
     id: a.id, deliveryOrderId: a.deliveryOrderId, deliveryNo: a.deliveryNo, requestedByName: a.requestedByName,
     approverName: a.approverName ?? undefined, fromStage: STAGE_TO_FRONTEND[a.fromStage] ?? "Pending",
-    toStage: STAGE_TO_FRONTEND[a.toStage] ?? "Pending", reason: a.reason, status: a.status as DeliveryApproval["status"],
+    toStage: STAGE_TO_FRONTEND[a.toStage] ?? (a.toStage.startsWith("Split") ? "Split" : "Pending"),
+    reason: a.reason, status: a.status as DeliveryApproval["status"],
     createdAt: new Date(a.createdAt).getTime(), resolvedAt: a.resolvedAt ? new Date(a.resolvedAt).getTime() : undefined,
   };
 }
@@ -167,6 +170,12 @@ export async function apiTransitionDelivery(backendId: number, body: Record<stri
 }
 export async function apiReserveStock(backendId: number) {
   return apiPut<ApiDeliveryOrder>(`/api/delivery/orders/${backendId}/reserve-stock`);
+}
+export type CreateDeliverySplitRequest = {
+  promisedDate: string; promisedTime: string; timeSlot: string | null; driverId: number | null; vehicleId: number | null; note: string | null;
+};
+export async function apiSplitDeliveryOrder(backendId: number, body: CreateDeliverySplitRequest) {
+  return apiPost<ApiTransitionResponse>(`/api/delivery/orders/${backendId}/split`, body);
 }
 export const useDeliveryApprovalsApi = (enabled = true) =>
   useQuery({ queryKey: ["delivery", "approvals"], queryFn: () => apiGet<ApiDeliveryApproval[]>("/api/delivery/orders/approvals"), enabled });
