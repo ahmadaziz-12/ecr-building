@@ -53,6 +53,14 @@ export type VatReportDto = {
   taxableSales: number; totalCollected: number; totalReversed: number; netVat: number;
   collected: VatByRateRow[];
 };
+// Order-wise VAT trace: one row per sale or return/exchange credit note. An Exchange always yields
+// a linked pair — the Return row (docType e.g. "Exchange Return") and the replacement "Exchange
+// Sale" row it spawned — cross-referenced via linkedDocNo so the two sides of one exchange are
+// never read as unrelated documents.
+export type VatTransactionRow = {
+  date: string; docNo: string; docType: string; linkedDocNo: string | null; customer: string;
+  taxableAmount: number; vatCollected: number; vatReversed: number; netVat: number;
+};
 export type TopProductRow = {
   productId: number; sku: string; name: string; category: string; brand: string | null;
   supplier: string | null; uom: string; orders: number; units: number; grossRevenue: number;
@@ -295,6 +303,8 @@ export const useRefundMethodsReport = (query: ReportQuery, enabled = true) =>
   useReport<RefundMethodRow[]>("refund-methods", query, enabled);
 export const useVatReport = (query: ReportQuery, enabled = true) =>
   useReport<VatReportDto>("vat", query, enabled);
+export const useVatTransactionsReport = (query: ReportQuery, enabled = true) =>
+  useReport<VatTransactionRow[]>("vat/transactions", query, enabled);
 export const useTopProductsReport = (query: ReportQuery, enabled = true) =>
   useReport<TopProductRow[]>("top-products", query, enabled);
 export const useSlowMovingReport = (query: ReportQuery, enabled = true) =>

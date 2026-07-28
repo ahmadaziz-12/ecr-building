@@ -26,8 +26,9 @@ import {
   useReportFilterOptions, useRestockingFeesReport, useReturnsAnalysisReport, useSalesSummaryReport,
   useShiftReport, useSlowMovingReport, useStockCountVarianceReport, useSupplierPerformanceReport,
   useSupplierReturnsReport, useSurplusReturnsReport, useTopProductsReport, useVatReport,
+  useVatTransactionsReport,
   type SalesByBranchRow, type SalesByCashierRow, type SalesByCategoryRow, type SalesByDayRow,
-  type SalesByMethodRow, type VatByRateRow,
+  type SalesByMethodRow, type VatByRateRow, type VatTransactionRow,
 } from "@/lib/api/reports";
 
 // Module 12 (BRD §7/§11): the operational reports console. The report catalogue, its filters and
@@ -80,6 +81,12 @@ const PANEL_COLUMNS = {
     c("vatCollected", "VAT Collected", "money"), c("vatReversed", "VAT Reversed", "money"),
     c("netVat", "Net VAT", "money"), c("sharePct", "Share of Turnover", "pct"),
   ] as ReportColumn<VatByRateRow>[],
+  vatTransactions: [
+    c("date", "Date", "date"), c("docNo", "Document"), c("docType", "Type"),
+    c("linkedDocNo", "Linked Document"), c("customer", "Customer"),
+    c("taxableAmount", "Taxable Amount", "money"), c("vatCollected", "VAT Collected", "money"),
+    c("vatReversed", "VAT Reversed", "money"), c("netVat", "Net VAT", "money"),
+  ] as ReportColumn<VatTransactionRow>[],
 };
 
 /** A KPI block is still a report — this is the only exportable shape it has. */
@@ -171,6 +178,7 @@ export function ReportsConsole() {
   const driverPerf = useDriverPerformanceReport(query, on("driver-performance"));
 
   const vat = useVatReport(query, on("vat"));
+  const vatTxns = useVatTransactionsReport(query, on("vat"));
   const contractorAging = useContractorAgingReport(query, on("contractor-aging"));
   const shiftReport = useShiftReport(query, on("shift-report"));
   const employeeReport = useEmployeeReport(query, on("employee-report"));
@@ -380,6 +388,7 @@ export function ReportsConsole() {
                 panels: [
                   kpiPanel("VAT Return", vatKpis),
                   { name: "By Rate", columns: PANEL_COLUMNS.vatByRate, rows: vat.data?.collected ?? [] },
+                  { name: "By Document", columns: PANEL_COLUMNS.vatTransactions, rows: vatTxns.data ?? [] },
                 ],
               }}
             />
@@ -393,6 +402,16 @@ export function ReportsConsole() {
               search={state.search}
               exportName="vat-by-rate"
               emptyLabel="No taxable sales in the selected period."
+            />
+            <ReportTable
+              title="VAT by Document (Order-wise)"
+              desc="Every sale and every return/exchange credit note in the period as its own row. An Exchange always shows as a linked pair — the return that reverses VAT on the returned item(s) and the Exchange Sale that collects VAT on the replacement item(s) — cross-referenced via Linked Document."
+              columns={PANEL_COLUMNS.vatTransactions}
+              rows={vatTxns.data ?? []}
+              loading={vatTxns.isLoading}
+              search={state.search}
+              exportName="vat-by-document"
+              emptyLabel="No VAT-relevant documents in the selected period."
             />
           </>
         )}

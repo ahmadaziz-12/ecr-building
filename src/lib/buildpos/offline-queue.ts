@@ -30,8 +30,18 @@ function writeQueue(queue: QueuedCheckout[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
 }
 
+// crypto.randomUUID() only exists in secure contexts (HTTPS/localhost); this ID is just an
+// idempotency key, not security-sensitive, so an insecure-context fallback keeps checkout working
+// on plain-HTTP deployments where randomUUID is undefined.
+function randomId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 export function newClientRequestId(): string {
-  return `offline-${crypto.randomUUID()}`;
+  return `offline-${randomId()}`;
 }
 
 export function enqueueCheckout(request: CheckoutRequest): QueuedCheckout {

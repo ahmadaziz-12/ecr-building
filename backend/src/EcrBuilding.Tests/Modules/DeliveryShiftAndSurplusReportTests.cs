@@ -453,6 +453,101 @@ public class DeliveryShiftAndSurplusReportTests : IAsyncLifetime
         Assert.Equal(0m, jeddahOnly.TotalReversed);
     }
 
+    // BRD §11.2/§3.2.1: the order-wise VAT trace — every sale and every return/exchange credit note
+    // as its own row, cross-referenced back to the order or return that produced it. An Exchange must
+    // show as a LINKED PAIR (the return that reverses VAT on the returned item, and the "Exchange
+    // Sale" that collects VAT on the replacement item) rather than as one blended, unexplained figure.
+    [Fact]
+    public async Task VatTransactions_report_traces_a_standard_return_and_an_exchange_back_to_their_orders()
+    {
+        using var db = _factory.CreateDbContext();
+        var branch = TestDataSeeder.AddBranch(db);
+        var category = TestDataSeeder.AddCategory(db);
+        var product = TestDataSeeder.AddProduct(db, category, sellingPrice: 100m, vatRate: 15m);
+        var replacement = TestDataSeeder.AddProduct(db, category, sku: "REPL-1", sellingPrice: 50m, vatRate: 15m);
+        var cashier = TestDataSeeder.AddUser(db, TestDataSeeder.AddRole(db, "Cashier"), "vat-txn-cashier@test.local", branchId: branch.Id);
+        var customer = TestDataSeeder.AddCustomer(db);
+
+        // Order A: a plain sale, later given a Standard return on part of it.
+        var orderA = new Order
+        {
+            OrderNo = "SO-VTX-A", BranchId = branch.Id, CashierUserId = cashier.Id, CustomerId = customer.Id,
+            Status = OrderStatus.Completed, SubTotal = 1_000m, VatTotal = 150m, GrandTotal = 1_150m,
+            Lines = [new OrderLine { ProductId = product.Id, Qty = 10, StockQty = 10, UnitPrice = 100m, VatRate = 15m, LineTotal = 1_000m }],
+        };
+        // Order B: the sale later exchanged.
+        var orderB = new Order
+        {
+            OrderNo = "SO-VTX-B", BranchId = branch.Id, CashierUserId = cashier.Id, CustomerId = customer.Id,
+            Status = OrderStatus.Completed, SubTotal = 100m, VatTotal = 15m, GrandTotal = 115m,
+            Lines = [new OrderLine { ProductId = product.Id, Qty = 1, StockQty = 1, UnitPrice = 100m, VatRate = 15m, LineTotal = 100m }],
+        };
+        db.Orders.AddRange(orderA, orderB);
+        db.SaveChanges();
+
+        // The Exchange's replacement item — a real new Order, exactly as FinanceController.
+        // ReturnsController.Approve creates one, linked back to the Return via ExchangeOrderId.
+        var exchangeOrder = new Order
+        {
+            OrderNo = "SO-VTX-EXC", BranchId = branch.Id, CashierUserId = cashier.Id, CustomerId = customer.Id,
+            Status = OrderStatus.Completed, SubTotal = 50m, VatTotal = 7.5m, GrandTotal = 57.5m,
+            Lines = [new OrderLine { ProductId = replacement.Id, Qty = 1, StockQty = 1, UnitPrice = 50m, VatRate = 15m, LineTotal = 50m }],
+        };
+        db.Orders.Add(exchangeOrder);
+        db.SaveChanges();
+
+        db.Returns.AddRange(
+            new Return
+            {
+                ReturnNo = "RT-VTX-STD", OrderId = orderA.Id, CustomerId = customer.Id, Type = ReturnType.Standard,
+                Status = ReturnStatus.Completed, Reason = "wrong item", RefundMethod = "Cash",
+                GrossRefund = 200m, VatReversal = 30m, NetCashback = 230m,
+                Lines = [new ReturnLine { ProductId = product.Id, Qty = 2, StockQty = 2, UnitPricePaid = 100m, VatRate = 15m, Amount = 200m }],
+            },
+            new Return
+            {
+                ReturnNo = "RT-VTX-EXC", OrderId = orderB.Id, CustomerId = customer.Id, Type = ReturnType.Exchange,
+                Status = ReturnStatus.Completed, Reason = "swap for cheaper item", RefundMethod = "Cash",
+                GrossRefund = 100m, VatReversal = 15m, NetCashback = 115m, ExchangeOrderId = exchangeOrder.Id,
+                Lines = [new ReturnLine { ProductId = product.Id, Qty = 1, StockQty = 1, UnitPricePaid = 100m, VatRate = 15m, Amount = 100m }],
+            });
+        db.SaveChanges();
+
+        var client = ReportsClient(db, branch);
+        var rows = await client.GetFromJsonAsync<List<VatTransactionTestRow>>(
+            $"/api/insights/reports/vat/transactions?from={Day(-7)}&to={Day()}");
+        Assert.NotNull(rows);
+
+        var saleA = Assert.Single(rows!, r => r.DocNo == "SO-VTX-A");
+        Assert.Equal("Sale", saleA.DocType);
+        Assert.Null(saleA.LinkedDocNo);
+        Assert.Equal(150m, saleA.VatCollected);
+        Assert.Equal(0m, saleA.VatReversed);
+
+        var stdReturn = Assert.Single(rows!, r => r.DocNo == "RT-VTX-STD");
+        Assert.Equal("Standard Return", stdReturn.DocType);
+        Assert.Equal("SO-VTX-A", stdReturn.LinkedDocNo);
+        Assert.Equal(0m, stdReturn.VatCollected);
+        Assert.Equal(30m, stdReturn.VatReversed);
+        Assert.Equal(-30m, stdReturn.NetVat);
+
+        // The Exchange's two halves must both appear and cross-reference each other — neither side
+        // is an orphaned figure.
+        var excReturn = Assert.Single(rows!, r => r.DocNo == "RT-VTX-EXC");
+        Assert.Equal("Exchange Return", excReturn.DocType);
+        Assert.Equal("SO-VTX-B", excReturn.LinkedDocNo);
+        Assert.Equal(15m, excReturn.VatReversed);
+
+        var excSale = Assert.Single(rows!, r => r.DocNo == "SO-VTX-EXC");
+        Assert.Equal("Exchange Sale", excSale.DocType);
+        Assert.Equal("RT-VTX-EXC", excSale.LinkedDocNo);
+        Assert.Equal(7.5m, excSale.VatCollected);
+        Assert.Equal(0m, excSale.VatReversed);
+
+        // Net VAT reconciles: 150 + 15 + 7.5 collected − 30 − 15 reversed = 127.5.
+        Assert.Equal(127.5m, rows!.Sum(r => r.NetVat));
+    }
+
     [Fact]
     public async Task Filter_options_expose_the_fleet_and_till_dimensions_the_new_reports_filter_on()
     {
@@ -508,6 +603,10 @@ public class DeliveryShiftAndSurplusReportTests : IAsyncLifetime
     private record VatTestDto(
         decimal TaxableSales, decimal TotalCollected, decimal TotalReversed, decimal NetVat,
         IReadOnlyList<VatByRateTestRow> Collected);
+
+    private record VatTransactionTestRow(
+        DateTime Date, string DocNo, string DocType, string? LinkedDocNo, string Customer,
+        decimal TaxableAmount, decimal VatCollected, decimal VatReversed, decimal NetVat);
 
     private record FilterOptionTestRow(string Id, string Label, string? Sub);
 

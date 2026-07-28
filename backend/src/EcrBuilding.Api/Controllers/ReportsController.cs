@@ -33,6 +33,15 @@ public record VatByRateRow(
 public record VatReportDto(
     decimal TaxableSales, decimal TotalCollected, decimal TotalReversed, decimal NetVat,
     IReadOnlyList<VatByRateRow> Collected);
+// BRD §11.2/§3.2.1: one row per source document (a sale OR a return/exchange credit note) so a
+// VAT auditor can trace every collected/reversed riyal back to the exact order or return that
+// produced it — the by-rate table above answers "how much," this answers "which document." An
+// Exchange always produces a LINKED PAIR: the Return row reverses VAT on the returned item(s),
+// the Exchange Sale row (a real new Order) collects VAT on the replacement item(s); LinkedDocNo
+// cross-references the pair so neither side reads as an orphaned, unexplained figure.
+public record VatTransactionRow(
+    DateTime Date, string DocNo, string DocType, string? LinkedDocNo, string Customer,
+    decimal TaxableAmount, decimal VatCollected, decimal VatReversed, decimal NetVat);
 public record TopProductRow(
     int ProductId, string Sku, string Name, string Category, string? Brand, string? Supplier, string Uom,
     int Orders, decimal Units, decimal GrossRevenue, decimal Discounts, decimal Revenue,
@@ -345,6 +354,50 @@ public class ReportsController(AppDbContext db) : ReportControllerBase
         return Ok(new VatReportDto(
             taxableSales, totalCollected, totalReversed,
             Math.Round(totalCollected - totalReversed, 2), rateRows));
+    }
+
+    // BRD §11.2/§3.2.1: order-wise VAT trace — every sale and every return/exchange credit note in
+    // the window as its own row, so a specific order's or return's VAT can be looked up directly
+    // instead of only ever seen blended into a by-rate total.
+    [HttpGet("vat/transactions")]
+    public async Task<ActionResult<List<VatTransactionRow>>> VatTransactions(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int[]? branchId,
+        CancellationToken ct = default)
+    {
+        var (f, t) = Window(from, to);
+        var orders = await CompletedOrders(f, t, branchId).Include(o => o.Customer).ToListAsync(ct);
+        var returns = await db.Returns.Include(r => r.Order).Include(r => r.Customer).Include(r => r.ExchangeOrder)
+            .Where(r => r.Status == ReturnStatus.Completed && r.CreatedAt >= f && r.CreatedAt < t)
+            .ToListAsync(ct);
+        returns = returns.Where(r => ReportFilters.Matches(branchId, r.Order?.BranchId ?? r.ExchangeOrder?.BranchId)).ToList();
+
+        // An Exchange's replacement sale is a real Order (created at Approve — see FinanceController
+        // .ReturnsController.Approve) — tag it "Exchange Sale" instead of a plain "Sale" and link it
+        // back to the Return that spawned it, rather than let it look like an unrelated walk-in sale.
+        var exchangeOrderReturnNo = returns
+            .Where(r => r.ExchangeOrderId is not null)
+            .ToDictionary(r => r.ExchangeOrderId!.Value, r => r.ReturnNo);
+
+        var rows = new List<VatTransactionRow>();
+        foreach (var o in orders)
+        {
+            var isExchangeSale = exchangeOrderReturnNo.TryGetValue(o.Id, out var linkedReturnNo);
+            rows.Add(new VatTransactionRow(
+                o.CreatedAt, o.OrderNo, isExchangeSale ? "Exchange Sale" : "Sale",
+                isExchangeSale ? linkedReturnNo : null,
+                o.Customer?.NameEn ?? "Walk-in Customer",
+                Math.Round(o.SubTotal - o.DiscountTotal, 2), Math.Round(o.VatTotal, 2), 0, Math.Round(o.VatTotal, 2)));
+        }
+        foreach (var r in returns)
+        {
+            rows.Add(new VatTransactionRow(
+                r.CreatedAt, r.ReturnNo, $"{r.Type} Return",
+                r.Order?.OrderNo ?? (r.IsNoReceipt ? "No Receipt" : null),
+                r.Customer?.NameEn ?? "Walk-in Customer",
+                Math.Round(r.GrossRefund, 2), 0, Math.Round(r.VatReversal, 2), Math.Round(-r.VatReversal, 2)));
+        }
+
+        return Ok(rows.OrderByDescending(x => x.Date).ToList());
     }
 
     // Top Products — best sellers by revenue, with the margin, discounting and return rate behind
