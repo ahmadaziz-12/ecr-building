@@ -15,7 +15,7 @@ namespace EcrBuilding.Api.Controllers;
 [Route("api/pos/quotations")]
 [Authorize]
 [RequireModule("/operate/orders", PermissionAction.View)]
-public class QuotationsController(AppDbContext db, IAuditService audit) : ControllerBase
+public class QuotationsController(AppDbContext db, IAuditService audit, IStockReservationService reservations) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<QuotationDto>>> List([FromQuery] string? status, CancellationToken ct)
@@ -76,8 +76,15 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
         if (linesResult.Error is not null) return BadRequest(new { error = linesResult.Error });
         ApplyLines(quotation, linesResult.Lines!, discountPct);
 
+        // A quotation holds the stock it quotes from the moment it's created — otherwise the same
+        // material could be quoted to two customers and only one of them could ever actually get it.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var reserveError = await ReserveOrConflict(request.BranchId, quotation.Lines, ct);
+        if (reserveError is not null) { await tx.RollbackAsync(ct); return reserveError!; }
+
         db.Quotations.Add(quotation);
         await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
         await audit.LogAsync("orders", "QUOTATION_CREATED", quotation.Id.ToString(), userId: cashierId, branchId: quotation.BranchId, cancellationToken: ct);
 
         var created = await Query().FirstAsync(q => q.Id == quotation.Id, ct);
@@ -114,6 +121,13 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
 
         var before = new { quotation.ProjectCode, quotation.CustomerReference, quotation.DiscountPct, quotation.GrandTotal };
 
+        // Release the old lines' hold and re-reserve against the new lines — simplest correct way to
+        // land on the right Reserved total whether the edit grew, shrank, or just re-priced the cart.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await reservations.ReleaseAsync(quotation.BranchId, quotation.Lines.Select(l => (l.ProductId, l.Qty)), ct);
+        var reserveError = await ReserveOrConflict(quotation.BranchId, linesResult.Lines!, ct);
+        if (reserveError is not null) { await tx.RollbackAsync(ct); return reserveError!; }
+
         db.QuotationLines.RemoveRange(quotation.Lines);
         quotation.Lines.Clear();
         quotation.CustomerId = request.CustomerId;
@@ -124,6 +138,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
         ApplyLines(quotation, linesResult.Lines!, discountPct);
 
         await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
         var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         await audit.LogAsync("orders", "QUOTATION_UPDATED", id.ToString(), userId: cashierId, branchId: quotation.BranchId,
             oldValue: before, newValue: new { quotation.ProjectCode, quotation.CustomerReference, quotation.DiscountPct, quotation.GrandTotal }, cancellationToken: ct);
@@ -136,7 +151,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
     [RequireModule("/operate/orders", PermissionAction.Delete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var quotation = await db.Quotations.FirstOrDefaultAsync(q => q.Id == id, ct);
+        var quotation = await Query().FirstOrDefaultAsync(q => q.Id == id, ct);
         if (quotation is null) return NotFound();
         // Soft-cancel, not a hard delete: the row stays for audit/history (matches Voided orders),
         // it's just excluded from active work. A quotation already turned into a real order can't be
@@ -147,8 +162,11 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
         }
         if (quotation.Status == QuotationStatus.Cancelled) return NoContent();
 
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await reservations.ReleaseAsync(quotation.BranchId, quotation.Lines.Select(l => (l.ProductId, l.Qty)), ct);
         quotation.Status = QuotationStatus.Cancelled;
         await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
         var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         await audit.LogAsync("orders", "QUOTATION_CANCELLED", id.ToString(), userId: cashierId, branchId: quotation.BranchId, cancellationToken: ct);
         return NoContent();
@@ -164,7 +182,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
 
     [HttpPut("{id:int}/reject")]
     [RequireModule("/operate/orders", PermissionAction.Edit)]
-    public Task<ActionResult<QuotationDto>> Reject(int id, CancellationToken ct) => Transition(id, QuotationStatus.Sent, QuotationStatus.Rejected, "QUOTATION_REJECTED", ct);
+    public Task<ActionResult<QuotationDto>> Reject(int id, CancellationToken ct) => Transition(id, QuotationStatus.Sent, QuotationStatus.Rejected, "QUOTATION_REJECTED", ct, releaseStock: true);
 
     [HttpPost("{id:int}/convert")]
     [RequireModule("/operate/orders", PermissionAction.Create)]
@@ -192,7 +210,16 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
         {
             // double cast: same Sqlite decimal-parameter-in-WHERE-comparison gotcha as
             // OrdersController.Checkout's stock deduction — see the comment there / docs/TESTING.md.
+            // First release whatever hold this quotation's own line might be sitting on — a no-op if
+            // Create/Update never got to reserve it (e.g. the branch hadn't stocked this product yet
+            // at the time) — then deduct exactly like a normal checkout sale, with the same atomic
+            // (OnHand - Reserved) >= qty guard. Releasing first (rather than combining into one
+            // statement assuming Reserved already covers qty) keeps this correct whether or not this
+            // quotation actually held a reservation for the line.
             var qty = (double)line.Qty;
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE BranchStockLevels SET Reserved = Reserved - {qty} WHERE ProductId = {line.ProductId} AND BranchId = {quotation.BranchId} AND Reserved >= {qty}",
+                ct);
             var rowsAffected = await db.Database.ExecuteSqlInterpolatedAsync(
                 $"UPDATE BranchStockLevels SET OnHand = OnHand - {qty} WHERE ProductId = {line.ProductId} AND BranchId = {quotation.BranchId} AND (OnHand - Reserved) >= {qty}",
                 ct);
@@ -223,24 +250,55 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
         return Ok(OrdersController.MapOrder(created));
     }
 
-    private async Task<ActionResult<QuotationDto>> Transition(int id, QuotationStatus from, QuotationStatus to, string auditEvent, CancellationToken ct)
+    private async Task<ActionResult<QuotationDto>> Transition(int id, QuotationStatus from, QuotationStatus to, string auditEvent, CancellationToken ct, bool releaseStock = false)
     {
         var quotation = await Query().FirstOrDefaultAsync(q => q.Id == id, ct);
         if (quotation is null) return NotFound();
         if (quotation.Status != from) return BadRequest(new { error = $"Quotation must be {from} to move to {to} (currently {quotation.Status})." });
 
-        quotation.Status = to;
-        await db.SaveChangesAsync(ct);
+        if (releaseStock)
+        {
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await reservations.ReleaseAsync(quotation.BranchId, quotation.Lines.Select(l => (l.ProductId, l.Qty)), ct);
+            quotation.Status = to;
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+        else
+        {
+            quotation.Status = to;
+            await db.SaveChangesAsync(ct);
+        }
         await audit.LogAsync("orders", auditEvent, id.ToString(), cancellationToken: ct);
         return Ok(Map(quotation));
     }
 
+    // A quotation stops holding stock the moment it's no longer actionable — Draft/Sent are the only
+    // statuses a reservation lives through.
     private async Task ExpireStale(CancellationToken ct)
     {
-        var stale = await db.Quotations.Where(q => q.Status == QuotationStatus.Sent && q.ValidUntil < DateTime.UtcNow).ToListAsync(ct);
+        var stale = await db.Quotations.Include(q => q.Lines)
+            .Where(q => q.Status == QuotationStatus.Sent && q.ValidUntil < DateTime.UtcNow).ToListAsync(ct);
         if (stale.Count == 0) return;
-        foreach (var q in stale) q.Status = QuotationStatus.Expired;
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        foreach (var q in stale)
+        {
+            await reservations.ReleaseAsync(q.BranchId, q.Lines.Select(l => (l.ProductId, l.Qty)), ct);
+            q.Status = QuotationStatus.Expired;
+        }
         await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+    }
+
+    // Shared by Create/Update: reserves every line's Qty at the branch, or returns a ready-to-return
+    // 400 naming the first product that doesn't have enough available (OnHand - Reserved) stock. The
+    // caller is expected to already be inside a transaction and roll it back when this returns non-null.
+    private async Task<ActionResult<QuotationDto>?> ReserveOrConflict(int branchId, IEnumerable<QuotationLine> lines, CancellationToken ct)
+    {
+        var failedProductId = await reservations.ReserveAsync(branchId, lines.Select(l => (l.ProductId, l.Qty)), ct);
+        if (failedProductId is null) return null;
+        var sku = (await db.Products.FindAsync([failedProductId], ct))?.Sku ?? failedProductId.ToString();
+        return BadRequest(new { error = $"Insufficient stock for {sku}." });
     }
 
     private IQueryable<Quotation> Query() => db.Quotations
