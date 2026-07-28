@@ -21,6 +21,7 @@ function baseOrder(overrides: Partial<OrderDto> = {}): OrderDto {
     fees: [],
     loyaltyPointsEarned: null, loyaltyPointsBalance: null, loyaltyNextTierThreshold: null, loyaltyPointsRedeemed: null,
     deliveryOrderId: null, deliveryOrderNo: null, deliveryStage: null,
+    poReference: null, projectCode: null,
     ...overrides,
   };
 }

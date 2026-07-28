@@ -53,7 +53,7 @@ function inDateRange(iso: string, range: DateRangeValue | undefined): boolean {
 
 const PAGE_SIZE = 10;
 
-const QUOTATION_FIELDS: FilterFieldDef[] = [{ kind: "search", key: "search", placeholder: "Search quote #, customer…" }];
+const QUOTATION_FIELDS: FilterFieldDef[] = [{ kind: "search", key: "search", placeholder: "Search quote #, customer, project code…" }];
 
 export function OrdersPage() {
   const { user, hasAccess } = useAuth();
@@ -103,7 +103,7 @@ export function OrdersPage() {
     { kind: "select", key: "status", placeholder: "Status", options: ORDER_STATUSES },
     { kind: "select", key: "type", placeholder: "Order Type", options: ORDER_TYPES },
     { kind: "select", key: "paymentMethod", placeholder: "Payment Method", options: PAYMENT_METHODS, labels: PAYMENT_LABELS },
-    { kind: "search", key: "search", placeholder: "Search order #, customer…" },
+    { kind: "search", key: "search", placeholder: "Search order #, customer, project code, PO ref…" },
   ], [branches, terminals, orders]);
   const fields = tab === "Quotations" ? QUOTATION_FIELDS : orderFields;
 
@@ -137,7 +137,8 @@ export function OrdersPage() {
       if (!inDateRange(o.createdAt, applied.dateRange as DateRangeValue)) return false;
       if (search) {
         const t = search.trim().toLowerCase();
-        if (t && !o.orderNo.toLowerCase().includes(t) && !o.customerName.toLowerCase().includes(t)) return false;
+        if (t && !o.orderNo.toLowerCase().includes(t) && !o.customerName.toLowerCase().includes(t)
+          && !(o.projectCode ?? "").toLowerCase().includes(t) && !(o.poReference ?? "").toLowerCase().includes(t)) return false;
       }
       return true;
     });
@@ -148,7 +149,7 @@ export function OrdersPage() {
     return (quotations ?? []).filter((q) => {
       if (!search) return true;
       const t = search.trim().toLowerCase();
-      return !t || q.quoteNo.toLowerCase().includes(t) || q.customerName.toLowerCase().includes(t);
+      return !t || q.quoteNo.toLowerCase().includes(t) || q.customerName.toLowerCase().includes(t) || q.projectCode.toLowerCase().includes(t);
     });
   }, [quotations, applied.search]);
 
@@ -198,11 +199,11 @@ export function OrdersPage() {
 
   function handleExport() {
     if (tab === "Quotations") {
-      exportToCsv("quotations.csv", ["Quote #", "Customer", "Created By", "Valid Until", "Amount", "Status"],
-        filteredQuotations.map((q) => [q.quoteNo, q.customerName, q.createdByName, q.validUntil, q.grandTotal, q.status]));
+      exportToCsv("quotations.csv", ["Quote #", "Customer", "Project Code", "Created By", "Valid Until", "Amount", "Status"],
+        filteredQuotations.map((q) => [q.quoteNo, q.customerName, q.projectCode, q.createdByName, q.validUntil, q.grandTotal, q.status]));
     } else {
-      exportToCsv("orders.csv", ["Order ID", "Date/Time", "Customer", "Type", "Payment", "Items", "Amount", "Cashier", "Status"],
-        filteredOrders.map((o) => [o.orderNo, o.createdAt, o.customerName, o.type, o.payments.map((p) => p.method).join(" + "), o.lines.reduce((s, l) => s + l.qty, 0), o.grandTotal, o.cashierName, o.status]));
+      exportToCsv("orders.csv", ["Order ID", "Date/Time", "Customer", "Type", "Project Code", "Payment", "Items", "Amount", "Cashier", "Status"],
+        filteredOrders.map((o) => [o.orderNo, o.createdAt, o.customerName, o.type, o.projectCode ?? "", o.payments.map((p) => p.method).join(" + "), o.lines.reduce((s, l) => s + l.qty, 0), o.grandTotal, o.cashierName, o.status]));
     }
     toast.success("Exported CSV");
   }
@@ -258,6 +259,7 @@ export function OrdersPage() {
                 <TableRow>
                   <TableHead>Quote #</TableHead>
                   <TableHead>Customer</TableHead>
+                  <TableHead>Project Code</TableHead>
                   <TableHead>Created By</TableHead>
                   <TableHead>Valid Until</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
@@ -270,6 +272,7 @@ export function OrdersPage() {
                   <TableRow key={q.id} onClick={() => setDetailQuote(q)} className="cursor-pointer">
                     <TableCell className="font-mono text-xs">{q.quoteNo}</TableCell>
                     <TableCell>{q.customerName}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{q.projectCode}</TableCell>
                     <TableCell className="text-muted-foreground">{q.createdByName}</TableCell>
                     <TableCell className="text-muted-foreground">{new Date(q.validUntil).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</TableCell>
                     <TableCell className="text-right font-medium">{fmtSar(q.grandTotal)}</TableCell>
@@ -292,7 +295,7 @@ export function OrdersPage() {
                   </TableRow>
                 ))}
                 {filteredQuotations.length === 0 && (
-                  <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">No quotations match those filters.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">No quotations match those filters.</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
@@ -311,6 +314,7 @@ export function OrdersPage() {
                   <TableHead>Date/Time</TableHead>
                   <TableHead>Customer</TableHead>
                   <TableHead>Type</TableHead>
+                  <TableHead>Project Code</TableHead>
                   <TableHead>Payment</TableHead>
                   <TableHead className="text-right">Items</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
@@ -327,6 +331,7 @@ export function OrdersPage() {
                     <TableCell className="text-muted-foreground">{fmtTime(o.createdAt)}</TableCell>
                     <TableCell>{o.customerName}</TableCell>
                     <TableCell>{o.type}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{o.projectCode || "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{o.payments.map((p) => p.method).join(" + ") || "—"}</TableCell>
                     <TableCell className="text-right">{o.lines.reduce((s, l) => s + l.qty, 0)}</TableCell>
                     <TableCell className="text-right font-medium">{fmtSar(o.grandTotal)}</TableCell>
@@ -352,7 +357,7 @@ export function OrdersPage() {
                   </TableRow>
                 ))}
                 {filteredOrders.length === 0 && (
-                  <TableRow><TableCell colSpan={11} className="py-8 text-center text-sm text-muted-foreground">No orders match those filters.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={12} className="py-8 text-center text-sm text-muted-foreground">No orders match those filters.</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>

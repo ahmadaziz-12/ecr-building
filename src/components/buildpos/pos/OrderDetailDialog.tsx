@@ -37,6 +37,18 @@ export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; 
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Payment</p>
                 <p className="mt-0.5 font-medium">{order.paymentStatus}</p>
               </div>
+              {order.projectCode && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Project Code</p>
+                  <p className="mt-0.5 font-mono text-xs font-medium">{order.projectCode}</p>
+                </div>
+              )}
+              {order.poReference && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">PO Reference</p>
+                  <p className="mt-0.5 font-mono text-xs font-medium">{order.poReference}</p>
+                </div>
+              )}
             </div>
 
             <div className="overflow-x-auto rounded-lg border border-black/5">

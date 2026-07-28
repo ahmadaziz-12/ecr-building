@@ -1042,5 +1042,5 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         o.Payments.Select(p => new OrderPaymentDto(p.Method.ToString(), p.Amount, p.ReferenceNumber, p.Status.ToString(), p.CreatedAt)).ToList(),
         o.Fees.Select(f => new OrderFeeDto(f.Label, f.Amount)).ToList(),
         loyaltyPointsEarned, loyaltyPointsBalance, loyaltyNextTierThreshold, loyaltyPointsRedeemed,
-        deliveryOrderId, deliveryOrderNo, deliveryStage);
+        deliveryOrderId, deliveryOrderNo, deliveryStage, o.PoReference, o.ProjectCode);
 }
