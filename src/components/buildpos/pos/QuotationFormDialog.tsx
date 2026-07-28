@@ -7,11 +7,21 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCreateQuotation, useUpdateQuotation, useCustomers, usePricingRules, type QuotationDto } from "@/lib/api/pos";
-import { categoryDisplayLabel, useCategories, useProducts } from "@/lib/api/catalog";
+import { categoryDisplayLabel, useCategories, useProducts, type ProductDto } from "@/lib/api/catalog";
 
-type Line = { productId: number; sku: string; name: string; qty: number; price: number };
+type Line = { productId: number; sku: string; name: string; qty: number };
 
-const CONTRACTOR_DISCOUNT_PCT = 5;
+// BRD §7 (CR-038), mirroring QuotationsController.BuildLines/OrdersController.Checkout: which of a
+// product's list prices this customer is charged. Unlike SellingPrice, price is resolved live (not
+// stored on the Line) so it always reflects the currently-selected customer and current catalog data
+// — the same way the backend recomputes it fresh on every Create/Update.
+function resolveUnitPrice(product: ProductDto, priceListType: string | undefined): { price: number; isListPrice: boolean } {
+  const segmentPrice = priceListType === "Contractor" ? product.contractorPrice
+    : priceListType === "Wholesale" ? product.wholesalePrice
+    : priceListType === "Project" ? product.projectPrice
+    : null;
+  return segmentPrice != null ? { price: segmentPrice, isListPrice: true } : { price: product.sellingPrice, isListPrice: false };
+}
 
 export function QuotationFormDialog({
   open, onOpenChange, branchId, editing,
@@ -45,28 +55,33 @@ export function QuotationFormDialog({
   const [projectCode, setProjectCode] = useState("");
   const [customerReference, setCustomerReference] = useState("");
   const [discountPct, setDiscountPct] = useState(0);
+  // True once the user has explicitly typed a Discount %, as opposed to the value the customer-type
+  // auto-fill computed. Only an explicit value is sent on the wire (discountPct omitted otherwise) —
+  // letting the server derive its own auto contractor rate is what lets it suppress that rate when a
+  // Contractor/Wholesale/Project list price already applies to a line (BRD §7 CR-038), instead of
+  // double-dipping a discount on top of an already-negotiated list price.
+  const [discountPctTouched, setDiscountPctTouched] = useState(false);
 
   // Auto-fill tracking: remembers the last value WE set from the selected customer, so picking a
-  // customer fills project code + discount for convenience without ever clobbering something the
-  // user typed/changed themselves.
+  // customer fills project code for convenience without ever clobbering something the user typed.
   const lastAutoProjectCode = useRef<string>("");
-  const lastAutoDiscount = useRef<number>(0);
 
   // Excludes the real seeded "Walk-in Customer" DB row (Type=WalkIn): the "walk-in" sentinel value
   // already covers that case, so listing both would show "Walk-in Customer" twice in the dropdown.
   const selectableCustomers = (customers ?? []).filter((c) => c.type !== "WalkIn");
   const customer = customerId === "walk-in" ? null : selectableCustomers.find((c) => String(c.id) === customerId) ?? null;
 
-  // BRD §5.1/§6.2, mirroring QuotationsController/OrdersController.Checkout: Active rules scoped to
-  // this quotation's branch (or company-wide) and not past ValidUntil.
+  // BRD §5.1/§6.2/§7, mirroring QuotationsController/OrdersController.Checkout: Active rules scoped
+  // to this quotation's branch (or company-wide), on/after ValidFrom and not past ValidUntil.
   const activePricingRules = (pricingRules ?? []).filter((r) =>
     r.status === "Active"
     && (r.branchId == null || r.branchId === branchId)
+    && (r.validFrom == null || new Date(r.validFrom).getTime() <= Date.now())
     && (r.validUntil == null || new Date(r.validUntil).getTime() >= Date.now()));
   const bestTradeTierRule = activePricingRules
     .filter((r) => r.type === "Trade Tier")
     .sort((a, b) => (Number(b.branchId != null) - Number(a.branchId != null)) || b.priority - a.priority)[0] ?? null;
-  const contractorRatePct = bestTradeTierRule?.value ?? CONTRACTOR_DISCOUNT_PCT;
+  const contractorRatePct = bestTradeTierRule?.value ?? 0;
   // BRD §6.2 Quantity Discount: matched case-insensitively (a rule's Sku is uppercased at creation,
   // a product's own Sku is stored exactly as entered) and doesn't stack with the blanket discount —
   // each line gets whichever is larger, same as OrdersController.Checkout / PosCheckout's cart preview.
@@ -75,20 +90,41 @@ export function QuotationFormDialog({
     quantityRules
       .filter((r) => (!r.sku || r.sku.toUpperCase() === l.sku.toUpperCase()) && l.qty >= r.minQuantity!)
       .reduce((max, r) => Math.max(max, r.value), 0);
-  const lineDiscountPct = (l: Line) => Math.max(discountPct, quantityPctFor(l));
+  // BRD §7 (CR-040): Promotional rules auto-apply within their date window, no coupon needed — same
+  // "larger of" group as everything else, never stacked on top.
+  const promoRules = activePricingRules.filter((r) => r.type === "Promotional");
+  const promoPctFor = (l: Line) =>
+    promoRules
+      .filter((r) => !r.sku || r.sku.toUpperCase() === l.sku.toUpperCase())
+      .reduce((max, r) => Math.max(max, r.value), 0);
+  const productFor = (l: Line) => products?.find((p) => p.id === l.productId);
+  const priceFor = (l: Line) => {
+    const product = productFor(l);
+    return product ? resolveUnitPrice(product, customer?.priceListType) : { price: 0, isListPrice: false };
+  };
+  // BRD §7 (CR-038): once a real segment list price is actually used for a line, the automatic
+  // contractor trade % would double-dip on top of an already-negotiated price — suppressed in that
+  // case unless the user explicitly typed a Discount % (see discountPctTouched above).
+  const lineDiscountPct = (l: Line) => {
+    const effectiveDiscountPct = priceFor(l).isListPrice && !discountPctTouched ? 0 : discountPct;
+    return Math.max(effectiveDiscountPct, quantityPctFor(l), promoPctFor(l));
+  };
 
   useEffect(() => {
     if (!open) return;
     if (editing) {
       setCustomerId(editing.customerId ? String(editing.customerId) : "walk-in");
-      setLines(editing.lines.map((l) => ({ productId: l.productId, sku: l.sku, name: l.productName, qty: l.qty, price: l.unitPrice })));
+      setLines(editing.lines.map((l) => ({ productId: l.productId, sku: l.sku, name: l.productName, qty: l.qty })));
       setValidUntil(editing.validUntil ? editing.validUntil.slice(0, 10) : "");
       setNotes(editing.notes ?? "");
       setProjectCode(editing.projectCode);
       setCustomerReference(editing.customerReference);
       setDiscountPct(editing.discountPct);
+      // Treat an existing quotation's saved discount as an explicit value on reload — re-deriving it
+      // silently from today's rules could shift the number the moment the edit form opens, before
+      // the user has changed anything.
+      setDiscountPctTouched(true);
       lastAutoProjectCode.current = editing.projectCode;
-      lastAutoDiscount.current = editing.discountPct;
     } else {
       reset();
     }
@@ -108,12 +144,10 @@ export function QuotationFormDialog({
     }
 
     // Discount: BRD §3.4 contractor auto-discount, sourced from the active Trade Tier rule's own
-    // Value when a manager has configured one (falls back to the flat default) — same non-destructive
-    // auto-fill rule as project code above.
-    if (discountPct === lastAutoDiscount.current) {
-      const auto = picked?.type === "Contractor" ? contractorRatePct : 0;
-      setDiscountPct(auto);
-      lastAutoDiscount.current = auto;
+    // Value when a manager has configured one (falls back to the flat default) — non-destructive:
+    // never overwrites a Discount % the user has explicitly typed.
+    if (!discountPctTouched) {
+      setDiscountPct(picked?.type === "Contractor" ? contractorRatePct : 0);
     }
   }
 
@@ -126,7 +160,7 @@ export function QuotationFormDialog({
       toast.error(`${p.sku} has no stock at this branch — can't add it to a quotation.`);
       return;
     }
-    setLines((prev) => (prev.some((l) => l.productId === p.id) ? prev : [...prev, { productId: p.id, sku: p.sku, name: p.nameEn, qty: 1, price: p.sellingPrice }]));
+    setLines((prev) => (prev.some((l) => l.productId === p.id) ? prev : [...prev, { productId: p.id, sku: p.sku, name: p.nameEn, qty: 1 }]));
     setSearch("");
   }
 
@@ -142,8 +176,8 @@ export function QuotationFormDialog({
     setProjectCode("");
     setCustomerReference("");
     setDiscountPct(0);
+    setDiscountPctTouched(false);
     lastAutoProjectCode.current = "";
-    lastAutoDiscount.current = 0;
   }
 
   const locked = editing != null && editing.status !== "Draft" && editing.status !== "Sent";
@@ -166,7 +200,10 @@ export function QuotationFormDialog({
       notes: notes || undefined,
       projectCode: projectCode.trim(),
       customerReference: customerReference.trim() || undefined,
-      discountPct,
+      // Omit when the user hasn't explicitly typed a value — the server derives its own auto
+      // contractor rate, which lets it suppress that rate for a line already priced off a real
+      // Contractor/Wholesale/Project list price instead of double-dipping (BRD §7 CR-038).
+      discountPct: discountPctTouched ? discountPct : undefined,
     };
     try {
       if (editing) {
@@ -239,6 +276,7 @@ export function QuotationFormDialog({
             <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-black/10 bg-white shadow-sm">
               {matches.map((p) => {
                 const outOfStock = p.totalAvailable <= 0;
+                const { price } = resolveUnitPrice(p, customer?.priceListType);
                 return (
                   <button
                     key={p.id}
@@ -253,7 +291,7 @@ export function QuotationFormDialog({
                       )}
                     </span>
                     <span className="shrink-0 pl-2 text-right text-muted-foreground">
-                      <span className="block">{p.sellingPrice.toFixed(2)} ر.س</span>
+                      <span className="block">{price.toFixed(2)} ر.س</span>
                       <span className={`block text-[10px] ${outOfStock ? "text-critical" : "text-muted-foreground/70"}`}>
                         {outOfStock ? "Out of stock" : `${p.totalAvailable} available`}
                       </span>
@@ -268,7 +306,8 @@ export function QuotationFormDialog({
         {lines.length > 0 && (
           <div className="rounded-lg border border-black/5">
             {lines.map((l, i) => {
-              const gross = l.qty * l.price;
+              const { price, isListPrice } = priceFor(l);
+              const gross = l.qty * price;
               const pct = lineDiscountPct(l);
               const discountAmt = gross * pct / 100;
               const available = availableFor(l.productId);
@@ -276,7 +315,14 @@ export function QuotationFormDialog({
               return (
                 <div key={l.productId} className={`px-3 py-2 text-sm ${i > 0 ? "border-t border-black/5" : ""}`}>
                   <div className="flex items-center gap-2">
-                    <span className="flex-1 truncate">{l.sku} · {l.name}</span>
+                    <span className="flex-1 truncate">
+                      {l.sku} · {l.name}
+                      {isListPrice && (
+                        <span className="ml-1.5 rounded-full bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
+                          {customer?.priceListType} price
+                        </span>
+                      )}
+                    </span>
                     <Input
                       type="number"
                       min={1}
@@ -323,7 +369,10 @@ export function QuotationFormDialog({
               step={0.5}
               value={discountPct}
               disabled={locked}
-              onChange={(e) => setDiscountPct(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+              onChange={(e) => {
+                setDiscountPctTouched(true);
+                setDiscountPct(Math.min(100, Math.max(0, Number(e.target.value) || 0)));
+              }}
             />
           </div>
         </div>

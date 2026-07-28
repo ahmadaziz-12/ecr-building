@@ -137,7 +137,7 @@ public class Module3CreditLimitTests : IAsyncLifetime
         {
             branchId = branch.Id, terminalId = (int?)null, customerId = customer.Id, type = "Contractor",
             lines = new[] { new { productId = product.Id, qty = 1m } },
-            payments = new[] { new { method = "Cash", amount = 95m } }, // 100 * (1 - 5% contractor discount)
+            payments = new[] { new { method = "Cash", amount = 100m } }, // no Trade Tier rule configured, so full price
             couponCode = (string?)null, manualDiscount = (object?)null, customFees = (object?)null, notes = (string?)null,
         };
 

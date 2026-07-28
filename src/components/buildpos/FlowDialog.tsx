@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Barcode, Check, ChevronLeft, ChevronRight, ImageOff, Loader2, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { Barcode, Check, ChevronLeft, ChevronRight, ImageOff, Loader2, Lock, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { Field, Flow, LineItemColumn } from "@/lib/buildpos/flows";
 import { useCategories, useProducts } from "@/lib/api/catalog";
 import { useBranches, useTerminals, useUsers, useRoles } from "@/lib/api/admin";
+import { useAuth } from "@/lib/api/auth";
 import { useStockLevels, useBranchStockLevels } from "@/lib/api/inventory";
 import { sellableUoms, unitPriceFor, factorToStock } from "@/lib/buildpos/uom";
 import { fileToCompressedDataUrl } from "@/lib/buildpos/image";
@@ -295,9 +296,11 @@ function ImagePickerField({ value, onChange }: { value: string; onChange: (v: st
   );
 }
 
-function FieldControl({ field, value, onChange }: { field: Field; value: string; onChange: (v: string) => void }) {
+function FieldControl({
+  field, value, onChange, disabled,
+}: { field: Field; value: string; onChange: (v: string) => void; disabled?: boolean }) {
   const base =
-    "h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15";
+    "h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15 disabled:cursor-not-allowed disabled:bg-black/[0.03] disabled:text-muted-foreground";
 
   if (field.scannable) {
     return (
@@ -309,6 +312,7 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
           placeholder={field.placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
           autoFocus
         />
       </div>
@@ -322,12 +326,13 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
         placeholder={field.placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
       />
     );
   }
   if (field.type === "select") {
     return (
-      <select className={base} value={value} onChange={(e) => onChange(e.target.value)}>
+      <select className={base} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
         <option value="">{field.placeholder ?? "Select…"}</option>
         {field.options?.map((o) => (
           <option key={o} value={o}>
@@ -342,10 +347,11 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
     return (
       <button
         type="button"
-        onClick={() => onChange(on ? "" : "on")}
+        onClick={() => !disabled && onChange(on ? "" : "on")}
+        disabled={disabled}
         className={`inline-flex h-8 w-14 items-center rounded-full border transition ${
           on ? "border-brand/40 bg-brand" : "border-black/10 bg-canvas"
-        }`}
+        } disabled:cursor-not-allowed disabled:opacity-50`}
       >
         <span
           className={`h-6 w-6 rounded-full bg-white shadow transition ${on ? "translate-x-7" : "translate-x-1"}`}
@@ -360,6 +366,7 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
         placeholder={field.placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
       />
     );
   }
@@ -373,6 +380,7 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
       placeholder={field.placeholder}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
     />
   );
 }
@@ -396,6 +404,7 @@ export function FlowDialog({
    *  "lines" lineItems field's "line" column options, since those choices aren't static. */
   fieldOverrides?: Record<string, Partial<Field>>;
 }) {
+  const { user } = useAuth();
   const [step, setStep] = useState(0);
   const [values, setValues] = useState<Record<string, string>>({});
   const [done, setDone] = useState(false);
@@ -746,11 +755,13 @@ export function FlowDialog({
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   {current?.fields.map((rawF) => {
                     const f = resolveField(rawF);
+                    const locked = f.requiresCeiling ? !(user?.posCeilings[f.requiresCeiling] ?? false) : false;
                     return (
                       <div key={f.name} className={f.full ? "md:col-span-2" : ""}>
                         <label className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                           {f.label}
                           {f.required && <span className="text-critical">*</span>}
+                          {locked && <Lock className="h-3 w-3 text-muted-foreground" aria-label="Locked by permission" />}
                         </label>
                         {f.type === "lineItems" ? (
                           <LineItemsField
@@ -764,6 +775,7 @@ export function FlowDialog({
                             field={f}
                             value={values[f.name] ?? f.default ?? ""}
                             onChange={(v) => handleFieldChange(f.name, v)}
+                            disabled={locked}
                           />
                         )}
                         {f.hint && <p className="mt-1 text-[11px] text-muted-foreground">{f.hint}</p>}

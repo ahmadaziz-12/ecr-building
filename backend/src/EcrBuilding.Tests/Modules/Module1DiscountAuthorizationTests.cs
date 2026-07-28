@@ -224,9 +224,16 @@ public class Module1DiscountAuthorizationTests : IAsyncLifetime
         db.SaveChanges();
         var cashier = TestDataSeeder.AddUser(db, cashierRole, "cashier5@test.local", branchId: branch.Id);
         var contractor = TestDataSeeder.AddCustomer(db, type: CustomerType.Contractor);
+        db.PricingRules.Add(new PricingRule
+        {
+            Name = "Contractor Trade Price", Type = "Trade Tier", Scope = "Contractor customers", Condition = "Any",
+            Action = "-5% list", Priority = 10, Status = PricingRuleStatus.Active,
+            DiscountType = RuleDiscountType.Percentage, Value = 5m,
+        });
+        db.SaveChanges();
         var client = _factory.CreateAuthenticatedClient(cashier);
 
-        // Contractor's automatic trade discount (5%, ContractorDiscountPct in OrdersController) applies
+        // Contractor's automatic trade discount, driven by an active Trade Tier PricingRule, applies
         // with no ManualDiscount at all — must never be blocked by the discount-tier check above,
         // regardless of the cashier's own ceiling.
         var request = new

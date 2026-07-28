@@ -78,7 +78,7 @@ public class PricingRuleCheckoutTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Expired_trade_tier_rule_is_ignored_and_the_default_contractor_discount_applies()
+    public async Task Expired_trade_tier_rule_is_ignored_and_no_automatic_contractor_discount_applies()
     {
         using var db = _factory.CreateDbContext();
         var (branch, product) = SeedBranchAndProduct(db);
@@ -95,8 +95,8 @@ public class PricingRuleCheckoutTests : IAsyncLifetime
         var cashier = TestDataSeeder.AddUser(db, cashierRole, "cashier-tt2@test.local", branchId: branch.Id);
         var client = _factory.CreateAuthenticatedClient(cashier);
 
-        // Expired rule must not apply — falls back to the default 5% (100 - 5% = 95).
-        var response = await client.PostAsJsonAsync("/api/pos/orders", CheckoutRequest(branch.Id, contractor.Id, product.Id, qty: 1m, payAmount: 95m));
+        // Expired rule must not apply, and there is no hardcoded fallback anymore — full price (100).
+        var response = await client.PostAsJsonAsync("/api/pos/orders", CheckoutRequest(branch.Id, contractor.Id, product.Id, qty: 1m, payAmount: 100m));
 
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"Expected OK, got {response.StatusCode}: {body}");

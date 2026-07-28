@@ -141,7 +141,6 @@ type CustomFee = { label: string; amount: number };
 // constituent order lines at checkout). vatPerUnit = Σ constituent bundle-share price × its own VAT
 // rate, so the client total matches the server's per-item VAT math.
 type BundleCartEntry = { bundleId: number; code: string; name: string; qty: number; bundlePrice: number; individualTotal: number; vatPerUnit: number };
-const CONTRACTOR_DISCOUNT_PCT = 5;
 // BRD §10.2 default: auto-lock after 3 minutes of inactivity (Module 15).
 const IDLE_LOCK_MS = 3 * 60 * 1000;
 // sessionStorage key the Cashier Workspace uses to hand a parked-sale id to this screen for resume.
@@ -791,9 +790,9 @@ export function PosCheckout() {
   }, [pricingRules, effectiveBranchId]);
 
   const isContractor = customer?.type === "Contractor";
-  // The best-matching active Trade Tier rule's own Value overrides the flat CONTRACTOR_DISCOUNT_PCT
-  // fallback when a manager has configured one — same branch-first-then-priority tiebreak the server
-  // uses, so a rule edited on the Pricing page is reflected here without a hardcoded number drifting.
+  // The contractor rate comes only from an actual active Trade Tier pricing rule — same
+  // branch-first-then-priority tiebreak the server uses. No rule configured means no automatic
+  // contractor discount (a manager must create one on the Pricing page).
   const tradeTierRule = useMemo(() => {
     if (!isContractor) return null;
     return activePricingRules
@@ -803,7 +802,7 @@ export function PosCheckout() {
   // Module 7 (BRD §4.3.2): per-line discount is the LARGER of contractor trade % and the customer's
   // loyalty tier % — mirrors OrdersController.Checkout exactly, so the display total matches the charge.
   const loyaltyTierPct = tierDiscountPct(customer?.loyaltyTier, customer?.loyaltyEnrolled, tierConfig);
-  const contractorDiscountPct = Math.max(isContractor ? (tradeTierRule?.value ?? CONTRACTOR_DISCOUNT_PCT) : 0, loyaltyTierPct);
+  const contractorDiscountPct = Math.max(tradeTierRule?.value ?? 0, loyaltyTierPct);
 
   // BRD §6.2 Quantity Discount: a per-SKU (or "any product" when Sku is null) quantity threshold —
   // matched case-insensitively since a rule's Sku is uppercased at creation but a product's own Sku

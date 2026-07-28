@@ -127,10 +127,12 @@ public record QuotationDto(
     string ProjectCode = "", string CustomerReference = "",
     // Manual discount override rate, echoed back so the edit form can re-show the number the user picked.
     decimal DiscountPct = 0m);
+// PriceOverrideApprovalRequestId (BRD §7 CR-039): required when any Lines entry sets ManualUnitPrice
+// and the creating user doesn't hold Role.CanOverrideItemPrice — same gate as OrdersController.Checkout.
 public record CreateQuotationRequest(int BranchId, int? CustomerId, List<CartLineInput> Lines, DateTime? ValidUntil, string? Notes,
-    string? ProjectCode = null, string? CustomerReference = null, decimal? DiscountPct = null);
+    string? ProjectCode = null, string? CustomerReference = null, decimal? DiscountPct = null, int? PriceOverrideApprovalRequestId = null);
 public record UpdateQuotationRequest(int? CustomerId, List<CartLineInput> Lines, DateTime? ValidUntil, string? Notes,
-    string ProjectCode, string? CustomerReference, decimal? DiscountPct = null);
+    string ProjectCode, string? CustomerReference, decimal? DiscountPct = null, int? PriceOverrideApprovalRequestId = null);
 
 public record ApprovalRequestDto(
     int Id, string Type, int BranchId, string RequestedByName, string? ApproverName, decimal Amount, string Reason,

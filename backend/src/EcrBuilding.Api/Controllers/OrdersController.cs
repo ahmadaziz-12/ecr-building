@@ -18,9 +18,6 @@ namespace EcrBuilding.Api.Controllers;
 [RequireModule("/operate/orders", PermissionAction.View)]
 public class OrdersController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements, IPaymentGateway paymentGateway, IGlPostingService gl, IZatcaService zatca, ILogger<OrdersController> logger, IPasswordHasher passwordHasher) : ControllerBase
 {
-    // Cashier's own contractor-discount rule, ported from the previous client-only PosCheckout.tsx.
-    private const decimal ContractorDiscountPct = 5m;
-
     // BRD §3.6: voids are logged with a REASON CODE, not free text.
     private static readonly string[] VoidReasonCodes =
         ["CustomerChangedMind", "PricingError", "DuplicateEntry", "StockIssue", "TrainingError", "Other"];
@@ -476,15 +473,15 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
 
         // Per-line discount: the LARGER of the contractor trade discount and the customer's loyalty
         // tier discount (BRD §4.3.2: Silver 5% / Gold 10% / Platinum 15%, applied automatically) —
-        // the two don't stack; a Gold contractor gets 10%, not 15%. The contractor rate itself comes
-        // from the best-matching active "Trade Tier" rule, falling back to the flat default only
-        // when no such rule has been configured.
+        // the two don't stack; a Gold contractor gets 10%, not 15%. The contractor rate comes only
+        // from an actual active "Trade Tier" pricing rule configured on the Finance > Pricing page —
+        // no rule means no automatic contractor discount (a manager must create one).
         var tierDiscountPct = customer is { LoyaltyEnrolled: true } ? LoyaltyRules.TierDiscountPct(customer.LoyaltyTier, loyaltyConfig) : 0m;
         var tradeTierRule = customer?.Type == CustomerType.Contractor
             ? activePricingRules.Where(r => r.Type == "Trade Tier")
                 .OrderByDescending(r => r.BranchId != null).ThenByDescending(r => r.Priority).FirstOrDefault()
             : null;
-        var contractorPct = customer?.Type == CustomerType.Contractor ? (tradeTierRule?.Value ?? ContractorDiscountPct) : 0m;
+        var contractorPct = tradeTierRule?.Value ?? 0m;
         var discountPct = Math.Max(contractorPct, tierDiscountPct);
 
         // BRD §6.2 Quantity Discount (Tiered): auto-applied per line once its quantity reaches the

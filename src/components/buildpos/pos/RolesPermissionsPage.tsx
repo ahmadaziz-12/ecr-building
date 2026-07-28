@@ -6,8 +6,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SectionCard, Pill } from "@/components/buildpos/sections";
 import { PermissionMatrix, EMPTY_CELL, type MatrixCell } from "@/components/buildpos/pos/PermissionMatrix";
 import { CustomPermissionsDialog } from "@/components/buildpos/pos/CustomPermissionsDialog";
+import { PosCeilingsPanel } from "@/components/buildpos/pos/PosCeilingsPanel";
 import { PERMISSION_PAGES } from "@/lib/buildpos/permission-pages";
-import { useRoles, useRoleUsers, useUpdateRole, useUsers, type ModulePermissionEntry, type RoleDto } from "@/lib/api/admin";
+import { useRoles, useRoleUsers, useUpdateRole, useUsers, type ModulePermissionEntry, type PosCeilingsDto, type RoleDto } from "@/lib/api/admin";
 import type { PermissionActionName } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 
@@ -37,6 +38,7 @@ export function RolesPermissionsPage() {
   const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
   const [tab, setTab] = useState("permissions");
   const [draft, setDraft] = useState<Record<string, MatrixCell> | null>(null);
+  const [ceilingsDraft, setCeilingsDraft] = useState<PosCeilingsDto | null>(null);
   const [saving, setSaving] = useState(false);
   const [customizing, setCustomizing] = useState<{ id: number; name: string; email: string; status: string } | null>(null);
 
@@ -47,15 +49,21 @@ export function RolesPermissionsPage() {
   const selectedRole = roles?.find((r) => r.id === selectedRoleId) ?? null;
 
   useEffect(() => {
-    if (selectedRole) setDraft(gridFromRole(selectedRole));
+    if (selectedRole) {
+      setDraft(gridFromRole(selectedRole));
+      setCeilingsDraft(selectedRole.posCeilings);
+    }
   }, [selectedRole]);
 
   const { data: members, isLoading: membersLoading } = useRoleUsers(selectedRoleId, tab === "members");
 
   const dirty = useMemo(() => {
-    if (!selectedRole || !draft) return false;
-    return JSON.stringify(gridFromRole(selectedRole)) !== JSON.stringify(draft);
-  }, [selectedRole, draft]);
+    if (!selectedRole || !draft || !ceilingsDraft) return false;
+    return (
+      JSON.stringify(gridFromRole(selectedRole)) !== JSON.stringify(draft)
+      || JSON.stringify(selectedRole.posCeilings) !== JSON.stringify(ceilingsDraft)
+    );
+  }, [selectedRole, draft, ceilingsDraft]);
 
   function toggle(moduleKey: string, action: PermissionActionName) {
     setDraft((prev) => {
@@ -67,7 +75,7 @@ export function RolesPermissionsPage() {
   }
 
   async function save() {
-    if (!selectedRole || !draft) return;
+    if (!selectedRole || !draft || !ceilingsDraft) return;
     setSaving(true);
     try {
       const permissions: ModulePermissionEntry[] = PERMISSION_PAGES.map((page) => {
@@ -80,7 +88,7 @@ export function RolesPermissionsPage() {
           description: selectedRole.description,
           approvalCap: selectedRole.approvalCap,
           permissions,
-          posCeilings: selectedRole.posCeilings,
+          posCeilings: ceilingsDraft,
         },
       });
       toast.success("Role permissions saved");
@@ -148,24 +156,28 @@ export function RolesPermissionsPage() {
                   </div>
                   <TabsList>
                     <TabsTrigger value="permissions">Role Permissions</TabsTrigger>
+                    <TabsTrigger value="ceilings">POS Ceilings</TabsTrigger>
                     <TabsTrigger value="members">Members ({selectedRole.userCount})</TabsTrigger>
                   </TabsList>
                 </div>
 
+                {(tab === "permissions" || tab === "ceilings") && draft && ceilingsDraft && (
+                  <div className="mb-3 flex justify-end">
+                    <Button
+                      size="sm" disabled={!dirty || saving} onClick={save}
+                      className="bg-brand text-brand-foreground hover:bg-brand/90"
+                    >
+                      {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save Changes"}
+                    </Button>
+                  </div>
+                )}
+
                 <TabsContent value="permissions">
-                  {draft && (
-                    <>
-                      <div className="mb-3 flex justify-end">
-                        <Button
-                          size="sm" disabled={!dirty || saving} onClick={save}
-                          className="bg-brand text-brand-foreground hover:bg-brand/90"
-                        >
-                          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save Changes"}
-                        </Button>
-                      </div>
-                      <PermissionMatrix values={draft} onToggle={toggle} disabled={saving} />
-                    </>
-                  )}
+                  {draft && <PermissionMatrix values={draft} onToggle={toggle} disabled={saving} />}
+                </TabsContent>
+
+                <TabsContent value="ceilings">
+                  {ceilingsDraft && <PosCeilingsPanel values={ceilingsDraft} onChange={setCeilingsDraft} disabled={saving} />}
                 </TabsContent>
 
                 <TabsContent value="members">

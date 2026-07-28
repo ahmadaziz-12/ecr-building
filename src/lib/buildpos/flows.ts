@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import type { PosCeilings } from "@/lib/api/auth";
 import {
   ShoppingCart,
   UserPlus,
@@ -76,6 +77,11 @@ export type Field = {
    *  removed from this field's own option list — e.g. Stock Transfer's "to" excludes whatever
    *  "from" currently holds, so the same warehouse/branch can never be picked as both ends. */
   excludeValueOf?: string;
+  /** Locks this field read-only for the current user unless their role's POS ceilings grant this
+   *  flag (e.g. "canManagePriceListAndUsers" for Contractor/Wholesale/Project price fields) —
+   *  mirrors the same server-side gate enforced in CatalogController, so a user without it never
+   *  gets to type a value the save request will 403 on. */
+  requiresCeiling?: keyof PosCeilings;
 };
 
 export type FlowStep = {
@@ -351,19 +357,22 @@ export const flows: Record<string, Flow> = {
             name: "contractorPrice",
             label: "Contractor Price (ر.س)",
             type: "number",
-            hint: "BRD §7: a distinct list price for Contractor-list customers — leave blank to charge them the Selling Price. Requires the Manage Price List permission to change.",
+            hint: "The price charged to customers on the Contractor price list — leave blank to charge them the Selling Price. Requires the Manage Price List permission to change.",
+            requiresCeiling: "canManagePriceListAndUsers",
           },
           {
             name: "wholesalePrice",
             label: "Wholesale Price (ر.س)",
             type: "number",
-            hint: "A distinct list price for Wholesale-list customers — leave blank to charge them the Selling Price.",
+            hint: "The price charged to customers on the Wholesale price list — leave blank to charge them the Selling Price. Requires the Manage Price List permission to change.",
+            requiresCeiling: "canManagePriceListAndUsers",
           },
           {
             name: "projectPrice",
             label: "Project Price (ر.س)",
             type: "number",
-            hint: "A distinct list price for Project-list customers — leave blank to charge them the Selling Price.",
+            hint: "The price charged to customers on the Project price list — leave blank to charge them the Selling Price. Requires the Manage Price List permission to change.",
+            requiresCeiling: "canManagePriceListAndUsers",
           },
           {
             name: "vat",
@@ -455,19 +464,22 @@ export const flows: Record<string, Flow> = {
             name: "contractorPrice",
             label: "Contractor Price (ر.س)",
             type: "number",
-            hint: "BRD §7: a distinct list price for Contractor-list customers — leave blank to charge them the Selling Price. Requires the Manage Price List permission to change.",
+            hint: "The price charged to customers on the Contractor price list — leave blank to charge them the Selling Price. Requires the Manage Price List permission to change.",
+            requiresCeiling: "canManagePriceListAndUsers",
           },
           {
             name: "wholesalePrice",
             label: "Wholesale Price (ر.س)",
             type: "number",
-            hint: "A distinct list price for Wholesale-list customers — leave blank to charge them the Selling Price.",
+            hint: "The price charged to customers on the Wholesale price list — leave blank to charge them the Selling Price. Requires the Manage Price List permission to change.",
+            requiresCeiling: "canManagePriceListAndUsers",
           },
           {
             name: "projectPrice",
             label: "Project Price (ر.س)",
             type: "number",
-            hint: "A distinct list price for Project-list customers — leave blank to charge them the Selling Price.",
+            hint: "The price charged to customers on the Project price list — leave blank to charge them the Selling Price. Requires the Manage Price List permission to change.",
+            requiresCeiling: "canManagePriceListAndUsers",
           },
           {
             name: "vat",
