@@ -20,7 +20,9 @@ import {
   PaginationBar,
   exportToCsv,
   type FilterFieldDef,
+  type FilterDraftValue,
 } from "./shared";
+import { resolveDateRangeBounds, type DateRangeValue } from "@/components/buildpos/FilterControls";
 import { CustomerFormDialog } from "./CustomerFormDialog";
 import { CustomerStatementDialog } from "./CustomerStatementDialog";
 import { useArchiveCustomer, useCustomers, type CustomerDto } from "@/lib/api/pos";
@@ -57,16 +59,15 @@ function tierTone(tier: string): "success" | "warning" | "info" | "muted" {
       return "muted";
   }
 }
-function inDateRange(iso: string, from: string, to: string): boolean {
+function inDateRange(iso: string, range: DateRangeValue | undefined): boolean {
+  const bounds = resolveDateRangeBounds(range);
+  if (!bounds) return true;
   const d = new Date(iso).getTime();
-  if (from && d < new Date(from).getTime()) return false;
-  if (to && d > new Date(`${to}T23:59:59`).getTime()) return false;
-  return true;
+  return d >= bounds.from.getTime() && d <= bounds.to.getTime();
 }
 
 const FIELDS: FilterFieldDef[] = [
-  { kind: "date", key: "dateFrom", placeholder: "Registered From" },
-  { kind: "date", key: "dateTo", placeholder: "Registered To" },
+  { kind: "daterange", key: "dateRange", placeholder: "Registered" },
   {
     kind: "select",
     key: "type",
@@ -91,35 +92,35 @@ export function CustomersPage() {
   const archiveCustomer = useArchiveCustomer();
 
   const [tab, setTab] = useState<Tab>("All");
-  const [draft, setDraft] = useState<Record<string, string>>(() => emptyFilterDraft(FIELDS));
-  const [applied, setApplied] = useState<Record<string, string>>(draft);
+  const [draft, setDraft] = useState<Record<string, FilterDraftValue>>(() => emptyFilterDraft(FIELDS));
+  const [applied, setApplied] = useState<Record<string, FilterDraftValue>>(draft);
   const [formCustomer, setFormCustomer] = useState<CustomerDto | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [statementId, setStatementId] = useState<number | null>(null);
 
   const all = customers ?? [];
   const filtered = useMemo(() => {
+    const type = (applied.type as string[]) ?? [];
+    const status = (applied.status as string[]) ?? [];
+    const creditStatus = (applied.creditStatus as string[]) ?? [];
+    const search = (applied.search as string) ?? "";
     return all.filter((c) => {
       if (tab === "Walk-in" && c.type !== "WalkIn") return false;
       if (tab === "Retail" && c.type !== "Retail") return false;
       if (tab === "Contractor / B2B" && c.type !== "Contractor" && c.type !== "B2B") return false;
       if (tab === "Loyalty" && !c.loyaltyEnrolled) return false;
-      if (applied.type && c.type !== applied.type) return false;
-      if (applied.status && c.status !== applied.status) return false;
-      if (
-        applied.creditStatus === "OverLimit" &&
-        !(c.outstanding > c.creditLimit && c.creditLimit > 0)
-      )
-        return false;
-      if (applied.creditStatus === "HasCredit" && !(c.creditLimit > 0)) return false;
-      if (applied.creditStatus === "NoCredit" && c.creditLimit > 0) return false;
-      if (
-        (applied.dateFrom || applied.dateTo) &&
-        !inDateRange(c.createdAt, applied.dateFrom, applied.dateTo)
-      )
-        return false;
-      if (applied.search) {
-        const t = applied.search.trim().toLowerCase();
+      if (type.length && !type.includes(c.type)) return false;
+      if (status.length && !status.includes(c.status)) return false;
+      if (creditStatus.length) {
+        const matches =
+          (creditStatus.includes("OverLimit") && c.outstanding > c.creditLimit && c.creditLimit > 0) ||
+          (creditStatus.includes("HasCredit") && c.creditLimit > 0) ||
+          (creditStatus.includes("NoCredit") && c.creditLimit <= 0);
+        if (!matches) return false;
+      }
+      if (!inDateRange(c.createdAt, applied.dateRange as DateRangeValue)) return false;
+      if (search) {
+        const t = search.trim().toLowerCase();
         if (
           t &&
           !c.nameEn.toLowerCase().includes(t) &&
@@ -344,7 +345,11 @@ export function CustomersPage() {
       </SectionCard>
 
       <CustomerFormDialog customer={formCustomer} open={formOpen} onOpenChange={setFormOpen} />
-      <CustomerStatementDialog customerId={statementId} onClose={() => setStatementId(null)} />
+      <CustomerStatementDialog
+        customerId={statementId}
+        customerType={all.find((c) => c.id === statementId)?.type}
+        onClose={() => setStatementId(null)}
+      />
     </div>
   );
 }

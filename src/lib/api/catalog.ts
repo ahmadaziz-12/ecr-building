@@ -20,6 +20,11 @@ export type CategoryDto = {
 // BRD §2.3: "1 {uom} = {factorToStock} {stockUom}" — drives the POS cart's UOM dropdown; the backend
 // refuses to sell in any UOM without a row here, so the dropdown only ever offers configured units.
 export type ProductUomConversionDto = { uom: string; factorToStock: number };
+// BRD §2.2: a structured custom attribute (Grade, Size, Colour, Diameter…) — the category's
+// Attribute Template suggests names, this is the actual value on one product.
+export type ProductAttributeDto = { name: string; value: string };
+// BRD §2.3 items 5-6: which dimensions the POS asks for on a cut-to-size line.
+export type CutToSizeUnit = "Length" | "Area" | "Volume";
 
 export type ProductDto = {
   id: number;
@@ -45,9 +50,16 @@ export type ProductDto = {
   totalAvailable: number;
   uomConversions: ProductUomConversionDto[];
   isCutToSize: boolean;
+  cutToSizeUnit: CutToSizeUnit;
+  attributes: ProductAttributeDto[];
   supplierId: number | null;
   supplierName: string | null;
   binLocation: string | null;
+  // BRD §7 (CR-038): distinct list prices for Contractor/Wholesale/Project — null = not configured,
+  // checkout falls back to sellingPrice (the Retail price) for that segment.
+  contractorPrice?: number | null;
+  wholesalePrice?: number | null;
+  projectPrice?: number | null;
 };
 
 export const useCategories = (enabled = true) =>
@@ -56,6 +68,59 @@ export const useCategories = (enabled = true) =>
     queryFn: () => apiGet<CategoryDto[]>("/api/catalog/categories"),
     enabled,
   });
+// A category name alone is ambiguous once subcategories exist — e.g. "Pipes" could be a child of
+// both "Electric" and "Plumbing". Prefix with the parent so selects/lookups stay unique.
+export const categoryDisplayLabel = (c: CategoryDto) =>
+  c.parentName ? `${c.parentName} → ${c.nameEn}` : c.nameEn;
+// The product form's plain "Category" + "Subcategory" dropdown pair resolves to a single leaf
+// CategoryId — subcategory wins when picked, otherwise the product sits directly on the top-level
+// category. Returns null only if categoryName itself doesn't match any top-level category.
+export function resolveProductCategoryId(
+  categories: CategoryDto[] | undefined,
+  categoryName: string,
+  subcategoryName?: string,
+): number | null {
+  const topCategory = categories?.find(
+    (c) => c.parentId == null && c.nameEn.toLowerCase() === (categoryName ?? "").toLowerCase(),
+  );
+  if (!topCategory) return null;
+  if (subcategoryName) {
+    const sub = categories?.find(
+      (c) =>
+        c.parentId === topCategory.id && c.nameEn.toLowerCase() === subcategoryName.toLowerCase(),
+    );
+    if (sub) return sub.id;
+  }
+  return topCategory.id;
+}
+// Reverse of resolveProductCategoryId — splits a product's actual CategoryId back into the
+// Category/Subcategory field pair, for pre-filling the Edit SKU dialog.
+export function splitProductCategory(
+  categories: CategoryDto[] | undefined,
+  categoryId: number,
+): { category: string; subcategory: string } {
+  const c = categories?.find((x) => x.id === categoryId);
+  if (!c) return { category: "", subcategory: "" };
+  if (c.parentId == null) return { category: c.nameEn, subcategory: "" };
+  const parent = categories?.find((x) => x.id === c.parentId);
+  return { category: parent?.nameEn ?? "", subcategory: c.nameEn };
+}
+// Category create/edit's "Belongs Under" field only ever offers top-level categories — this is
+// what keeps the hierarchy exactly two levels deep (Category → Subcategory) instead of letting a
+// subcategory become a parent itself. excludeId stops a category being set as its own parent.
+export function resolveParentCategory(
+  categories: CategoryDto[] | undefined,
+  parentLabel: string,
+  excludeId?: number,
+): CategoryDto | undefined {
+  if (!parentLabel) return undefined;
+  return categories?.find(
+    (c) =>
+      c.parentId == null &&
+      c.id !== excludeId &&
+      c.nameEn.toLowerCase() === parentLabel.toLowerCase(),
+  );
+}
 // branchId scopes totalOnHand/totalAvailable to that branch's own warehouse — pass the
 // cashier's branch in POS checkout so stock badges reflect what's actually there, not a
 // global sum across every branch's warehouses.
@@ -86,6 +151,11 @@ export type CreateProductRequest = {
   imageUrl: string | null;
   uomConversions?: ProductUomConversionDto[];
   isCutToSize?: boolean;
+  cutToSizeUnit?: CutToSizeUnit;
+  attributes?: ProductAttributeDto[];
+  contractorPrice?: number | null;
+  wholesalePrice?: number | null;
+  projectPrice?: number | null;
 };
 
 export function useCreateProduct() {
@@ -155,23 +225,30 @@ export function useSetCategoryStatus() {
 }
 
 export function mapCategories(rows: CategoryDto[]): LiveTable {
+  // Group every subcategory directly under its own top-level category, in the same relative
+  // order, so the flat table reads as a simple two-level tree at a glance instead of needing a
+  // separate "Parent" column the reader has to cross-reference by name.
+  const topLevel = rows.filter((c) => c.parentId == null);
+  const topLevelIds = new Set(topLevel.map((c) => c.id));
+  const childrenOf = new Map<number, CategoryDto[]>();
+  for (const c of rows) {
+    if (c.parentId == null) continue;
+    const list = childrenOf.get(c.parentId) ?? [];
+    list.push(c);
+    childrenOf.set(c.parentId, list);
+  }
+  // A subcategory whose parent id doesn't resolve to any known top-level row (data drift) still
+  // gets listed, unindented, rather than silently disappearing from the table.
+  const orphans = rows.filter((c) => c.parentId != null && !topLevelIds.has(c.parentId));
+  const ordered = [...topLevel.flatMap((c) => [c, ...(childrenOf.get(c.id) ?? [])]), ...orphans];
+
   return {
-    columns: [
-      "Code",
-      "Category",
-      "Parent",
-      "SKUs",
-      "Attributes",
-      "Return Rule",
-      "Default UOM",
-      "Status",
-    ],
-    statusCol: 7,
-    ids: rows.map((c) => c.id),
-    rows: rows.map((c) => [
+    columns: ["Code", "Category", "SKUs", "Attributes", "Return Rule", "Default UOM", "Status"],
+    statusCol: 6,
+    ids: ordered.map((c) => c.id),
+    rows: ordered.map((c) => [
       c.code,
-      c.nameEn,
-      c.parentName ?? "—",
+      c.parentId == null ? c.nameEn : `↳ ${c.nameEn}`,
       c.skuCount,
       c.attributes.length,
       c.returnRule,
@@ -219,10 +296,11 @@ export function mapProducts(rows: ProductDto[]): LiveTable {
       "VAT",
       "Stock UOM",
       "Selling UOMs",
+      "Attributes",
       "Stock",
       "Status",
     ],
-    statusCol: 10,
+    statusCol: 11,
     ids: rows.map((p) => p.id),
     rows: rows.map((p) => [
       p.sku,
@@ -234,6 +312,7 @@ export function mapProducts(rows: ProductDto[]): LiveTable {
       `${p.vatRate}%`,
       p.stockUom,
       p.sellUoms.length ? p.sellUoms.join(", ") : p.stockUom,
+      p.attributes.length ? p.attributes.map((a) => `${a.name}: ${a.value}`).join(", ") : "—",
       p.totalOnHand,
       p.returnable ? p.status : "Non-Returnable",
     ]),

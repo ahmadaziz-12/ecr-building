@@ -37,14 +37,14 @@ public static class DbSeeder
             await SeedUsersAsync(db, hasher);
         }
 
-        // BRD §10.1: databases seeded before the authorization-ladder work never receive the
-        // Senior Cashier/Supervisor roles or the per-role POS ceilings via the empty-table guards
-        // above (migrations backfill the new columns with NULL/false, which the API reads as
-        // "no ceiling"/"no authority" — silently disabling discount gating and voiding entirely).
-        // This top-up is idempotent: it inserts missing ladder roles and applies the preset
-        // ceilings only to roles whose ceiling block is still in the untouched all-default state.
-        await EnsureBrdRolesAsync(db, hasher);
-        await EnsureReturnApprovalPermissionsAsync(db);
+        // BRD §10.1 defines exactly 5 roles (Cashier, Senior Cashier, Supervisor, Store Manager,
+        // System Admin). This runs on every startup: creates/repairs the 5 canonical roles (ladder
+        // POS ceilings + full page-permission grid), then consolidates any other role — the old
+        // pre-consolidation roster (Owner/Admin/Branch Manager/Warehouse Staff/Delivery
+        // Driver/HR Officer/Accountant) or any ad-hoc role created via the UI — into the nearest of
+        // the 5, reassigns its users, and deletes it. Idempotent: once a role has a complete page
+        // grid and touched ceilings, it's never rebuilt or re-consolidated again.
+        await EnsureExactlyFiveBrdRolesAsync(db, hasher);
 
         // Same drift class as the two ensure-steps above: a database seeded before the UOM engine's
         // demo conversions were added to SeedCatalogAndInventoryAsync has EVERY product stuck at a
@@ -86,6 +86,11 @@ public static class DbSeeder
         {
             await SeedPosDataAsync(db);
         }
+
+        // Same drift class as the Ensure* calls above (SeedPosDataAsync only runs once, on a totally
+        // empty Customers table, so a database seeded before these two rules' Value/MinQuantity/Sku
+        // fields existed never receives the backfill).
+        await EnsurePricingRuleSeedValuesBackfilledAsync(db);
 
         if (!await db.Drivers.AnyAsync())
         {
@@ -153,19 +158,19 @@ public static class DbSeeder
                 new Device
                 {
                     DeviceCode = $"{terminal.Code}-PRN", Type = DeviceType.ReceiptPrinter, Model = "Epson TM-T88VI",
-                    Serial = $"SN-{terminal.Code}-PRN", TerminalId = terminal.Id, Connection = DeviceConnection.Usb,
+                    Serial = $"SN-{terminal.Code}-PRN", TerminalId = terminal.Id, BranchId = branch.Id, Connection = DeviceConnection.Usb,
                     Status = DeviceStatus.Healthy, LastTestAt = DateTime.UtcNow,
                 },
                 new Device
                 {
                     DeviceCode = $"{terminal.Code}-SCN", Type = DeviceType.BarcodeScanner, Model = "Honeywell Voyager 1200g",
-                    Serial = $"SN-{terminal.Code}-SCN", TerminalId = terminal.Id, Connection = DeviceConnection.Usb,
+                    Serial = $"SN-{terminal.Code}-SCN", TerminalId = terminal.Id, BranchId = branch.Id, Connection = DeviceConnection.Usb,
                     Status = DeviceStatus.Healthy, LastTestAt = DateTime.UtcNow,
                 },
                 new Device
                 {
                     DeviceCode = $"{terminal.Code}-DRW", Type = DeviceType.CashDrawer, Model = "APG Vasario 1616",
-                    Serial = $"SN-{terminal.Code}-DRW", TerminalId = terminal.Id, Connection = DeviceConnection.Usb,
+                    Serial = $"SN-{terminal.Code}-DRW", TerminalId = terminal.Id, BranchId = branch.Id, Connection = DeviceConnection.Usb,
                     Status = DeviceStatus.Healthy, LastTestAt = DateTime.UtcNow,
                 });
         }
@@ -308,7 +313,7 @@ public static class DbSeeder
                 ApprovalCap = def.ApprovalCap,
                 IsSystem = true,
             };
-            role.Permissions = def.Levels.Select(kv => new RolePermission { Module = kv.Key, Level = kv.Value }).ToList();
+            role.Permissions = BuildPagePermissions(def.SectionLevels, def.ApprovePages);
             def.PosCeilings(role);
             db.Roles.Add(role);
         }
@@ -317,8 +322,9 @@ public static class DbSeeder
     }
 
     // A role whose entire BRD §10.1 ceiling block is still at the column defaults the migration
-    // backfilled (NULL ceilings, every flag false). This is the drift signature EnsureBrdRolesAsync
-    // repairs; once a preset (or an admin) sets anything here, the role is never touched again.
+    // backfilled (NULL ceilings, every flag false). This is the drift signature
+    // EnsureExactlyFiveBrdRolesAsync repairs; once a preset (or an admin) sets anything here, the
+    // role is never touched again.
     private static bool HasUntouchedPosCeilings(Role r) =>
         r.DiscountCeilingPercent is null && r.SurplusReturnCeilingAmount is null
         && !r.CanAuthorizeStandardReturnWithoutReceipt && !r.CanOverrideItemPrice
@@ -327,17 +333,31 @@ public static class DbSeeder
         && !r.CanConfigureReturnRulesAndFees && !r.CanManagePriceListAndUsers
         && !r.CanManageSystemConfiguration;
 
-    // Runs on EVERY startup (same contract as EnsureBrdCategoriesAsync): inserts BRD ladder roles
-    // that don't exist yet, applies the preset ceilings to roles still carrying the untouched
-    // migration defaults, and — when this is the demo dataset — adds the demo users for roles that
-    // arrived after the original user seed. Never overwrites permissions, caps, or any ceiling an
-    // admin has customized.
-    internal static async Task EnsureBrdRolesAsync(AppDbContext db, IPasswordHasher hasher)
+    // A role's page-permission grid is "complete" once it has a row for every page in
+    // PermissionCatalog. Any pre-migration role (old Module/Level schema) or a role that predates a
+    // newly-added sidebar page fails this check exactly once, after which the rebuild below makes it
+    // permanently true — so an admin's own matrix edits are never clobbered on a later restart.
+    private static bool HasCompletePageGrid(Role r)
     {
-        var existingRoles = await db.Roles.ToListAsync();
+        var keys = r.Permissions.Select(p => p.ModuleKey).ToHashSet();
+        return PermissionCatalog.ValidKeys.All(keys.Contains);
+    }
+
+    // BRD §10.1 caps the roster at exactly 5 roles. Runs on EVERY startup: creates the 5 canonical
+    // roles if missing, repairs POS ceilings still at untouched migration defaults, rebuilds any
+    // role's page-permission grid that isn't yet complete (covers both the old Module/Level schema
+    // and brand-new sidebar pages), then consolidates every OTHER role — the pre-consolidation
+    // roster or any ad-hoc role created via the old "+ Add Role" UI — into its nearest canonical
+    // role, reassigns its users, deletes it, and logs an audit entry. Never touches permissions,
+    // caps, or ceilings an admin has already customized on a canonical role.
+    internal static async Task EnsureExactlyFiveBrdRolesAsync(AppDbContext db, IPasswordHasher hasher)
+    {
+        var defs = RoleDefinitions();
+        var canonicalNames = defs.Select(d => d.Name).ToHashSet();
+        var existingRoles = await db.Roles.Include(r => r.Permissions).Include(r => r.Users).ToListAsync();
         var changed = false;
 
-        foreach (var def in RoleDefinitions())
+        foreach (var def in defs)
         {
             var role = existingRoles.FirstOrDefault(r => r.Name == def.Name);
             if (role is null)
@@ -348,21 +368,80 @@ public static class DbSeeder
                     Description = def.Description,
                     ApprovalCap = def.ApprovalCap,
                     IsSystem = true,
-                    Permissions = def.Levels.Select(kv => new RolePermission { Module = kv.Key, Level = kv.Value }).ToList(),
+                    Permissions = BuildPagePermissions(def.SectionLevels, def.ApprovePages),
                 };
                 def.PosCeilings(role);
                 db.Roles.Add(role);
+                existingRoles.Add(role);
                 changed = true;
             }
-            else if (HasUntouchedPosCeilings(role))
+            else
             {
-                def.PosCeilings(role);
-                changed = true;
+                if (HasUntouchedPosCeilings(role))
+                {
+                    def.PosCeilings(role);
+                    changed = true;
+                }
+                if (!HasCompletePageGrid(role))
+                {
+                    db.RolePermissions.RemoveRange(role.Permissions);
+                    role.Permissions = BuildPagePermissions(def.SectionLevels, def.ApprovePages);
+                    changed = true;
+                }
             }
         }
 
         if (changed)
         {
+            await db.SaveChangesAsync();
+        }
+
+        // Non-canonical roles: the pre-consolidation 10-role roster (Owner/Admin/Branch
+        // Manager/Warehouse Staff/Delivery Driver/HR Officer/Accountant), or anything a store admin
+        // created ad hoc via the old "+ Add Role" UI. Mapped to the nearest canonical role by
+        // authority level; anything unrecognized falls back to Supervisor (the mid-tier operational
+        // role) rather than silently inheriting Admin-level access.
+        var consolidationMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Owner"] = "System Admin",
+            ["Admin"] = "System Admin",
+            ["Auditor"] = "System Admin",
+            ["Branch Manager"] = "Store Manager",
+            ["Manager"] = "Store Manager",
+            ["Warehouse Manager"] = "Store Manager",
+            ["Warehouse Staff"] = "Supervisor",
+            ["Delivery Driver"] = "Supervisor",
+            ["Inventory Staff"] = "Supervisor",
+            ["HR Officer"] = "Supervisor",
+            ["Accountant"] = "Supervisor",
+            ["Self-Checkout Kiosk"] = "Cashier",
+        };
+
+        var rolesToConsolidate = existingRoles.Where(r => !canonicalNames.Contains(r.Name)).ToList();
+        if (rolesToConsolidate.Count > 0)
+        {
+            var canonicalIdByName = existingRoles.Where(r => canonicalNames.Contains(r.Name)).ToDictionary(r => r.Name, r => r.Id);
+            foreach (var role in rolesToConsolidate)
+            {
+                var targetName = consolidationMap.TryGetValue(role.Name, out var mapped) ? mapped : "Supervisor";
+                var targetId = canonicalIdByName[targetName];
+                var users = await db.Users.Where(u => u.RoleId == role.Id).ToListAsync();
+                foreach (var user in users)
+                {
+                    user.RoleId = targetId;
+                }
+
+                db.AuditLogs.Add(new AuditLog
+                {
+                    Module = "admin",
+                    Event = "ROLE_CONSOLIDATED",
+                    RecordId = role.Id.ToString(),
+                    Reason = $"\"{role.Name}\" consolidated into \"{targetName}\" ({users.Count} user(s) reassigned) — the role roster is limited to the BRD's 5 roles.",
+                    Severity = AuditSeverity.Warning,
+                });
+                db.Roles.Remove(role);
+            }
+
             await db.SaveChangesAsync();
         }
 
@@ -398,164 +477,125 @@ public static class DbSeeder
         }
     }
 
-    // Same drift class as EnsureBrdRolesAsync/EnsureUomConversionsAsync: Supervisor and Branch
-    // Manager were seeded with Finance=View from day one, despite both role descriptions requiring
-    // Finance=Edit to ever reach ReturnsController.Approve — neither role could approve a single
-    // return since inception, even though CanAuthorizeDamagedReturns=true on both. Only touches the
-    // known-broken View default; an admin who deliberately reduced this further (e.g. to None) is
-    // never overwritten.
-    internal static async Task EnsureReturnApprovalPermissionsAsync(AppDbContext db)
+    // Expands a role's per-section AccessLevel defaults into a full per-page RolePermission grid.
+    // None -> everything off. View -> can view + export. Edit -> view+create+edit+export (not
+    // delete/approve). Full -> everything on. approvePages grants CanApprove (and CanView) on
+    // specific pages regardless of that page's section level — e.g. Supervisor/Store Manager get
+    // Finance:Edit generally but still need CanApprove specifically on Returns to authorize refunds
+    // (ReturnsController.Approve requires PermissionAction.Approve on "/finance/returns").
+    private static List<RolePermission> BuildPagePermissions(Dictionary<string, AccessLevel> sectionLevels, string[]? approvePages = null)
     {
-        // List<string>, not string[] — EF's LINQ-to-SQL translation of an array .Contains() inside a
-        // query hits a .NET expression-interpreter bug (span-based overload resolution) that crashes
-        // at startup; List<T>.Contains doesn't take that path.
-        var roleNames = new List<string> { "Supervisor", "Branch Manager" };
-        var roles = await db.Roles.Include(r => r.Permissions).Where(r => roleNames.Contains(r.Name)).ToListAsync();
-        var changed = false;
-        foreach (var role in roles)
+        var perms = PermissionCatalog.Pages.Select(page =>
         {
-            var perm = role.Permissions.FirstOrDefault(p => p.Module == ModuleArea.Finance);
-            if (perm is not null && perm.Level == AccessLevel.View)
+            var level = sectionLevels.TryGetValue(page.Section, out var l) ? l : AccessLevel.None;
+            return new RolePermission
             {
-                perm.Level = AccessLevel.Edit;
-                changed = true;
+                ModuleKey = page.Key,
+                CanView = level is AccessLevel.View or AccessLevel.Edit or AccessLevel.Full,
+                CanCreate = level is AccessLevel.Edit or AccessLevel.Full,
+                CanEdit = level is AccessLevel.Edit or AccessLevel.Full,
+                CanDelete = level == AccessLevel.Full,
+                CanApprove = level == AccessLevel.Full,
+                CanExport = level is AccessLevel.View or AccessLevel.Edit or AccessLevel.Full,
+            };
+        }).ToList();
+
+        foreach (var key in approvePages ?? [])
+        {
+            var perm = perms.FirstOrDefault(p => p.ModuleKey == key);
+            if (perm is not null)
+            {
+                perm.CanView = true;
+                perm.CanApprove = true;
             }
         }
-        if (changed)
-        {
-            await db.SaveChangesAsync();
-        }
+
+        return perms;
     }
 
-    private static (string Name, string Description, decimal ApprovalCap, Dictionary<ModuleArea, AccessLevel> Levels, Action<Role> PosCeilings)[] RoleDefinitions() =>
-        new (string, string, decimal, Dictionary<ModuleArea, AccessLevel>, Action<Role>)[]
+    private static (string Name, string Description, decimal ApprovalCap, Dictionary<string, AccessLevel> SectionLevels, string[]? ApprovePages, Action<Role> PosCeilings)[] RoleDefinitions() =>
+        new (string, string, decimal, Dictionary<string, AccessLevel>, string[]?, Action<Role>)[]
         {
-            ("Owner", "Full access across every module.", 999_999m, AllModules(AccessLevel.Full), PosTier.Admin),
-            ("Admin", "Manages users, settings, network and compliance.", 100_000m, AdminLevels(), PosTier.Admin),
-            ("Branch Manager", "Runs day-to-day branch operations.", 20_000m, new Dictionary<ModuleArea, AccessLevel>
+            ("System Admin", "Full access across every module.", 999_999m, AllSections(AccessLevel.Full), null, PosTier.Admin),
+            ("Store Manager", "Runs day-to-day branch operations.", 20_000m, new Dictionary<string, AccessLevel>
             {
-                [ModuleArea.Pos] = AccessLevel.Edit,
-                [ModuleArea.Orders] = AccessLevel.Edit,
-                [ModuleArea.Inventory] = AccessLevel.Edit,
-                [ModuleArea.Delivery] = AccessLevel.Edit,
-                [ModuleArea.Suppliers] = AccessLevel.Edit,
-                [ModuleArea.Insights] = AccessLevel.View,
-                // Edit (not View): a branch manager must be able to approve customer returns
-                // (ReturnsController.Approve requires Finance:Edit) — running the branch includes
-                // authorizing refunds, not just viewing the ledger.
-                [ModuleArea.Finance] = AccessLevel.Edit,
-                [ModuleArea.Hr] = AccessLevel.View,
-                [ModuleArea.Network] = AccessLevel.View,
-                [ModuleArea.Admin] = AccessLevel.None,
-            }, PosTier.Manager),
-            ("Cashier", "Runs the point-of-sale register.", 500m, new Dictionary<ModuleArea, AccessLevel>
+                [Sec.Dashboard] = AccessLevel.View,
+                [Sec.Pos] = AccessLevel.Edit,
+                [Sec.Orders] = AccessLevel.Edit,
+                [Sec.Inventory] = AccessLevel.Edit,
+                [Sec.Delivery] = AccessLevel.Edit,
+                [Sec.Suppliers] = AccessLevel.Edit,
+                [Sec.Insights] = AccessLevel.View,
+                [Sec.Finance] = AccessLevel.Edit,
+                [Sec.Hr] = AccessLevel.View,
+                [Sec.Network] = AccessLevel.View,
+                [Sec.Admin] = AccessLevel.None,
+            }, new[] { "/finance/returns" }, PosTier.Manager),
+            ("Cashier", "Runs the point-of-sale register.", 500m, new Dictionary<string, AccessLevel>
             {
-                [ModuleArea.Pos] = AccessLevel.Full,
-                [ModuleArea.Orders] = AccessLevel.Edit,
-                [ModuleArea.Inventory] = AccessLevel.View,
-                [ModuleArea.Delivery] = AccessLevel.None,
-                [ModuleArea.Suppliers] = AccessLevel.None,
-                [ModuleArea.Insights] = AccessLevel.None,
-                [ModuleArea.Finance] = AccessLevel.None,
-                [ModuleArea.Hr] = AccessLevel.None,
+                [Sec.Dashboard] = AccessLevel.View,
+                [Sec.Pos] = AccessLevel.Full,
+                [Sec.Orders] = AccessLevel.Edit,
+                [Sec.Inventory] = AccessLevel.View,
+                [Sec.Delivery] = AccessLevel.None,
+                [Sec.Suppliers] = AccessLevel.None,
+                [Sec.Insights] = AccessLevel.None,
+                [Sec.Finance] = AccessLevel.None,
+                [Sec.Hr] = AccessLevel.None,
                 // View-only — needed to see the terminal's paired receipt printer in POS Checkout's
                 // Printer Setup dialog; cashiers still can't manage branches/terminals/devices.
-                [ModuleArea.Network] = AccessLevel.View,
-                [ModuleArea.Admin] = AccessLevel.None,
-            }, PosTier.Cashier),
-            ("Senior Cashier", "Cashier plus higher discount/return authorization.", 1_000m, new Dictionary<ModuleArea, AccessLevel>
+                [Sec.Network] = AccessLevel.View,
+                [Sec.Admin] = AccessLevel.None,
+            }, null, PosTier.Cashier),
+            ("Senior Cashier", "Cashier plus higher discount/return authorization.", 1_000m, new Dictionary<string, AccessLevel>
             {
-                [ModuleArea.Pos] = AccessLevel.Full,
-                [ModuleArea.Orders] = AccessLevel.Edit,
-                [ModuleArea.Inventory] = AccessLevel.View,
-                [ModuleArea.Delivery] = AccessLevel.None,
-                [ModuleArea.Suppliers] = AccessLevel.None,
-                [ModuleArea.Insights] = AccessLevel.None,
-                [ModuleArea.Finance] = AccessLevel.None,
-                [ModuleArea.Hr] = AccessLevel.None,
-                [ModuleArea.Network] = AccessLevel.View,
-                [ModuleArea.Admin] = AccessLevel.None,
-            }, PosTier.SeniorCashier),
-            ("Supervisor", "Authorizes damaged/surplus returns, voids, and X-reports.", 10_000m, new Dictionary<ModuleArea, AccessLevel>
+                [Sec.Dashboard] = AccessLevel.View,
+                [Sec.Pos] = AccessLevel.Full,
+                [Sec.Orders] = AccessLevel.Edit,
+                [Sec.Inventory] = AccessLevel.View,
+                [Sec.Delivery] = AccessLevel.None,
+                [Sec.Suppliers] = AccessLevel.None,
+                [Sec.Insights] = AccessLevel.None,
+                [Sec.Finance] = AccessLevel.None,
+                [Sec.Hr] = AccessLevel.None,
+                [Sec.Network] = AccessLevel.View,
+                [Sec.Admin] = AccessLevel.None,
+            }, null, PosTier.SeniorCashier),
+            ("Supervisor", "Authorizes damaged/surplus returns, voids, and X-reports.", 10_000m, new Dictionary<string, AccessLevel>
             {
-                [ModuleArea.Pos] = AccessLevel.Full,
-                [ModuleArea.Orders] = AccessLevel.Full,
-                [ModuleArea.Inventory] = AccessLevel.View,
-                // Edit (not View): the role description literally says "authorizes damaged/surplus
-                // returns" — ReturnsController.Approve requires Finance:Edit, so View could never
-                // actually approve anything despite CanAuthorizeDamagedReturns being true below.
-                [ModuleArea.Finance] = AccessLevel.Edit,
-                [ModuleArea.Delivery] = AccessLevel.View,
-                [ModuleArea.Suppliers] = AccessLevel.None,
-                [ModuleArea.Insights] = AccessLevel.View,
-                [ModuleArea.Hr] = AccessLevel.None,
-                [ModuleArea.Network] = AccessLevel.View,
-                [ModuleArea.Admin] = AccessLevel.None,
-            }, PosTier.Supervisor),
-            ("Warehouse Staff", "Manages stock, transfers and receiving.", 0m, new Dictionary<ModuleArea, AccessLevel>
-            {
-                [ModuleArea.Inventory] = AccessLevel.Edit,
-                [ModuleArea.Suppliers] = AccessLevel.Edit,
-                [ModuleArea.Orders] = AccessLevel.View,
-                [ModuleArea.Pos] = AccessLevel.None,
-                [ModuleArea.Delivery] = AccessLevel.View,
-                [ModuleArea.Insights] = AccessLevel.None,
-                [ModuleArea.Finance] = AccessLevel.None,
-                [ModuleArea.Hr] = AccessLevel.None,
-                [ModuleArea.Network] = AccessLevel.None,
-                [ModuleArea.Admin] = AccessLevel.None,
-            }, PosTier.None),
-            ("Delivery Driver", "Executes assigned delivery orders.", 0m, new Dictionary<ModuleArea, AccessLevel>
-            {
-                [ModuleArea.Delivery] = AccessLevel.Edit,
-                [ModuleArea.Orders] = AccessLevel.View,
-                [ModuleArea.Pos] = AccessLevel.None,
-                [ModuleArea.Inventory] = AccessLevel.None,
-                [ModuleArea.Suppliers] = AccessLevel.None,
-                [ModuleArea.Insights] = AccessLevel.None,
-                [ModuleArea.Finance] = AccessLevel.None,
-                [ModuleArea.Hr] = AccessLevel.None,
-                [ModuleArea.Network] = AccessLevel.None,
-                [ModuleArea.Admin] = AccessLevel.None,
-            }, PosTier.None),
-            ("HR Officer", "Manages employees, attendance and leave.", 5_000m, new Dictionary<ModuleArea, AccessLevel>
-            {
-                [ModuleArea.Hr] = AccessLevel.Full,
-                [ModuleArea.Admin] = AccessLevel.View,
-                [ModuleArea.Delivery] = AccessLevel.View,
-                [ModuleArea.Pos] = AccessLevel.None,
-                [ModuleArea.Orders] = AccessLevel.None,
-                [ModuleArea.Inventory] = AccessLevel.None,
-                [ModuleArea.Suppliers] = AccessLevel.None,
-                [ModuleArea.Insights] = AccessLevel.None,
-                [ModuleArea.Finance] = AccessLevel.None,
-                [ModuleArea.Network] = AccessLevel.None,
-            }, PosTier.None),
-            ("Accountant", "Owns finance, tax and reporting.", 50_000m, new Dictionary<ModuleArea, AccessLevel>
-            {
-                [ModuleArea.Finance] = AccessLevel.Full,
-                [ModuleArea.Insights] = AccessLevel.View,
-                [ModuleArea.Orders] = AccessLevel.View,
-                [ModuleArea.Inventory] = AccessLevel.View,
-                [ModuleArea.Pos] = AccessLevel.None,
-                [ModuleArea.Delivery] = AccessLevel.None,
-                [ModuleArea.Suppliers] = AccessLevel.View,
-                [ModuleArea.Hr] = AccessLevel.None,
-                [ModuleArea.Network] = AccessLevel.None,
-                [ModuleArea.Admin] = AccessLevel.None,
-            }, PosTier.None),
+                [Sec.Dashboard] = AccessLevel.View,
+                [Sec.Pos] = AccessLevel.Full,
+                [Sec.Orders] = AccessLevel.Full,
+                [Sec.Inventory] = AccessLevel.View,
+                [Sec.Finance] = AccessLevel.Edit,
+                [Sec.Delivery] = AccessLevel.View,
+                [Sec.Suppliers] = AccessLevel.None,
+                [Sec.Insights] = AccessLevel.View,
+                [Sec.Hr] = AccessLevel.None,
+                [Sec.Network] = AccessLevel.View,
+                [Sec.Admin] = AccessLevel.None,
+            }, new[] { "/finance/returns" }, PosTier.Supervisor),
         };
 
-    private static Dictionary<ModuleArea, AccessLevel> AllModules(AccessLevel level) =>
-        Enum.GetValues<ModuleArea>().ToDictionary(m => m, _ => level);
-
-    private static Dictionary<ModuleArea, AccessLevel> AdminLevels()
+    // Old ModuleArea bucket names, now used only as the lookup key inside RoleDefinitions'
+    // SectionLevels dictionaries (see PermissionCatalog.PageDef.Section) — not a persisted type.
+    private static class Sec
     {
-        var levels = AllModules(AccessLevel.Edit);
-        levels[ModuleArea.Admin] = AccessLevel.Full;
-        levels[ModuleArea.Network] = AccessLevel.Full;
-        return levels;
+        public const string Dashboard = "Dashboard";
+        public const string Pos = "Pos";
+        public const string Orders = "Orders";
+        public const string Inventory = "Inventory";
+        public const string Finance = "Finance";
+        public const string Admin = "Admin";
+        public const string Delivery = "Delivery";
+        public const string Hr = "Hr";
+        public const string Insights = "Insights";
+        public const string Suppliers = "Suppliers";
+        public const string Network = "Network";
     }
+
+    private static Dictionary<string, AccessLevel> AllSections(AccessLevel level) =>
+        PermissionCatalog.Pages.Select(p => p.Section).Distinct().ToDictionary(s => s, _ => level);
 
     private static async Task SeedUsersAsync(AppDbContext db, IPasswordHasher hasher)
     {
@@ -563,18 +603,21 @@ public static class DbSeeder
         var jeddah = await db.Branches.FirstAsync(b => b.Code == "BR-JED-01");
         var roles = await db.Roles.ToDictionaryAsync(r => r.Name);
 
+        // Warehouse/Driver/HR/Accountant demo users are kept (their emails are referenced as FKs by
+        // later seed steps — SeedDeliveryDataAsync's Driver row, SeedHrDataAsync's Employee rows) but
+        // assigned to Supervisor, their nearest BRD-ladder equivalent, since those specialty roles no
+        // longer exist as standalone roles (BRD §10.1 caps the roster at 5).
         var users = new[]
         {
-            new User { Name = "Omar Al-Qahtani", Email = "owner@ecr-building.local", RoleId = roles["Owner"].Id, BranchId = null },
-            new User { Name = "Sara Al-Dossary", Email = "admin@ecr-building.local", RoleId = roles["Admin"].Id, BranchId = null },
-            new User { Name = "Faisal Al-Otaibi", Email = "manager.ruh@ecr-building.local", RoleId = roles["Branch Manager"].Id, BranchId = riyadh.Id },
+            new User { Name = "Sara Al-Dossary", Email = "admin@ecr-building.local", RoleId = roles["System Admin"].Id, BranchId = null },
+            new User { Name = "Faisal Al-Otaibi", Email = "manager.ruh@ecr-building.local", RoleId = roles["Store Manager"].Id, BranchId = riyadh.Id },
             new User { Name = "Yousef Al-Malki", Email = "cashier.ruh@ecr-building.local", RoleId = roles["Cashier"].Id, BranchId = riyadh.Id },
             new User { Name = "Mona Al-Harbi", Email = "senior-cashier.ruh@ecr-building.local", RoleId = roles["Senior Cashier"].Id, BranchId = riyadh.Id },
             new User { Name = "Tariq Al-Subaie", Email = "supervisor.ruh@ecr-building.local", RoleId = roles["Supervisor"].Id, BranchId = riyadh.Id },
-            new User { Name = "Khalid Al-Shehri", Email = "warehouse.jed@ecr-building.local", RoleId = roles["Warehouse Staff"].Id, BranchId = jeddah.Id },
-            new User { Name = "Naif Al-Ghamdi", Email = "driver.ruh@ecr-building.local", RoleId = roles["Delivery Driver"].Id, BranchId = riyadh.Id },
-            new User { Name = "Huda Al-Zahrani", Email = "hr@ecr-building.local", RoleId = roles["HR Officer"].Id, BranchId = null },
-            new User { Name = "Abdullah Al-Rashid", Email = "accountant@ecr-building.local", RoleId = roles["Accountant"].Id, BranchId = null },
+            new User { Name = "Khalid Al-Shehri", Email = "warehouse.jed@ecr-building.local", RoleId = roles["Supervisor"].Id, BranchId = jeddah.Id },
+            new User { Name = "Naif Al-Ghamdi", Email = "driver.ruh@ecr-building.local", RoleId = roles["Supervisor"].Id, BranchId = riyadh.Id },
+            new User { Name = "Huda Al-Zahrani", Email = "hr@ecr-building.local", RoleId = roles["Supervisor"].Id, BranchId = null },
+            new User { Name = "Abdullah Al-Rashid", Email = "accountant@ecr-building.local", RoleId = roles["Supervisor"].Id, BranchId = null },
         };
 
         foreach (var user in users)
@@ -735,6 +778,29 @@ public static class DbSeeder
         new Setting { Category = "Pos", Group = "Loyalty", Key = "BirthdayBonusMultiplier", Value = "2", Scope = SettingScope.Global },
         new Setting { Category = "Pos", Group = "Loyalty", Key = "PointsExpiryMonths", Value = "12", Scope = SettingScope.Global },
     ];
+
+    // Same drift class as EnsureBrdRolesAsync/EnsureUomConversionsAsync — a database seeded before
+    // MinQuantity/Sku/Value were added to these two PricingRule rows is stuck at their original
+    // all-default values (Value=0, MinQuantity/Sku=null), so OrdersController/QuotationsController's
+    // rule matching silently never fires even though the grid still shows the correct-looking Action
+    // string ("-8%", "-5% list"). Only touches a row while it's still in that drifted state, so an
+    // admin who genuinely re-zeroed one of these two rules on purpose is left alone.
+    internal static async Task EnsurePricingRuleSeedValuesBackfilledAsync(AppDbContext db)
+    {
+        var cementDeal = await db.PricingRules.FirstOrDefaultAsync(r => r.Name == "Cement Pallet Deal" && r.Type == "Quantity");
+        if (cementDeal is not null && (cementDeal.MinQuantity is null || cementDeal.Sku is null) && cementDeal.Value == 0)
+        {
+            cementDeal.MinQuantity = 50;
+            cementDeal.Sku = "CEM-OPC-50KG";
+            cementDeal.Value = 8;
+        }
+        var contractorRate = await db.PricingRules.FirstOrDefaultAsync(r => r.Name == "Contractor Trade Price" && r.Type == "Trade Tier");
+        if (contractorRate is not null && contractorRate.Value == 0)
+        {
+            contractorRate.Value = 5;
+        }
+        await db.SaveChangesAsync();
+    }
 
     // Same drift class as EnsureBrdCategoriesAsync/EnsureUomConversionsAsync: a database seeded
     // before the loyalty economics moved from LoyaltyRules constants to Settings rows has none of

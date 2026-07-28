@@ -13,7 +13,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/inventory/warehouses")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/stock/warehouses", PermissionAction.View)]
 public class WarehousesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -50,7 +50,7 @@ public class WarehousesController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/warehouses", PermissionAction.Create)]
     public async Task<ActionResult<WarehouseDto>> Create(UpsertWarehouseRequest request, CancellationToken ct)
     {
         var warehouse = new Warehouse
@@ -66,7 +66,7 @@ public class WarehousesController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/warehouses", PermissionAction.Edit)]
     public async Task<ActionResult<WarehouseDto>> Update(int id, UpdateWarehouseRequest request, CancellationToken ct)
     {
         var warehouse = await db.Warehouses.Include(w => w.Branch).Include(w => w.Bins).FirstOrDefaultAsync(w => w.Id == id, ct);
@@ -89,7 +89,7 @@ public class WarehousesController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/warehouses", PermissionAction.Delete)]
     public async Task<ActionResult<WarehouseDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
     {
         var warehouse = await db.Warehouses.Include(w => w.Branch).Include(w => w.Bins).FirstOrDefaultAsync(w => w.Id == id, ct);
@@ -103,7 +103,7 @@ public class WarehousesController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPost("{id:int}/bins")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/warehouses", PermissionAction.Create)]
     public async Task<ActionResult<WarehouseDto>> CreateBin(int id, CreateWarehouseBinRequest request, CancellationToken ct)
     {
         var warehouse = await db.Warehouses.Include(w => w.Branch).Include(w => w.Bins).FirstOrDefaultAsync(w => w.Id == id, ct);
@@ -119,7 +119,7 @@ public class WarehousesController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpDelete("{id:int}/bins/{binId:int}")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/warehouses", PermissionAction.Delete)]
     public async Task<ActionResult<WarehouseDto>> DeleteBin(int id, int binId, CancellationToken ct)
     {
         var warehouse = await db.Warehouses.Include(w => w.Branch).Include(w => w.Bins).FirstOrDefaultAsync(w => w.Id == id, ct);
@@ -145,7 +145,7 @@ public class WarehousesController(AppDbContext db, IAuditService audit) : Contro
 [ApiController]
 [Route("api/inventory/stock-levels")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/stock/stocks", PermissionAction.View)]
 public class StockLevelsController(AppDbContext db) : ControllerBase
 {
     [HttpGet]
@@ -168,7 +168,7 @@ public class StockLevelsController(AppDbContext db) : ControllerBase
 [ApiController]
 [Route("api/inventory/branch-stock-levels")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/stock/branch-stock", PermissionAction.View)]
 public class BranchStockLevelsController(AppDbContext db) : ControllerBase
 {
     [HttpGet]
@@ -191,8 +191,8 @@ public class BranchStockLevelsController(AppDbContext db) : ControllerBase
 [ApiController]
 [Route("api/inventory/stock-batches")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
-public class StockBatchesController(AppDbContext db, IAuditService audit) : ControllerBase
+[RequireModule("/stock/expiry", PermissionAction.View)]
+public class StockBatchesController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements, IGlPostingService gl) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<StockBatchDto>>> List(CancellationToken ct)
@@ -203,7 +203,7 @@ public class StockBatchesController(AppDbContext db, IAuditService audit) : Cont
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/expiry", PermissionAction.Create)]
     public async Task<ActionResult<StockBatchDto>> Create(CreateStockBatchRequest request, CancellationToken ct)
     {
         var batch = new StockBatch
@@ -221,15 +221,50 @@ public class StockBatchesController(AppDbContext db, IAuditService audit) : Cont
     }
 
     [HttpPut("{id:int}/quarantine")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/expiry", PermissionAction.Edit)]
     public Task<ActionResult<StockBatchDto>> Quarantine(int id, CancellationToken ct) => SetManualStatus(id, StockBatchStatus.Quarantine, "BATCH_QUARANTINED", ct);
 
     [HttpPut("{id:int}/write-off")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
-    public Task<ActionResult<StockBatchDto>> WriteOff(int id, CancellationToken ct) => SetManualStatus(id, StockBatchStatus.WrittenOff, "BATCH_WRITTEN_OFF", ct);
+    [RequireModule("/stock/expiry", PermissionAction.Delete)]
+    public async Task<ActionResult<StockBatchDto>> WriteOff(int id, CancellationToken ct)
+    {
+        var batch = await db.StockBatches.Include(b => b.Product).Include(b => b.Warehouse).FirstOrDefaultAsync(b => b.Id == id, ct);
+        if (batch is null) return NotFound();
+        if (batch.ManualStatus == StockBatchStatus.WrittenOff) return BadRequest(new { error = "This batch is already written off." });
+
+        // A write-off destroys real inventory value — flipping only the display status (as this
+        // used to) left StockLevel.OnHand overstated forever (the batch still "counted" everywhere:
+        // valuation, low-stock, availability) even though the goods are gone. Zero the batch and
+        // debit the loss out of both the warehouse pool and the books, same class of fix as the
+        // PO-receive/RTS stock-integrity pass.
+        var qty = batch.Qty;
+        if (qty > 0 && batch.Warehouse is not null)
+        {
+            var level = await db.StockLevels.FirstOrDefaultAsync(s => s.ProductId == batch.ProductId && s.WarehouseId == batch.WarehouseId, ct);
+            if (level is not null) level.OnHand = Math.Max(0, level.OnHand - qty);
+        }
+        batch.Qty = 0;
+        batch.ManualStatus = StockBatchStatus.WrittenOff;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "BATCH_WRITTEN_OFF", batch.Id.ToString(), newValue: new { WrittenOffQty = qty }, cancellationToken: ct);
+
+        if (qty > 0 && batch.Warehouse is not null)
+        {
+            await stockMovements.RecordAsync(batch.ProductId, batch.Warehouse.BranchId, StockMovementType.WriteOff, -qty,
+                refTable: "StockBatch", refId: batch.Id.ToString(), warehouseId: batch.WarehouseId, cancellationToken: ct);
+
+            var value = qty * (batch.Product?.CostPrice ?? 0);
+            if (value > 0)
+            {
+                await gl.PostAsync($"WO-{batch.Id}", $"Stock write-off: {batch.Product?.Sku} batch {batch.BatchNo}",
+                    [new GlLine("5100", value, 0), new GlLine("1200", 0, value)], ct);
+            }
+        }
+        return Ok(Map(batch));
+    }
 
     [HttpPut("{id:int}/move-to-promo")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/expiry", PermissionAction.Edit)]
     public async Task<ActionResult<StockBatchDto>> MoveToPromo(int id, CancellationToken ct)
     {
         var batch = await db.StockBatches.Include(b => b.Product).Include(b => b.Warehouse).FirstOrDefaultAsync(b => b.Id == id, ct);
@@ -262,10 +297,119 @@ public class StockBatchesController(AppDbContext db, IAuditService audit) : Cont
     }
 }
 
+// Branch-side counterpart to StockBatchesController — same shape, same actions, keyed on Branch
+// instead of Warehouse (see BranchStockBatch's doc comment for why this exists as its own table
+// rather than a nullable WarehouseId column on StockBatch: a branch and a warehouse decrement a
+// different stock pool on write-off, BranchStockLevel vs StockLevel, so the two need genuinely
+// different logic, not just a different foreign key).
+[ApiController]
+[Route("api/inventory/branch-stock-batches")]
+[Authorize]
+[RequireModule("/stock/expiry", PermissionAction.View)]
+public class BranchStockBatchesController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements, IGlPostingService gl) : ControllerBase
+{
+    [HttpGet]
+    public async Task<ActionResult<List<StockBatchDto>>> List(CancellationToken ct)
+    {
+        var batches = await db.BranchStockBatches.Include(b => b.Product).Include(b => b.Branch)
+            .OrderBy(b => b.ExpiryDate).ToListAsync(ct);
+        return Ok(batches.Select(Map).ToList());
+    }
+
+    [HttpPost]
+    [RequireModule("/stock/expiry", PermissionAction.Create)]
+    public async Task<ActionResult<StockBatchDto>> Create(CreateBranchStockBatchRequest request, CancellationToken ct)
+    {
+        var batch = new BranchStockBatch
+        {
+            ProductId = request.ProductId, BranchId = request.BranchId, BatchNo = request.BatchNo,
+            ReceivedDate = request.ReceivedDate, ExpiryDate = request.ExpiryDate, Qty = request.Qty,
+        };
+        db.BranchStockBatches.Add(batch);
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "BRANCH_BATCH_CREATED", batch.Id.ToString(), newValue: request, cancellationToken: ct);
+
+        await db.Entry(batch).Reference(b => b.Product).LoadAsync(ct);
+        await db.Entry(batch).Reference(b => b.Branch).LoadAsync(ct);
+        return Ok(Map(batch));
+    }
+
+    [HttpPut("{id:int}/quarantine")]
+    [RequireModule("/stock/expiry", PermissionAction.Edit)]
+    public Task<ActionResult<StockBatchDto>> Quarantine(int id, CancellationToken ct) => SetManualStatus(id, StockBatchStatus.Quarantine, "BRANCH_BATCH_QUARANTINED", ct);
+
+    [HttpPut("{id:int}/write-off")]
+    [RequireModule("/stock/expiry", PermissionAction.Delete)]
+    public async Task<ActionResult<StockBatchDto>> WriteOff(int id, CancellationToken ct)
+    {
+        var batch = await db.BranchStockBatches.Include(b => b.Product).Include(b => b.Branch).FirstOrDefaultAsync(b => b.Id == id, ct);
+        if (batch is null) return NotFound();
+        if (batch.ManualStatus == StockBatchStatus.WrittenOff) return BadRequest(new { error = "This batch is already written off." });
+
+        var qty = batch.Qty;
+        if (qty > 0)
+        {
+            var level = await db.BranchStockLevels.FirstOrDefaultAsync(s => s.ProductId == batch.ProductId && s.BranchId == batch.BranchId, ct);
+            if (level is not null) level.OnHand = Math.Max(0, level.OnHand - qty);
+        }
+        batch.Qty = 0;
+        batch.ManualStatus = StockBatchStatus.WrittenOff;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "BRANCH_BATCH_WRITTEN_OFF", batch.Id.ToString(), newValue: new { WrittenOffQty = qty }, cancellationToken: ct);
+
+        if (qty > 0)
+        {
+            await stockMovements.RecordAsync(batch.ProductId, batch.BranchId, StockMovementType.WriteOff, -qty,
+                refTable: "BranchStockBatch", refId: batch.Id.ToString(), cancellationToken: ct);
+
+            var value = qty * (batch.Product?.CostPrice ?? 0);
+            if (value > 0)
+            {
+                await gl.PostAsync($"WO-B{batch.Id}", $"Branch stock write-off: {batch.Product?.Sku} batch {batch.BatchNo}",
+                    [new GlLine("5100", value, 0), new GlLine("1200", 0, value)], ct);
+            }
+        }
+        return Ok(Map(batch));
+    }
+
+    [HttpPut("{id:int}/move-to-promo")]
+    [RequireModule("/stock/expiry", PermissionAction.Edit)]
+    public async Task<ActionResult<StockBatchDto>> MoveToPromo(int id, CancellationToken ct)
+    {
+        var batch = await db.BranchStockBatches.Include(b => b.Product).Include(b => b.Branch).FirstOrDefaultAsync(b => b.Id == id, ct);
+        if (batch is null) return NotFound();
+
+        batch.OnPromo = true;
+        batch.ManualStatus = null;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "BRANCH_BATCH_MOVED_TO_PROMO", batch.Id.ToString(), cancellationToken: ct);
+        return Ok(Map(batch));
+    }
+
+    private async Task<ActionResult<StockBatchDto>> SetManualStatus(int id, StockBatchStatus status, string auditAction, CancellationToken ct)
+    {
+        var batch = await db.BranchStockBatches.Include(b => b.Product).Include(b => b.Branch).FirstOrDefaultAsync(b => b.Id == id, ct);
+        if (batch is null) return NotFound();
+
+        batch.ManualStatus = status;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", auditAction, batch.Id.ToString(), cancellationToken: ct);
+        return Ok(Map(batch));
+    }
+
+    private static StockBatchDto Map(BranchStockBatch b)
+    {
+        var daysLeft = (int)(b.ExpiryDate.Date - DateTime.UtcNow.Date).TotalDays;
+        var computed = daysLeft < 0 ? "Expired" : daysLeft <= 7 ? "Critical" : daysLeft <= 30 ? "Expiring" : daysLeft <= 90 ? "Monitor" : "Healthy";
+        var status = b.ManualStatus?.ToString() ?? (b.OnPromo ? "On Promo" : computed);
+        return new StockBatchDto(b.Id, b.Product!.Sku, b.Product.NameEn, b.BatchNo, b.ReceivedDate, b.ExpiryDate, daysLeft, b.Qty, b.Branch?.NameEn ?? "", status, Scope: "Branch");
+    }
+}
+
 [ApiController]
 [Route("api/inventory/transfers")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/stock/transfers", PermissionAction.View)]
 public class StockTransfersController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements) : ControllerBase
 {
     private IQueryable<StockTransfer> WithIncludes() => db.StockTransfers
@@ -296,9 +440,19 @@ public class StockTransfersController(AppDbContext db, IAuditService audit, ISto
             return null;
         }
         var branchLevel = await db.BranchStockLevels.FirstOrDefaultAsync(s => s.ProductId == productId && s.BranchId == branchId, ct);
-        return branchLevel is null || branchLevel.Available < qty
-            ? $"Insufficient available stock for \"{productName}\" at the source branch (available: {branchLevel?.Available ?? 0}, requested: {qty})."
-            : null;
+        if (branchLevel is null || branchLevel.Available < qty)
+        {
+            return $"Insufficient available stock for \"{productName}\" at the source branch (available: {branchLevel?.Available ?? 0}, requested: {qty}).";
+        }
+        if (!string.IsNullOrWhiteSpace(batchNo))
+        {
+            var batch = await db.BranchStockBatches.FirstOrDefaultAsync(b => b.ProductId == productId && b.BranchId == branchId && b.BatchNo == batchNo, ct);
+            if (batch is null || batch.Qty < qty)
+            {
+                return $"Batch \"{batchNo}\" doesn't have enough quantity for \"{productName}\" at the source branch (available: {batch?.Qty ?? 0}, requested: {qty}).";
+            }
+        }
+        return null;
     }
 
     private async Task DebitAsync(int? warehouseId, int? branchId, int productId, decimal qty, string? batchNo, string? refId, CancellationToken ct)
@@ -316,6 +470,11 @@ public class StockTransfersController(AppDbContext db, IAuditService audit, ISto
         }
         var branchLevel = await db.BranchStockLevels.FirstAsync(s => s.ProductId == productId && s.BranchId == branchId, ct);
         branchLevel.OnHand -= qty;
+        if (!string.IsNullOrWhiteSpace(batchNo))
+        {
+            var batch = await db.BranchStockBatches.FirstAsync(b => b.ProductId == productId && b.BranchId == branchId && b.BatchNo == batchNo, ct);
+            batch.Qty -= qty;
+        }
         await stockMovements.RecordAsync(productId, branchId!.Value, StockMovementType.TransferOut, -qty,
             refTable: "StockTransfer", refId: refId, cancellationToken: ct);
     }
@@ -356,7 +515,21 @@ public class StockTransfersController(AppDbContext db, IAuditService audit, ISto
             branchLevel = new BranchStockLevel { ProductId = productId, BranchId = branchId!.Value };
             db.BranchStockLevels.Add(branchLevel);
         }
-        branchLevel.OnHand += qty; // branches don't batch-track — no destination StockBatch here
+        branchLevel.OnHand += qty;
+        if (!string.IsNullOrWhiteSpace(batchNo) && qty > 0)
+        {
+            var batch = await db.BranchStockBatches.FirstOrDefaultAsync(b => b.ProductId == productId && b.BranchId == branchId && b.BatchNo == batchNo, ct);
+            if (batch is null)
+            {
+                batch = new BranchStockBatch
+                {
+                    ProductId = productId, BranchId = branchId!.Value, BatchNo = batchNo,
+                    ReceivedDate = DateTime.UtcNow, ExpiryDate = expiryDate ?? DateTime.UtcNow.AddYears(1),
+                };
+                db.BranchStockBatches.Add(batch);
+            }
+            batch.Qty += qty;
+        }
         await stockMovements.RecordAsync(productId, branchId!.Value, StockMovementType.TransferIn, qty,
             refTable: "StockTransfer", refId: refId, cancellationToken: ct);
     }
@@ -371,7 +544,7 @@ public class StockTransfersController(AppDbContext db, IAuditService audit, ISto
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/transfers", PermissionAction.Create)]
     public async Task<ActionResult<StockTransferDto>> Create(CreateStockTransferRequest request, CancellationToken ct)
     {
         if ((request.FromWarehouseId is null) == (request.FromBranchId is null))
@@ -429,12 +602,12 @@ public class StockTransfersController(AppDbContext db, IAuditService audit, ISto
     }
 
     [HttpPut("{id:int}/submit")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/transfers", PermissionAction.Edit)]
     public Task<ActionResult<StockTransferDto>> Submit(int id, CancellationToken ct) =>
         Transition(id, StockTransferStatus.Draft, StockTransferStatus.PendingApproval, "TRANSFER_SUBMITTED", null, ct);
 
     [HttpPut("{id:int}/approve")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/transfers", PermissionAction.Approve)]
     public Task<ActionResult<StockTransferDto>> Approve(int id, ApproveStockTransferRequest request, CancellationToken ct) =>
         Transition(id, StockTransferStatus.PendingApproval, StockTransferStatus.Approved, "TRANSFER_APPROVED",
             t => t.ApproverUserId = request.ApproverUserId ?? t.ApproverUserId, ct);
@@ -453,7 +626,7 @@ public class StockTransfersController(AppDbContext db, IAuditService audit, ISto
     }
 
     [HttpPut("{id:int}/dispatch")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/transfers", PermissionAction.Edit)]
     public async Task<ActionResult<StockTransferDto>> Dispatch(int id, CancellationToken ct)
     {
         var transfer = await WithIncludes().FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -483,7 +656,7 @@ public class StockTransfersController(AppDbContext db, IAuditService audit, ISto
     }
 
     [HttpPut("{id:int}/receive")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/transfers", PermissionAction.Edit)]
     public async Task<ActionResult<StockTransferDto>> Receive(int id, ReceiveStockTransferRequest? request, CancellationToken ct)
     {
         var transfer = await WithIncludes().FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -506,7 +679,7 @@ public class StockTransfersController(AppDbContext db, IAuditService audit, ISto
     }
 
     [HttpPut("{id:int}/cancel")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/transfers", PermissionAction.Delete)]
     public async Task<ActionResult<StockTransferDto>> Cancel(int id, CancellationToken ct)
     {
         var transfer = await WithIncludes().FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -557,7 +730,7 @@ public class StockTransfersController(AppDbContext db, IAuditService audit, ISto
 [ApiController]
 [Route("api/inventory/adjustments")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/stock/stocks", PermissionAction.View)]
 public class StockAdjustmentsController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements) : ControllerBase
 {
     [HttpGet]
@@ -571,7 +744,7 @@ public class StockAdjustmentsController(AppDbContext db, IAuditService audit, IS
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/stocks", PermissionAction.Create)]
     public async Task<ActionResult<StockAdjustmentDto>> Create(CreateStockAdjustmentRequest request, CancellationToken ct)
     {
         var warehouse = await db.Warehouses.FindAsync([request.WarehouseId], ct);
@@ -639,7 +812,7 @@ public class StockAdjustmentsController(AppDbContext db, IAuditService audit, IS
 [ApiController]
 [Route("api/inventory/stock-movements")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/stock/movements", PermissionAction.View)]
 public class StockMovementsController(AppDbContext db) : ControllerBase
 {
     private static readonly Dictionary<StockMovementType, string> TypeLabels = new()

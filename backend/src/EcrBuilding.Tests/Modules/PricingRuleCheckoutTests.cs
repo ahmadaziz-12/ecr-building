@@ -78,7 +78,7 @@ public class PricingRuleCheckoutTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Expired_trade_tier_rule_is_ignored_and_the_default_contractor_discount_applies()
+    public async Task Expired_trade_tier_rule_is_ignored_and_no_automatic_contractor_discount_applies()
     {
         using var db = _factory.CreateDbContext();
         var (branch, product) = SeedBranchAndProduct(db);
@@ -95,8 +95,8 @@ public class PricingRuleCheckoutTests : IAsyncLifetime
         var cashier = TestDataSeeder.AddUser(db, cashierRole, "cashier-tt2@test.local", branchId: branch.Id);
         var client = _factory.CreateAuthenticatedClient(cashier);
 
-        // Expired rule must not apply — falls back to the default 5% (100 - 5% = 95).
-        var response = await client.PostAsJsonAsync("/api/pos/orders", CheckoutRequest(branch.Id, contractor.Id, product.Id, qty: 1m, payAmount: 95m));
+        // Expired rule must not apply, and there is no hardcoded fallback anymore — full price (100).
+        var response = await client.PostAsJsonAsync("/api/pos/orders", CheckoutRequest(branch.Id, contractor.Id, product.Id, qty: 1m, payAmount: 100m));
 
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"Expected OK, got {response.StatusCode}: {body}");
@@ -169,6 +169,32 @@ public class PricingRuleCheckoutTests : IAsyncLifetime
 
         // 50 units of a DIFFERENT sku — the cement-specific rule must not apply: 50 x 100 = 5,000.
         var response = await client.PostAsJsonAsync("/api/pos/orders", CheckoutRequest(branch.Id, null, product.Id, qty: 50m, payAmount: 5_000m));
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"Expected OK, got {response.StatusCode}: {body}");
+    }
+
+    [Fact]
+    public async Task Quantity_rule_matches_the_products_sku_case_insensitively()
+    {
+        using var db = _factory.CreateDbContext();
+        var (branch, product) = SeedBranchAndProduct(db, sku: "Net12");
+        // Sku is uppercased at rule-creation time (PricingRulesController.Create) — the catalog SKU
+        // itself is stored exactly as entered ("Net12"), so an ordinal comparison would never match.
+        db.PricingRules.Add(new PricingRule
+        {
+            Name = "NetWire Deal", Type = "Quantity", Scope = "SKU: Net12", Condition = ">= 1 units",
+            Action = "-20%", Priority = 10, Status = PricingRuleStatus.Active,
+            DiscountType = RuleDiscountType.Percentage, Value = 20m, MinQuantity = 1m, Sku = "NET12",
+        });
+        db.SaveChanges();
+        var cashierRole = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders]);
+        db.SaveChanges();
+        var cashier = TestDataSeeder.AddUser(db, cashierRole, "cashier-case@test.local", branchId: branch.Id);
+        var client = _factory.CreateAuthenticatedClient(cashier);
+
+        // 1 unit x 100 x (1 - 20%) = 80.
+        var response = await client.PostAsJsonAsync("/api/pos/orders", CheckoutRequest(branch.Id, null, product.Id, qty: 1m, payAmount: 80m));
 
         var body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"Expected OK, got {response.StatusCode}: {body}");

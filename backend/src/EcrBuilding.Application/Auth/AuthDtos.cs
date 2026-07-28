@@ -4,7 +4,9 @@ namespace EcrBuilding.Application.Auth;
 
 public record LoginRequest(string Email, string Password);
 
-public record ModulePermissionDto(string Module, string Level);
+// Module is a page route key (e.g. "/stock/warehouses") — mirrors ModulePermissionEntry, this is
+// the user's EFFECTIVE grid (role default merged with any per-user override) sent to the frontend.
+public record ModulePermissionDto(string Module, bool CanView, bool CanCreate, bool CanEdit, bool CanDelete, bool CanApprove, bool CanExport);
 
 public record CurrentUserDto(
     int Id,

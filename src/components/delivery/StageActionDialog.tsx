@@ -35,7 +35,7 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
   const vehicles = useDeliveryStore((s) => s.vehicles);
   const employees = useHrStore((s) => s.employees);
   const { hasAccess } = useAuth();
-  const canMoveDirectly = hasAccess("Delivery", "Full");
+  const canMoveDirectly = hasAccess("/delivery/orders", "Approve");
 
   const next = useMemo(() => allowedNext(order.stage), [order.stage]);
   const driverEmp = employees.find((e) => e.id === driverEmpId);
@@ -88,6 +88,10 @@ function StageActionInner({ order, onClose }: { order: DeliveryOrder; onClose: (
     }
     if (target === "Returned to Branch" && !reason) {
       toast.error("Reason is required for return-to-branch.");
+      return;
+    }
+    if ((target === "Rescheduled" || target === "Cancelled") && !reason) {
+      toast.error(`Reason is required to mark this ${target.toLowerCase()}.`);
       return;
     }
     setSaving(true);

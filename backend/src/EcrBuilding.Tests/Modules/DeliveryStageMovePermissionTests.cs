@@ -1,18 +1,21 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using EcrBuilding.Application.Auth;
 using EcrBuilding.Domain.Entities;
 using EcrBuilding.Domain.Enums;
 using EcrBuilding.Infrastructure.Persistence;
 using EcrBuilding.Tests.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace EcrBuilding.Tests.Modules;
 
 /// <summary>
-/// Delivery Orders "move to next stage": Delivery:Edit can only file a move request, Delivery:Full
-/// moves directly and is who approves/rejects someone else's pending request — mirrors the POS
-/// discount request/approve pattern (Module1DiscountAuthorizationTests) but keyed off the module
-/// AccessLevel tiers instead of a numeric ceiling, since Delivery has no per-action ceiling concept.
+/// Delivery Orders "move to next stage": a role with only Edit on the Delivery Orders page can only
+/// file a move request; one with Approve moves directly and is who approves/rejects someone else's
+/// pending request — mirrors the POS discount request/approve pattern
+/// (Module1DiscountAuthorizationTests) but keyed off the page-level PermissionAction.Approve bit
+/// instead of a numeric ceiling, since Delivery has no per-action ceiling concept.
 /// </summary>
 public class DeliveryStageMovePermissionTests : IAsyncLifetime
 {
@@ -115,9 +118,22 @@ public class DeliveryStageMovePermissionTests : IAsyncLifetime
         var requestBody = await requestResponse.Content.ReadFromJsonAsync<JsonElement>();
         var approvalId = requestBody.GetProperty("pendingApproval").GetProperty("id").GetInt32();
 
-        // Promote the requester's own role to Full and retry approving their own request.
-        db.RolePermissions.Single(p => p.RoleId == editRole.Id && p.Module == ModuleArea.Delivery).Level = AccessLevel.Full;
+        // Promote the requester's own role to carry Approve on Delivery Orders and retry approving
+        // their own request. Direct DB mutation bypasses RolesController.Update's epoch bump, so the
+        // resolver's per-user cache (populated by the request above) is invalidated explicitly here —
+        // the same thing that endpoint does after a real permission edit.
+        foreach (var perm in db.RolePermissions.Where(p => p.RoleId == editRole.Id && p.ModuleKey == "/delivery/orders"))
+        {
+            perm.CanView = perm.CanCreate = perm.CanEdit = perm.CanDelete = perm.CanApprove = perm.CanExport = true;
+        }
+        var epoch = db.PermissionsEpochs.FirstOrDefault();
+        if (epoch is null) db.PermissionsEpochs.Add(new PermissionsEpoch { Value = 1 });
+        else epoch.Value++;
         db.SaveChanges();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<IPermissionResolver>().InvalidateEpoch();
+        }
         var selfClient = _factory.CreateAuthenticatedClient(requester);
 
         var approveResponse = await selfClient.PutAsync($"/api/delivery/orders/approvals/{approvalId}/approve", null);

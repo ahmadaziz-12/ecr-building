@@ -1,7 +1,16 @@
-import { useCategories, useCreateCategory, useCreateProduct, useProducts } from "./catalog";
-import { parseUomConversions } from "@/lib/buildpos/uom";
+import {
+  resolveParentCategory,
+  resolveProductCategoryId,
+  useCategories,
+  useCreateCategory,
+  useCreateProduct,
+  useProducts,
+} from "./catalog";
+import { parseUomConversions, parseCutToSizeMode } from "@/lib/buildpos/uom";
+import { parseAttributes } from "@/lib/buildpos/attributes";
 import { useCreateBundle } from "./bundles";
 import {
+  useCreateBranchStockBatch,
   useCreateStockAdjustment,
   useCreateStockBatch,
   useCreateStockTransfer,
@@ -10,11 +19,23 @@ import {
   useWarehouses,
 } from "./inventory";
 import {
-  useUsers, useBranches, useRoles, useTerminals,
-  useCreateUser, useCreateRole, useCreateBranch, useCreateTerminal, useCreateDevice,
-  useCreateRule, useCreateCompliance, useCreateMaintenance,
-  TERMINAL_TYPE_TO_BACKEND, DEVICE_TYPE_TO_BACKEND, CONNECTION_TO_BACKEND,
-  RULE_DOMAIN_TO_BACKEND, RULE_PRIORITY_TO_NUMBER, posCeilingsFromTier,
+  useUsers,
+  useBranches,
+  useRoles,
+  useTerminals,
+  useCreateUser,
+  useCreateBranch,
+  useCreateTerminal,
+  useCreateDevice,
+  useCreateRule,
+  useCreateCompliance,
+  useCreateMaintenance,
+  TERMINAL_TYPE_TO_BACKEND,
+  DEVICE_TYPE_TO_BACKEND,
+  CONNECTION_TO_BACKEND,
+  RULE_DOMAIN_TO_BACKEND,
+  RULE_PRIORITY_TO_NUMBER,
+  posCeilingsFromTier,
 } from "./admin";
 import {
   useCreatePurchaseOrder,
@@ -74,6 +95,7 @@ export function useFlowSubmitHandlers(): Record<
   const { data: users } = useUsers();
   const createStockAdjustment = useCreateStockAdjustment();
   const createStockBatch = useCreateStockBatch();
+  const createBranchStockBatch = useCreateBranchStockBatch();
   const createTransfer = useCreateStockTransfer();
   const createWarehouse = useCreateWarehouse();
   const createWarehouseBin = useCreateWarehouseBin();
@@ -82,7 +104,6 @@ export function useFlowSubmitHandlers(): Record<
   const { data: roles } = useRoles();
   const { data: terminals } = useTerminals();
   const createUser = useCreateUser();
-  const createRole = useCreateRole();
   const createBranch = useCreateBranch();
   const createTerminal = useCreateTerminal();
   const createDevice = useCreateDevice();
@@ -103,7 +124,10 @@ export function useFlowSubmitHandlers(): Record<
   // A Stock Transfer's source/destination is either a warehouse (bulk stock) or a branch (shop-floor
   // stock) — the picker's options are prefixed "Warehouse: <name>" / "Branch: <name>" so one field
   // can pick either kind of location.
-  function resolveTransferLocation(value: string): { warehouseId: number | null; branchId: number | null } {
+  function resolveTransferLocation(value: string): {
+    warehouseId: number | null;
+    branchId: number | null;
+  } {
     if (value.toLowerCase().startsWith("warehouse:")) {
       const name = value.slice("warehouse:".length).trim();
       const warehouse = warehouses?.find((w) => w.name.toLowerCase() === name.toLowerCase());
@@ -139,40 +163,46 @@ export function useFlowSubmitHandlers(): Record<
 
   return {
     "add-sku": async (values) => {
-      const category = categories?.find(
-        (c) => c.nameEn.toLowerCase() === (values.category ?? "").toLowerCase(),
-      );
       if (!values.sku || !values.nameEn) throw new Error("SKU and Name (English) are required.");
-      if (!category)
+      const categoryId = resolveProductCategoryId(
+        categories,
+        values.category ?? "",
+        values.subcategory,
+      );
+      if (categoryId == null)
         throw new Error(
           `Unknown category "${values.category}" — pick one that exists in Categories & Attributes.`,
         );
 
       const vatRate = values.vat === "Exempt" ? 0 : values.vat?.startsWith("0%") ? 0 : 15;
+      const conversions = parseUomConversions(values.uomConversions);
+      const { isCutToSize, cutToSizeUnit } = parseCutToSizeMode(values.cutToSizeMode);
       await createProduct.mutateAsync({
         sku: values.sku,
         barcode: values.barcode || null,
         nameEn: values.nameEn,
         nameAr: values.nameAr || null,
-        categoryId: category.id,
+        categoryId,
         brand: values.brand || null,
         costPrice: Number(values.cost || 0),
         sellingPrice: Number(values.price || 0),
+        contractorPrice: values.contractorPrice ? Number(values.contractorPrice) : null,
+        wholesalePrice: values.wholesalePrice ? Number(values.wholesalePrice) : null,
+        projectPrice: values.projectPrice ? Number(values.projectPrice) : null,
         vatRate,
         stockUom: values.stockUom || "Piece",
-        sellUoms: values.sellUoms
-          ? values.sellUoms
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : [],
+        // Display-label list, derived from the same conversions the cashier can actually sell in —
+        // no separate "Selling UOMs" input to keep in sync with it.
+        sellUoms: conversions.map((c) => c.uom),
         weight: Number(values.weight || 0),
         returnable: values.returnable === "on",
         reorderLevel: Number(values.reorder || 0),
         reorderQty: Number(values.reorderQty || 0),
-        imageUrl: null,
-        uomConversions: parseUomConversions(values.uomConversions),
-        isCutToSize: values.cutToSize === "on",
+        imageUrl: values.imageUrl || null,
+        uomConversions: conversions,
+        isCutToSize,
+        cutToSizeUnit,
+        attributes: parseAttributes(values.attributes),
       });
     },
 
@@ -181,10 +211,8 @@ export function useFlowSubmitHandlers(): Record<
       // Parent is optional — an unrecognized name just creates a top-level category instead of
       // blocking the whole form, unlike category-on-product which is required.
       const parentName =
-        values.parent && values.parent !== "— None (top level) —" ? values.parent : null;
-      const parent = parentName
-        ? categories?.find((c) => c.nameEn.toLowerCase() === parentName.toLowerCase())
-        : undefined;
+        values.parent && values.parent !== "— This is a Main Category —" ? values.parent : null;
+      const parent = parentName ? resolveParentCategory(categories, parentName) : undefined;
       const vatRate = values.vat === "Exempt" ? 0 : values.vat?.startsWith("0%") ? 0 : 15;
 
       await createCategory.mutateAsync({
@@ -259,13 +287,19 @@ export function useFlowSubmitHandlers(): Record<
 
     "bin-setup": async (values) => {
       if (!values.warehouse) throw new Error("Warehouse is required.");
-      const warehouse = warehouses?.find((w) => w.name.toLowerCase() === values.warehouse.toLowerCase());
+      const warehouse = warehouses?.find(
+        (w) => w.name.toLowerCase() === values.warehouse.toLowerCase(),
+      );
       if (!warehouse) throw new Error(`Unknown warehouse "${values.warehouse}".`);
       if (!values.binCode || !values.label) throw new Error("Bin Code and Label are required.");
 
       await createWarehouseBin.mutateAsync({
         warehouseId: warehouse.id,
-        request: { binCode: values.binCode, label: values.label, capacityTons: Number(values.capacity || 0) },
+        request: {
+          binCode: values.binCode,
+          label: values.label,
+          capacityTons: Number(values.capacity || 0),
+        },
       });
     },
 
@@ -273,14 +307,16 @@ export function useFlowSubmitHandlers(): Record<
       if (!values.from || !values.to) throw new Error("From and To location are required.");
       const from = resolveTransferLocation(values.from);
       const to = resolveTransferLocation(values.to);
-      if (from.warehouseId !== null && from.warehouseId === to.warehouseId) throw new Error("Source and destination warehouse must differ.");
-      if (from.branchId !== null && from.branchId === to.branchId) throw new Error("Source and destination branch must differ.");
+      if (from.warehouseId !== null && from.warehouseId === to.warehouseId)
+        throw new Error("Source and destination warehouse must differ.");
+      if (from.branchId !== null && from.branchId === to.branchId)
+        throw new Error("Source and destination branch must differ.");
 
       const rows = parseLineItemRows(values.items);
       if (!rows.length) throw new Error("At least one line item is required.");
 
       const lines = rows.map((row) => {
-        if (!row.sku || !row.qty) throw new Error("Every line needs an item and a quantity.");
+        if (!row.sku || !(Number(row.qty) > 0)) throw new Error("Every line needs an item and a quantity greater than 0.");
         const product = products?.find((p) => p.sku.toLowerCase() === row.sku.toLowerCase());
         if (!product) throw new Error(`Unknown SKU "${row.sku}".`);
         return {
@@ -305,25 +341,33 @@ export function useFlowSubmitHandlers(): Record<
     },
 
     "add-batch": async (values) => {
-      if (!values.sku || !values.warehouse || !values.batchNo)
-        throw new Error("SKU, warehouse and batch number are required.");
+      if (!values.sku || !values.location || !values.batchNo)
+        throw new Error("SKU, location and batch number are required.");
       const product = products?.find((p) => p.sku.toLowerCase() === values.sku.toLowerCase());
       if (!product) throw new Error(`Unknown SKU "${values.sku}" — check Product Catalog.`);
-      const warehouse = warehouses?.find(
-        (w) => w.name.toLowerCase() === values.warehouse.toLowerCase(),
-      );
-      if (!warehouse) throw new Error(`Unknown warehouse "${values.warehouse}".`);
       if (!values.received || !values.expiry)
         throw new Error("Received and Expiry dates are required.");
 
-      await createStockBatch.mutateAsync({
-        productId: product.id,
-        warehouseId: warehouse.id,
-        batchNo: values.batchNo,
-        receivedDate: values.received,
-        expiryDate: values.expiry,
-        qty: Number(values.qty || 0),
-      });
+      const location = resolveTransferLocation(values.location);
+      if (location.warehouseId !== null) {
+        await createStockBatch.mutateAsync({
+          productId: product.id,
+          warehouseId: location.warehouseId,
+          batchNo: values.batchNo,
+          receivedDate: values.received,
+          expiryDate: values.expiry,
+          qty: Number(values.qty || 0),
+        });
+      } else {
+        await createBranchStockBatch.mutateAsync({
+          productId: product.id,
+          branchId: location.branchId!,
+          batchNo: values.batchNo,
+          receivedDate: values.received,
+          expiryDate: values.expiry,
+          qty: Number(values.qty || 0),
+        });
+      }
     },
 
     "create-bundle": async (values) => {
@@ -380,10 +424,13 @@ export function useFlowSubmitHandlers(): Record<
       // Each row can target several branches at once (the multi-select branch pills) — that
       // fans out into one PO line per branch, all carrying the same qty/cost/batch/expiry.
       const lines = rows.flatMap((row) => {
-        if (!row.sku || !row.branch || !row.qty) throw new Error("Every PO line needs an item, at least one branch and a quantity.");
+        if (!row.sku || !row.branch || !(Number(row.qty) > 0)) throw new Error("Every PO line needs an item, at least one branch and a quantity greater than 0.");
         const product = products?.find((p) => p.sku === row.sku);
         if (!product) throw new Error(`Unknown SKU "${row.sku}".`);
-        const branchNames = row.branch.split(",").map((s) => s.trim()).filter(Boolean);
+        const branchNames = row.branch
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
         return branchNames.map((branchName) => {
           const { branch, warehouse } = resolveBranchAndOptionalWarehouse(branchName);
           return {
@@ -431,10 +478,15 @@ export function useFlowSubmitHandlers(): Record<
         : undefined;
 
       const lines = rows.map((row) => {
-        if (!row.sku || !row.qty) throw new Error("Every return line needs an item and quantity.");
+        if (!row.sku || !(Number(row.qty) > 0)) throw new Error("Every return line needs an item and a quantity greater than 0.");
         const product = products?.find((p) => p.sku === row.sku);
         if (!product) throw new Error(`Unknown SKU "${row.sku}".`);
-        return { productId: product.id, batchNo: row.batchNo || null, qty: Number(row.qty), unitCost: Number(row.unitCost || product.costPrice) };
+        return {
+          productId: product.id,
+          batchNo: row.batchNo || null,
+          qty: Number(row.qty),
+          unitCost: Number(row.unitCost || product.costPrice),
+        };
       });
 
       await createRts.mutateAsync({
@@ -471,9 +523,11 @@ export function useFlowSubmitHandlers(): Record<
 
     "new-return": async (values) => {
       if (!values.type || !values.reason) throw new Error("Return type and reason are required.");
-      if (!values.items)
-        throw new Error("At least one return line (SKU x Qty) is required.");
-      if (!values.invoice) throw new Error("The original order number is required — returns always reference the original transaction.");
+      if (!values.items) throw new Error("At least one return line (SKU x Qty) is required.");
+      if (!values.invoice)
+        throw new Error(
+          "The original order number is required — returns always reference the original transaction.",
+        );
 
       // Module 6: returns are anchored to the ORIGINAL ORDER's lines, so the SKUs entered here are
       // resolved against that order and quantities validated/priced server-side.
@@ -501,7 +555,10 @@ export function useFlowSubmitHandlers(): Record<
       if (!values.name || !values.email || !values.password)
         throw new Error("Name, email and password are required.");
       const role = roles?.find((r) => r.name.toLowerCase() === (values.role ?? "").toLowerCase());
-      if (!role) throw new Error(`Unknown role "${values.role}" — pick one that exists in Roles & Permissions.`);
+      if (!role)
+        throw new Error(
+          `Unknown role "${values.role}" — pick one that exists in Roles & Permissions.`,
+        );
       const branch =
         values.branch && values.branch !== "All Branches"
           ? branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase())
@@ -513,26 +570,6 @@ export function useFlowSubmitHandlers(): Record<
         password: values.password,
         roleId: role.id,
         branchId: branch?.id ?? null,
-      });
-    },
-
-    "create-role": async (values) => {
-      if (!values.name) throw new Error("Role name is required.");
-      const permMap: Record<string, string | undefined> = {
-        Pos: values.permPos, Orders: values.permOrders, Inventory: values.permInventory, Finance: values.permFinance,
-        Admin: values.permAdmin, Delivery: values.permDelivery, Hr: values.permHr, Insights: values.permInsights,
-        Suppliers: values.permSuppliers, Network: values.permNetwork,
-      };
-      const permissions = Object.fromEntries(
-        Object.entries(permMap).filter((entry): entry is [string, string] => Boolean(entry[1]) && entry[1] !== "None"),
-      );
-
-      await createRole.mutateAsync({
-        name: values.name,
-        description: values.description || null,
-        approvalCap: Number(values.approvalCap || 0),
-        permissions,
-        posCeilings: posCeilingsFromTier(values.posTier),
       });
     },
 
@@ -555,9 +592,10 @@ export function useFlowSubmitHandlers(): Record<
       if (!values.id || !values.branch) throw new Error("Terminal ID and branch are required.");
       const branch = branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase());
       if (!branch) throw new Error(`Unknown branch "${values.branch}".`);
-      const assignedCashier = values.operator && values.operator !== "Unassigned"
-        ? users?.find((u) => u.name.toLowerCase() === values.operator.toLowerCase())
-        : undefined;
+      const assignedCashier =
+        values.operator && values.operator !== "Unassigned"
+          ? users?.find((u) => u.name.toLowerCase() === values.operator.toLowerCase())
+          : undefined;
 
       await createTerminal.mutateAsync({
         code: values.id,
@@ -574,7 +612,10 @@ export function useFlowSubmitHandlers(): Record<
     "pair-device": async (values) => {
       if (!values.type) throw new Error("Device type is required.");
       const terminal = terminals?.find((t) => t.code === values.terminal);
-      if (!terminal) throw new Error(`Unknown terminal "${values.terminal}" — pick one that exists in Terminals.`);
+      if (!terminal)
+        throw new Error(
+          `Unknown terminal "${values.terminal}" — pick one that exists in Terminals.`,
+        );
 
       await createDevice.mutateAsync({
         type: DEVICE_TYPE_TO_BACKEND[values.type] ?? "ReceiptPrinter",
@@ -609,7 +650,9 @@ export function useFlowSubmitHandlers(): Record<
 
     "create-rule": async (values) => {
       if (!values.name) throw new Error("Rule name is required.");
-      const approver = values.approver ? users?.find((u) => u.name.toLowerCase() === values.approver.toLowerCase()) : undefined;
+      const approver = values.approver
+        ? users?.find((u) => u.name.toLowerCase() === values.approver.toLowerCase())
+        : undefined;
       await createRule.mutateAsync({
         name: values.name,
         domain: RULE_DOMAIN_TO_BACKEND[values.domain] ?? "Admin",
@@ -624,7 +667,8 @@ export function useFlowSubmitHandlers(): Record<
     },
 
     "add-control": async (values) => {
-      if (!values.control || !values.owner || !values.nextDue) throw new Error("Control name, owner and next-due date are required.");
+      if (!values.control || !values.owner || !values.nextDue)
+        throw new Error("Control name, owner and next-due date are required.");
       await createCompliance.mutateAsync({
         control: values.control,
         framework: values.framework || "Internal Policy",
@@ -638,8 +682,12 @@ export function useFlowSubmitHandlers(): Record<
     },
 
     "create-ticket": async (values) => {
-      if (!values.deviceOrModule || !values.owner) throw new Error("Device/module and assignee are required.");
-      const branch = values.branch && values.branch !== "All Branches" ? branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase()) : undefined;
+      if (!values.deviceOrModule || !values.owner)
+        throw new Error("Device/module and assignee are required.");
+      const branch =
+        values.branch && values.branch !== "All Branches"
+          ? branches?.find((b) => b.nameEn.toLowerCase() === values.branch.toLowerCase())
+          : undefined;
       await createMaintenance.mutateAsync({
         deviceOrModule: values.deviceOrModule,
         branchId: branch?.id ?? null,

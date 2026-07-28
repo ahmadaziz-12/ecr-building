@@ -7,17 +7,19 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   RowActionsMenu, statusTone, FilterBar, emptyFilterDraft, usePagination, PaginationBar, exportToCsv,
-  type FilterFieldDef,
+  type FilterFieldDef, type FilterDraftValue,
 } from "./shared";
+import { resolveDateRangeBounds, type DateRangeValue } from "@/components/buildpos/FilterControls";
 import { OrderDetailDialog } from "./OrderDetailDialog";
 import { VoidOrderDialog } from "./VoidOrderDialog";
 import { CreateReturnDialog } from "./CreateReturnDialog";
 import { QuotationFormDialog } from "./QuotationFormDialog";
+import { QuotationDetailDialog } from "./QuotationDetailDialog";
 import { PaymentDialog } from "./PaymentDialog";
 import { ReceiptDialog } from "./ReceiptDialog";
 import {
   useOrders, useQuotations, useSendQuotation, useAcceptQuotation, useRejectQuotation, useConvertQuotation,
-  usePayOrder, type OrderDto, type QuotationDto, type PaymentInput,
+  useCancelQuotation, usePayOrder, type OrderDto, type QuotationDto, type PaymentInput,
 } from "@/lib/api/pos";
 import { useAuth } from "@/lib/api/auth";
 import { useBranches, useTerminals } from "@/lib/api/admin";
@@ -42,11 +44,11 @@ function fmtTime(iso: string): string {
 function isToday(iso: string): boolean {
   return new Date(iso).toDateString() === new Date().toDateString();
 }
-function inDateRange(iso: string, from: string, to: string): boolean {
+function inDateRange(iso: string, range: DateRangeValue | undefined): boolean {
+  const bounds = resolveDateRangeBounds(range);
+  if (!bounds) return true;
   const d = new Date(iso).getTime();
-  if (from && d < new Date(from).getTime()) return false;
-  if (to && d > new Date(`${to}T23:59:59`).getTime()) return false;
-  return true;
+  return d >= bounds.from.getTime() && d <= bounds.to.getTime();
 }
 
 const PAGE_SIZE = 10;
@@ -55,7 +57,7 @@ const QUOTATION_FIELDS: FilterFieldDef[] = [{ kind: "search", key: "search", pla
 
 export function OrdersPage() {
   const { user, hasAccess } = useAuth();
-  const canReturn = hasAccess("Finance");
+  const canReturn = hasAccess("/finance/returns");
   const { data: branches } = useBranches(user?.branchId == null);
   const { data: terminals } = useTerminals(true);
   const effectiveBranchId = user?.branchId ?? branches?.[0]?.id ?? null;
@@ -66,12 +68,15 @@ export function OrdersPage() {
   const acceptQuotation = useAcceptQuotation();
   const rejectQuotation = useRejectQuotation();
   const convertQuotation = useConvertQuotation();
+  const cancelQuotation = useCancelQuotation();
 
   const [tab, setTab] = useState<Tab>("All Orders");
   const [detailOrder, setDetailOrder] = useState<OrderDto | null>(null);
   const [voidTarget, setVoidTarget] = useState<OrderDto | null>(null);
   const [returnTarget, setReturnTarget] = useState<OrderDto | null>(null);
   const [creatingQuote, setCreatingQuote] = useState(false);
+  const [editingQuote, setEditingQuote] = useState<QuotationDto | null>(null);
+  const [detailQuote, setDetailQuote] = useState<QuotationDto | null>(null);
   const [reprintTarget, setReprintTarget] = useState<OrderDto | null>(null);
   // Pending/Unpaid orders (converted quotations) get settled right here — without this the list is
   // a dead end: "Awaiting payment" with no way to ever take the payment.
@@ -91,8 +96,7 @@ export function OrdersPage() {
   }
 
   const orderFields: FilterFieldDef[] = useMemo(() => [
-    { kind: "date", key: "dateFrom", placeholder: "From Date" },
-    { kind: "date", key: "dateTo", placeholder: "To Date" },
+    { kind: "daterange", key: "dateRange", placeholder: "Date Range" },
     { kind: "select", key: "branchId", placeholder: "Branch", options: (branches ?? []).map((b) => String(b.id)), labels: Object.fromEntries((branches ?? []).map((b) => [String(b.id), b.nameEn])) },
     { kind: "select", key: "terminalId", placeholder: "Terminal", options: (terminals ?? []).map((t) => String(t.id)), labels: Object.fromEntries((terminals ?? []).map((t) => [String(t.id), t.name])) },
     { kind: "select", key: "cashier", placeholder: "Cashier", options: Array.from(new Set((orders ?? []).map((o) => o.cashierName))) },
@@ -103,27 +107,36 @@ export function OrdersPage() {
   ], [branches, terminals, orders]);
   const fields = tab === "Quotations" ? QUOTATION_FIELDS : orderFields;
 
-  const allFilterKeys = useMemo(() => Array.from(new Set([...orderFields, ...QUOTATION_FIELDS].map((f) => f.key))), [orderFields]);
-  const [draft, setDraft] = useState<Record<string, string>>(() => Object.fromEntries(allFilterKeys.map((k) => [k, ""])));
-  const [applied, setApplied] = useState<Record<string, string>>(draft);
+  const [draft, setDraft] = useState<Record<string, FilterDraftValue>>(() => ({
+    ...emptyFilterDraft(orderFields),
+    ...emptyFilterDraft(QUOTATION_FIELDS),
+  }));
+  const [applied, setApplied] = useState<Record<string, FilterDraftValue>>(draft);
 
   const allOrders = orders ?? [];
   const filteredOrders = useMemo(() => {
+    const status = (applied.status as string[]) ?? [];
+    const type = (applied.type as string[]) ?? [];
+    const paymentMethod = (applied.paymentMethod as string[]) ?? [];
+    const branchId = (applied.branchId as string[]) ?? [];
+    const terminalId = (applied.terminalId as string[]) ?? [];
+    const cashier = (applied.cashier as string[]) ?? [];
+    const search = (applied.search as string) ?? "";
     return allOrders.filter((o) => {
       if (tab === "Completed" && o.status !== "Completed") return false;
       if (tab === "Pending" && o.status !== "Pending") return false;
       if (tab === "Delivery" && o.deliveryOrderId === null) return false;
       if (tab === "Returned" && o.status !== "Returned") return false;
       if (tab === "Voided" && o.status !== "Voided") return false;
-      if (applied.status && o.status !== applied.status) return false;
-      if (applied.type && o.type !== applied.type) return false;
-      if (applied.paymentMethod && !o.payments.some((p) => p.method === applied.paymentMethod)) return false;
-      if (applied.branchId && String(o.branchId) !== applied.branchId) return false;
-      if (applied.terminalId && String(o.terminalId) !== applied.terminalId) return false;
-      if (applied.cashier && o.cashierName !== applied.cashier) return false;
-      if ((applied.dateFrom || applied.dateTo) && !inDateRange(o.createdAt, applied.dateFrom, applied.dateTo)) return false;
-      if (applied.search) {
-        const t = applied.search.trim().toLowerCase();
+      if (status.length && !status.includes(o.status)) return false;
+      if (type.length && !type.includes(o.type)) return false;
+      if (paymentMethod.length && !o.payments.some((p) => paymentMethod.includes(p.method))) return false;
+      if (branchId.length && !branchId.includes(String(o.branchId))) return false;
+      if (terminalId.length && !terminalId.includes(String(o.terminalId))) return false;
+      if (cashier.length && !cashier.includes(o.cashierName)) return false;
+      if (!inDateRange(o.createdAt, applied.dateRange as DateRangeValue)) return false;
+      if (search) {
+        const t = search.trim().toLowerCase();
         if (t && !o.orderNo.toLowerCase().includes(t) && !o.customerName.toLowerCase().includes(t)) return false;
       }
       return true;
@@ -131,15 +144,16 @@ export function OrdersPage() {
   }, [allOrders, tab, applied]);
 
   const filteredQuotations = useMemo(() => {
+    const search = (applied.search as string) ?? "";
     return (quotations ?? []).filter((q) => {
-      if (!applied.search) return true;
-      const t = applied.search.trim().toLowerCase();
+      if (!search) return true;
+      const t = search.trim().toLowerCase();
       return !t || q.quoteNo.toLowerCase().includes(t) || q.customerName.toLowerCase().includes(t);
     });
   }, [quotations, applied.search]);
 
   const ordersPagination = usePagination(filteredOrders, PAGE_SIZE, JSON.stringify(applied) + tab);
-  const quotationsPagination = usePagination(filteredQuotations, PAGE_SIZE, applied.search ?? "");
+  const quotationsPagination = usePagination(filteredQuotations, PAGE_SIZE, (applied.search as string) ?? "");
 
   const kpis = useMemo(() => {
     const today = allOrders.filter((o) => isToday(o.createdAt));
@@ -168,6 +182,17 @@ export function OrdersPage() {
       toast.success(`${q.quoteNo} updated`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Action failed.");
+    }
+  }
+
+  async function handleCancelQuotation(q: QuotationDto) {
+    if (!window.confirm(`Cancel ${q.quoteNo}? This can't be undone.`)) return;
+    try {
+      await cancelQuotation.mutateAsync(q.id);
+      toast.success(`${q.quoteNo} cancelled`);
+      setDetailQuote(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not cancel the quotation.");
     }
   }
 
@@ -242,7 +267,7 @@ export function OrdersPage() {
               </TableHeader>
               <TableBody>
                 {quotationsPagination.pageRows.map((q) => (
-                  <TableRow key={q.id}>
+                  <TableRow key={q.id} onClick={() => setDetailQuote(q)} className="cursor-pointer">
                     <TableCell className="font-mono text-xs">{q.quoteNo}</TableCell>
                     <TableCell>{q.customerName}</TableCell>
                     <TableCell className="text-muted-foreground">{q.createdByName}</TableCell>
@@ -252,11 +277,15 @@ export function OrdersPage() {
                     <TableCell>
                       <RowActionsMenu
                         actions={[
+                          { label: "View", onClick: () => setDetailQuote(q) },
+                          { label: "Edit", onClick: () => setEditingQuote(q), disabled: q.status !== "Draft" && q.status !== "Sent" },
+                          "separator",
                           { label: "Send to Customer", onClick: () => handleQuotationAction(q, "send"), disabled: q.status !== "Draft" },
                           { label: "Mark Accepted", onClick: () => handleQuotationAction(q, "accept"), disabled: q.status !== "Sent" },
                           { label: "Mark Rejected", onClick: () => handleQuotationAction(q, "reject"), disabled: q.status !== "Sent" },
-                          "separator",
                           { label: "Convert to Order", onClick: () => handleQuotationAction(q, "convert"), disabled: !["Sent", "Accepted"].includes(q.status) },
+                          "separator",
+                          { label: "Cancel Quotation", onClick: () => handleCancelQuotation(q), destructive: true, disabled: q.status === "Converted" || q.status === "Cancelled" },
                         ]}
                       />
                     </TableCell>
@@ -293,7 +322,7 @@ export function OrdersPage() {
               </TableHeader>
               <TableBody>
                 {ordersPagination.pageRows.map((o) => (
-                  <TableRow key={o.id}>
+                  <TableRow key={o.id} onClick={() => setDetailOrder(o)} className="cursor-pointer">
                     <TableCell className="font-mono text-xs">{o.orderNo}</TableCell>
                     <TableCell className="text-muted-foreground">{fmtTime(o.createdAt)}</TableCell>
                     <TableCell>{o.customerName}</TableCell>
@@ -338,6 +367,18 @@ export function OrdersPage() {
       <VoidOrderDialog order={voidTarget} onClose={() => setVoidTarget(null)} />
       <CreateReturnDialog order={returnTarget} onClose={() => setReturnTarget(null)} />
       <QuotationFormDialog open={creatingQuote} onOpenChange={setCreatingQuote} branchId={effectiveBranchId} />
+      <QuotationFormDialog
+        open={editingQuote !== null}
+        onOpenChange={(v) => !v && setEditingQuote(null)}
+        branchId={effectiveBranchId}
+        editing={editingQuote}
+      />
+      <QuotationDetailDialog
+        quotation={detailQuote}
+        onClose={() => setDetailQuote(null)}
+        onEdit={(q) => { setDetailQuote(null); setEditingQuote(q); }}
+        onCancel={handleCancelQuotation}
+      />
       <PaymentDialog
         open={payTarget !== null}
         onOpenChange={(v) => !v && setPayTarget(null)}

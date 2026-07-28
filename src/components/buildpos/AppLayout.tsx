@@ -52,15 +52,18 @@ import {
   Warehouse,
   Wrench,
   History,
+  BookOpen,
+  ClipboardCheck,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import logoAsset from "@/assets/mimony-logo.png.asset.json";
 import { statusBar } from "@/lib/buildpos/data";
 import { LanguageSwitcher } from "@/components/language-switcher";
-import { useAuth, type ModulePermission } from "@/lib/api/auth";
+import { useAuth } from "@/lib/api/auth";
 import { SetPinDialog } from "@/components/buildpos/SetPinDialog";
 import { DeliverySync } from "@/lib/api/delivery-sync";
-import { HrSync } from "@/lib/api/hr-sync";
+// HRM module temporarily disabled — see the commented-out "HRMS" nav group below.
+// import { HrSync } from "@/lib/api/hr-sync";
 import { useNotifications } from "@/lib/api/notifications";
 import { useProducts } from "@/lib/api/catalog";
 import { useCustomers, useCashierShifts } from "@/lib/api/pos";
@@ -75,9 +78,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type Item = { to: string; label: string; icon: typeof LayoutDashboard; module?: ModulePermission["module"] };
+type Item = {
+  to: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+};
 type Group = { name: string; items: Item[]; collapsed?: boolean };
 
+// Every item's `to` route IS its permission module key (see PermissionCatalog.cs on the backend —
+// same string on both sides). No separate `module` tag: page-level RBAC means each page's own route
+// is the thing being permissioned, not a shared section bucket.
 const nav: Group[] = [
   {
     name: "",
@@ -86,103 +96,111 @@ const nav: Group[] = [
   {
     name: "Operate",
     items: [
-      { to: "/operate/pos-checkout", label: "POS Checkout", icon: ScanBarcode, module: "Pos" },
-      { to: "/operate/orders", label: "Orders & Quotations", icon: ShoppingBag, module: "Orders" },
-      { to: "/operate/customers", label: "Customers & Contractors", icon: Users, module: "Orders" },
-      { to: "/operate/cashier-workspace", label: "Cashier Workspace", icon: UserSquare2, module: "Pos" },
-      { to: "/operate/cashier-shift", label: "Cashier Shifts", icon: ClipboardList, module: "Pos" },
+      { to: "/operate/pos-checkout", label: "POS Checkout", icon: ScanBarcode },
+      { to: "/operate/orders", label: "Orders & Quotations", icon: ShoppingBag },
+      { to: "/operate/customers", label: "Customers & Contractors", icon: Users },
+      { to: "/operate/cashier-workspace", label: "Cashier Workspace", icon: UserSquare2 },
+      { to: "/operate/cashier-shift", label: "Cashier Shifts", icon: ClipboardList },
       // Control Tower is still fully mock/static data with no backend behind it — hidden from
       // nav until it's wired, rather than shipping a dead link (see /operate/control-tower).
-      // { to: "/operate/control-tower", label: "Control Tower", icon: Activity, module: "Pos" },
+      // { to: "/operate/control-tower", label: "Control Tower", icon: Activity },
     ],
   },
   {
     name: "Products & Stock",
     items: [
-      { to: "/stock/inventory", label: "Product Catalog", icon: Package, module: "Inventory" },
-      { to: "/admin/categories", label: "Categories & Attributes", icon: Layers, module: "Inventory" },
-      { to: "/stock/warehouses", label: "Warehouses", icon: Warehouse, module: "Inventory" },
-      { to: "/stock/stocks", label: "Warehouse Stock", icon: Boxes, module: "Inventory" },
-      { to: "/stock/branch-stock", label: "Branch Stock", icon: Store, module: "Inventory" },
-      { to: "/stock/movements", label: "Stock Movements", icon: History, module: "Inventory" },
-      { to: "/stock/expiry", label: "Material Validity", icon: CalendarClock, module: "Inventory" },
-      { to: "/stock/transfers", label: "Stock Transfers", icon: ArrowLeftRight, module: "Inventory" },
-      { to: "/stock/bundles", label: "Bundles & Systems", icon: Blocks, module: "Inventory" },
+      { to: "/stock/inventory", label: "Product Catalog", icon: Package },
+      { to: "/admin/categories", label: "Categories & Attributes", icon: Layers },
+      { to: "/stock/bundles", label: "Bundles & Systems", icon: Blocks },
+    ],
+  },
+  {
+    name: "Stock",
+    items: [
+      { to: "/stock/warehouses", label: "Warehouse Directory", icon: Warehouse },
+      { to: "/stock/stocks", label: "Warehouse Stock", icon: Boxes },
+      { to: "/stock/branch-stock", label: "Branch Stock", icon: Store },
+      { to: "/stock/stock-count", label: "Stock Count", icon: ClipboardCheck },
+      { to: "/stock/movements", label: "Stock Movements", icon: History },
+      { to: "/stock/expiry", label: "Material Validity", icon: CalendarClock },
+      { to: "/stock/transfers", label: "Stock Transfers", icon: ArrowLeftRight },
     ],
   },
   {
     name: "Procurement",
     items: [
-      { to: "/suppliers/suppliers", label: "Suppliers", icon: Truck, module: "Suppliers" },
-      { to: "/finance/purchase-orders", label: "Purchase Orders", icon: FileText, module: "Suppliers" },
-      { to: "/suppliers/rts", label: "Supplier Returns", icon: Undo2, module: "Suppliers" },
+      { to: "/suppliers/suppliers", label: "Suppliers", icon: Truck },
+      { to: "/finance/purchase-orders", label: "Purchase Orders", icon: FileText },
+      { to: "/suppliers/rts", label: "Supplier Returns", icon: Undo2 },
     ],
   },
   {
     name: "Finance & Customers",
     items: [
-      { to: "/finance/expenses", label: "Expenses", icon: Wallet, module: "Finance" },
-      { to: "/finance/pricing", label: "Pricing, Discounts & Coupons", icon: Percent, module: "Finance" },
-      { to: "/finance/returns", label: "Returns & Refunds", icon: RotateCcw, module: "Finance" },
-      { to: "/finance/loyalty", label: "Loyalty Program", icon: Gift, module: "Finance" },
-      { to: "/finance/tax-zatca", label: "Invoices & Tax Compliance", icon: Receipt, module: "Finance" },
+      { to: "/finance/expenses", label: "Expenses", icon: Wallet },
+      { to: "/finance/general-ledger", label: "General Ledger", icon: BookOpen },
+      { to: "/finance/pricing", label: "Pricing, Discounts & Coupons", icon: Percent },
+      { to: "/finance/returns", label: "Returns & Refunds", icon: RotateCcw },
+      { to: "/finance/loyalty", label: "Loyalty Program", icon: Gift },
+      { to: "/finance/tax-zatca", label: "Invoices & Tax Compliance", icon: Receipt },
     ],
   },
   {
     name: "Delivery",
     items: [
-      { to: "/delivery/dashboard", label: "Delivery Dashboard", icon: Truck, module: "Delivery" },
-      { to: "/delivery/pipeline", label: "Delivery Pipeline", icon: ArrowLeftRight, module: "Delivery" },
-      { to: "/delivery/orders", label: "Delivery Orders", icon: ClipboardList, module: "Delivery" },
-      { to: "/delivery/drivers", label: "Driver Assignments", icon: UserRound, module: "Delivery" },
-      { to: "/delivery/vehicles", label: "Vehicle Assignments", icon: Truck, module: "Delivery" },
-      { to: "/delivery/zones", label: "Delivery Zones", icon: Building2, module: "Delivery" },
-      { to: "/delivery/logs", label: "Delivery Activity Logs", icon: Activity, module: "Delivery" },
+      { to: "/delivery/dashboard", label: "Delivery Dashboard", icon: Truck },
+      { to: "/delivery/pipeline", label: "Delivery Pipeline", icon: ArrowLeftRight },
+      { to: "/delivery/orders", label: "Delivery Orders", icon: ClipboardList },
+      { to: "/delivery/drivers", label: "Driver Assignments", icon: UserRound },
+      { to: "/delivery/vehicles", label: "Vehicle Assignments", icon: Truck },
+      { to: "/delivery/zones", label: "Delivery Zones", icon: Building2 },
+      { to: "/delivery/logs", label: "Delivery Activity Logs", icon: Activity },
     ],
   },
-  {
-    name: "HRMS",
-    items: [
-      { to: "/hrms/dashboard", label: "HR Dashboard", icon: LayoutDashboard, module: "Hr" },
-      { to: "/hrms/employees", label: "Employees", icon: UserRound, module: "Hr" },
-      { to: "/hrms/departments", label: "Departments", icon: Building2, module: "Hr" },
-      { to: "/hrms/attendance", label: "Shift & Attendance", icon: CalendarDays, module: "Hr" },
-      { to: "/hrms/leave", label: "Leave Management", icon: CalendarClock, module: "Hr" },
-      { to: "/hrms/documents", label: "Documents & Contracts", icon: FileSignature, module: "Hr" },
-      { to: "/hrms/logs", label: "HR Activity Logs", icon: Activity, module: "Hr" },
-    ],
-  },
+  // HRM module temporarily disabled — routes (src/routes/hrms.*.tsx) are commented out too.
+  // {
+  //   name: "HRMS",
+  //   items: [
+  //     { to: "/hrms/dashboard", label: "HR Dashboard", icon: LayoutDashboard },
+  //     { to: "/hrms/employees", label: "Employees", icon: UserRound },
+  //     { to: "/hrms/departments", label: "Departments", icon: Building2 },
+  //     { to: "/hrms/attendance", label: "Shift & Attendance", icon: CalendarDays },
+  //     { to: "/hrms/leave", label: "Leave Management", icon: CalendarClock },
+  //     { to: "/hrms/documents", label: "Documents & Contracts", icon: FileSignature },
+  //     { to: "/hrms/logs", label: "HR Activity Logs", icon: Activity },
+  //   ],
+  // },
   {
     name: "Network",
     items: [
-      { to: "/network/branches", label: "Branches", icon: Store, module: "Network" },
-      { to: "/network/terminals", label: "Terminals", icon: MonitorSmartphone, module: "Network" },
-      { to: "/network/devices", label: "Devices", icon: Printer, module: "Network" },
+      { to: "/network/branches", label: "Branches", icon: Store },
+      { to: "/network/terminals", label: "Terminals", icon: MonitorSmartphone },
+      { to: "/network/devices", label: "Devices", icon: Printer },
     ],
   },
   {
     name: "Insights",
     items: [
-      { to: "/insights/reports", label: "Reports", icon: FileBarChart, module: "Insights" },
-      { to: "/insights/bi", label: "Analytics", icon: BarChart3, module: "Insights" },
-      { to: "/insights/kpi", label: "KPI Evaluation", icon: Target, module: "Insights" },
+      { to: "/insights/reports", label: "Reports", icon: FileBarChart },
+      { to: "/insights/bi", label: "Analytics", icon: BarChart3 },
+      { to: "/insights/kpi", label: "KPI Evaluation", icon: Target },
     ],
   },
   {
     name: "Admin",
     items: [
-      { to: "/admin/overview", label: "Admin Overview", icon: ShieldCheck, module: "Admin" },
-      { to: "/admin/users", label: "Registered Users", icon: UserCog, module: "Admin" },
-      { to: "/admin/roles", label: "Roles & Permissions", icon: KeyRound, module: "Admin" },
-      { to: "/admin/rules", label: "Rules Engine", icon: Sliders, module: "Admin" },
-      { to: "/admin/compliance", label: "Compliance", icon: ShieldCheck, module: "Admin" },
-      { to: "/admin/maintenance", label: "Maintenance", icon: Wrench, module: "Admin" },
-      { to: "/admin/pos-settings", label: "POS Settings", icon: Cog, module: "Admin" },
-      { to: "/admin/zatca-invoices", label: "ZATCA Invoices", icon: QrCode, module: "Finance" },
-      { to: "/admin/zatca-settings", label: "ZATCA Phase 2 Settings", icon: ShieldCheck, module: "Finance" },
-      { to: "/admin/audit-logs", label: "Audit Logs", icon: ScrollText, module: "Admin" },
-      { to: "/admin/plans", label: "Subscriptions", icon: CreditCard, module: "Admin" },
-      { to: "/admin/settings", label: "General Settings", icon: Settings2, module: "Admin" },
+      { to: "/admin/overview", label: "Admin Overview", icon: ShieldCheck },
+      { to: "/admin/users", label: "Registered Users", icon: UserCog },
+      { to: "/admin/roles", label: "Roles & Permissions", icon: KeyRound },
+      { to: "/admin/rules", label: "Rules Engine", icon: Sliders },
+      { to: "/admin/compliance", label: "Compliance", icon: ShieldCheck },
+      { to: "/admin/maintenance", label: "Maintenance", icon: Wrench },
+      { to: "/admin/pos-settings", label: "POS Settings", icon: Cog },
+      { to: "/admin/zatca-invoices", label: "ZATCA Invoices", icon: QrCode },
+      { to: "/admin/zatca-settings", label: "ZATCA Phase 2 Settings", icon: ShieldCheck },
+      { to: "/admin/audit-logs", label: "Audit Logs", icon: ScrollText },
+      { to: "/admin/plans", label: "Subscriptions", icon: CreditCard },
+      { to: "/admin/settings", label: "General Settings", icon: Settings2 },
     ],
   },
 ];
@@ -195,15 +213,20 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [search, setSearch] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const [pinDialogOpen, setPinDialogOpen] = useState(false);
-  const canSearchProducts = hasAccess("Inventory");
-  const canSearchCustomers = hasAccess("Orders");
+  const canSearchProducts = hasAccess("/stock/inventory");
+  const canSearchCustomers = hasAccess("/operate/customers");
   const { data: searchProducts } = useProducts(canSearchProducts && search.trim().length > 0);
   const { data: searchCustomers } = useCustomers(canSearchCustomers && search.trim().length > 0);
   const { data: notifications } = useNotifications();
-  const { data: terminals } = useTerminals(hasAccess("Network"));
-  const { data: cashierShifts } = useCashierShifts(hasAccess("Pos"));
-  const { data: zatcaIdentity } = useZatcaIdentity(user?.branchId ?? null, hasAccess("Finance") && user?.branchId != null);
-  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+  const { data: terminals } = useTerminals(hasAccess("/network/terminals"));
+  const { data: cashierShifts } = useCashierShifts(hasAccess("/operate/cashier-shift"));
+  const { data: zatcaIdentity } = useZatcaIdentity(
+    user?.branchId ?? null,
+    hasAccess("/admin/zatca-settings") && user?.branchId != null,
+  );
+  const [online, setOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
 
   useEffect(() => {
     const goOnline = () => setOnline(true);
@@ -220,10 +243,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
     const q = search.trim().toLowerCase();
     if (!q) return { products: [], customers: [] };
     const products = (searchProducts ?? [])
-      .filter((p) => p.sku.toLowerCase().includes(q) || p.nameEn.toLowerCase().includes(q) || (p.barcode?.toLowerCase().includes(q) ?? false))
+      .filter(
+        (p) =>
+          p.sku.toLowerCase().includes(q) ||
+          p.nameEn.toLowerCase().includes(q) ||
+          (p.barcode?.toLowerCase().includes(q) ?? false),
+      )
       .slice(0, 5);
     const customers = (searchCustomers ?? [])
-      .filter((c) => c.nameEn.toLowerCase().includes(q) || (c.phone?.toLowerCase().includes(q) ?? false))
+      .filter(
+        (c) => c.nameEn.toLowerCase().includes(q) || (c.phone?.toLowerCase().includes(q) ?? false),
+      )
       .slice(0, 5);
     return { products, customers };
   }, [search, searchProducts, searchCustomers]);
@@ -246,14 +276,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
   }
 
   const visibleNav = nav
-    .map((g) => ({ ...g, items: g.items.filter((i) => !i.module || hasAccess(i.module)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => hasAccess(i.to)) }))
     .filter((g) => g.items.length > 0);
   const allItems: Item[] = visibleNav.flatMap((g) => g.items);
 
   const active = allItems.find((m) => m.to === pathname) ?? allItems[0];
-  const activeGroup = visibleNav.find((g) => g.items.some((i) => i.to === pathname))?.name ?? "Dashboard";
+  const activeGroup =
+    visibleNav.find((g) => g.items.some((i) => i.to === pathname))?.name ?? "Dashboard";
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(visibleNav.map((g) => [g.name, true]))
+    Object.fromEntries(visibleNav.map((g) => [g.name, true])),
   );
 
   async function handleLogout() {
@@ -263,10 +294,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-canvas font-sans text-foreground">
-      {hasAccess("Delivery") && <DeliverySync />}
-      {hasAccess("Hr") && <HrSync />}
+      {hasAccess("/delivery/dashboard") && <DeliverySync />}
+      {/* HRM module temporarily disabled — see the commented-out "HRMS" nav group below. */}
+      {/* {hasAccess("/hrms/dashboard") && <HrSync />} */}
       {/* Sidebar */}
-      <aside className="sticky top-0 hidden h-screen w-64 flex-none flex-col border-r border-black/5 bg-sidebar-bg text-sidebar-fg lg:flex relative">
+      {/* Narrower than the usual 16rem: the reports console renders 20-plus-column tables, and the
+          reclaimed 2rem is what keeps them inside their own scroller instead of pushing the page
+          itself sideways. */}
+      <aside className="sticky top-0 hidden h-screen w-56 flex-none flex-col border-r border-black/5 bg-sidebar-bg text-sidebar-fg lg:flex relative">
         <div className="pointer-events-none absolute inset-0 blueprint-grid-dark opacity-60" />
         <div className="relative flex h-16 items-center border-b border-white/10 px-4">
           <div className="flex h-10 w-full items-center justify-center rounded-xl bg-white/95 px-3 shadow-sm">
@@ -390,11 +425,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
               {searchFocused && search.trim() !== "" && (
                 <div className="absolute right-0 top-full z-20 mt-1 w-80 rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
                   {!hasSearchResults && (
-                    <p className="px-2.5 py-2 text-xs text-muted-foreground">No matches for "{search}"</p>
+                    <p className="px-2.5 py-2 text-xs text-muted-foreground">
+                      No matches for "{search}"
+                    </p>
                   )}
                   {searchResults.products.length > 0 && (
                     <div className="mb-1">
-                      <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Products</p>
+                      <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Products
+                      </p>
                       {searchResults.products.map((p) => (
                         <button
                           key={p.id}
@@ -402,14 +441,18 @@ export function AppLayout({ children }: { children: ReactNode }) {
                           className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
                         >
                           <span className="truncate">{p.nameEn}</span>
-                          <span className="ml-2 flex-none font-mono text-[10px] text-muted-foreground">{p.sku}</span>
+                          <span className="ml-2 flex-none font-mono text-[10px] text-muted-foreground">
+                            {p.sku}
+                          </span>
                         </button>
                       ))}
                     </div>
                   )}
                   {searchResults.customers.length > 0 && (
                     <div>
-                      <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Customers</p>
+                      <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Customers
+                      </p>
                       {searchResults.customers.map((c) => (
                         <button
                           key={c.id}
@@ -417,7 +460,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
                           className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
                         >
                           <span className="truncate">{c.nameEn}</span>
-                          <span className="ml-2 flex-none text-[10px] text-muted-foreground">{c.phone ?? "—"}</span>
+                          <span className="ml-2 flex-none text-[10px] text-muted-foreground">
+                            {c.phone ?? "—"}
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -425,17 +470,28 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 </div>
               )}
             </div>
-            {hasAccess("Pos") && (
+            {hasAccess("/operate/cashier-shift") && (
               <span className="hidden items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success-foreground md:inline-flex">
-                <Circle className="h-2 w-2 fill-current" /> {openShift ? `Open since ${new Date(openShift.openedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "No active shift"}
+                <Circle className="h-2 w-2 fill-current" />{" "}
+                {openShift
+                  ? `Open since ${new Date(openShift.openedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`
+                  : "No active shift"}
               </span>
             )}
-            <span className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium md:inline-flex ${online ? "border-teal/30 bg-teal/10 text-foreground" : "border-critical/30 bg-critical/10 text-critical"}`}>
-              <Wifi className={`h-3 w-3 ${online ? "text-teal" : "text-critical"}`} /> {online ? "Online" : "Offline"}
+            <span
+              className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium md:inline-flex ${online ? "border-teal/30 bg-teal/10 text-foreground" : "border-critical/30 bg-critical/10 text-critical"}`}
+            >
+              <Wifi className={`h-3 w-3 ${online ? "text-teal" : "text-critical"}`} />{" "}
+              {online ? "Online" : "Offline"}
             </span>
-            {hasAccess("Finance") && (
+            {hasAccess("/admin/zatca-settings") && (
               <span className="hidden items-center gap-1.5 rounded-full border border-brand/20 bg-brand/10 px-2.5 py-0.5 text-xs font-medium text-brand md:inline-flex">
-                <Shield className="h-3 w-3" /> ZATCA {zatcaIdentity?.onboardingStatus === "ProductionReady" ? "Connected" : zatcaIdentity ? "Pending" : "—"}
+                <Shield className="h-3 w-3" /> ZATCA{" "}
+                {zatcaIdentity?.onboardingStatus === "ProductionReady"
+                  ? "Connected"
+                  : zatcaIdentity
+                    ? "Pending"
+                    : "—"}
               </span>
             )}
             <LanguageSwitcher />
@@ -444,7 +500,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 <button className="relative grid h-9 w-9 place-items-center rounded-lg border border-black/10 bg-white text-foreground hover:bg-canvas">
                   <Bell className="h-4 w-4" />
                   {notifications && notifications.length > 0 && (
-                    <span className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ${criticalCount > 0 ? "bg-critical" : "bg-warning"}`} />
+                    <span
+                      className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ${criticalCount > 0 ? "bg-critical" : "bg-warning"}`}
+                    />
                   )}
                 </button>
               </DropdownMenuTrigger>
@@ -452,13 +510,23 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 <DropdownMenuLabel>Notifications</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {(!notifications || notifications.length === 0) && (
-                  <p className="px-2 py-3 text-center text-xs text-muted-foreground">No alerts right now.</p>
+                  <p className="px-2 py-3 text-center text-xs text-muted-foreground">
+                    No alerts right now.
+                  </p>
                 )}
                 {notifications?.map((n) => (
-                  <DropdownMenuItem key={n.id} onClick={() => n.link && navigate({ to: n.link })} className="flex items-start gap-2 py-2">
+                  <DropdownMenuItem
+                    key={n.id}
+                    onClick={() => n.link && navigate({ to: n.link })}
+                    className="flex items-start gap-2 py-2"
+                  >
                     <span
                       className={`mt-1 h-1.5 w-1.5 flex-none rounded-full ${
-                        n.severity === "Critical" ? "bg-critical" : n.severity === "Warning" ? "bg-warning" : "bg-brand"
+                        n.severity === "Critical"
+                          ? "bg-critical"
+                          : n.severity === "Warning"
+                            ? "bg-warning"
+                            : "bg-brand"
                       }`}
                     />
                     <span className="min-w-0">
@@ -477,17 +545,24 @@ export function AppLayout({ children }: { children: ReactNode }) {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel>
-                  <p className="truncate text-sm font-semibold text-foreground">{user?.name ?? "—"}</p>
-                  <p className="truncate text-xs font-normal text-muted-foreground">{user?.email ?? ""}</p>
-                  <p className="truncate text-xs font-normal text-muted-foreground">{user?.role ?? ""}</p>
+                  <p className="truncate text-sm font-semibold text-foreground">
+                    {user?.name ?? "—"}
+                  </p>
+                  <p className="truncate text-xs font-normal text-muted-foreground">
+                    {user?.email ?? ""}
+                  </p>
+                  <p className="truncate text-xs font-normal text-muted-foreground">
+                    {user?.role ?? ""}
+                  </p>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {/* BRD §10.2: self-service PIN for register sign-in / idle unlock / authorizations. */}
-                <DropdownMenuItem onClick={() => setPinDialogOpen(true)}>
-                  Set PIN…
-                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setPinDialogOpen(true)}>Set PIN…</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="text-critical focus:text-critical">
+                <DropdownMenuItem
+                  onClick={handleLogout}
+                  className="text-critical focus:text-critical"
+                >
                   Sign out
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -501,22 +576,43 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <Building2 className="h-3 w-3 text-brand" /> {statusBar.business}
           </span>
           <span className="text-black/20">·</span>
-          <span><span className="text-foreground/70">Branch:</span> {user?.branchName ?? "All Branches"}</span>
+          <span>
+            <span className="text-foreground/70">Branch:</span> {user?.branchName ?? "All Branches"}
+          </span>
           <span className="text-black/20">·</span>
-          <span><span className="text-foreground/70">Terminal:</span> <span className="font-mono text-foreground">{currentTerminal?.code ?? (user?.branchId === null ? "All Terminals" : "Unassigned")}</span></span>
+          <span>
+            <span className="text-foreground/70">Terminal:</span>{" "}
+            <span className="font-mono text-foreground">
+              {currentTerminal?.code ?? (user?.branchId === null ? "All Terminals" : "Unassigned")}
+            </span>
+          </span>
           <span className="text-black/20">·</span>
-          <span><span className="text-foreground/70">User:</span> {user?.name ?? "—"} · <span className="text-foreground/60">{user?.role ?? "—"}</span></span>
+          <span>
+            <span className="text-foreground/70">User:</span> {user?.name ?? "—"} ·{" "}
+            <span className="text-foreground/60">{user?.role ?? "—"}</span>
+          </span>
           <span className="text-black/20">·</span>
-          <span><span className="text-foreground/70">Date:</span> {new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}</span>
+          <span>
+            <span className="text-foreground/70">Date:</span>{" "}
+            {new Date().toLocaleDateString("en-GB", {
+              day: "2-digit",
+              month: "long",
+              year: "numeric",
+            })}
+          </span>
           <span className="ml-auto flex items-center gap-1 text-foreground/60">
             <Globe className="h-3 w-3" /> {statusBar.currency} · auto-refresh 60s
           </span>
         </div>
 
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+        {/* min-w-0 lets a wide child (a report table) shrink to the column and scroll inside its own
+            overflow-x-auto box; without it the flex item sizes to its content and the whole page
+            gains a horizontal scrollbar. */}
+        <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
 
         <footer className="border-t border-black/5 bg-white px-4 py-3 text-center text-xs text-muted-foreground md:px-6">
-          BuildPOS · Al Binaa Building Materials Trading · Data source: POS transactions, inventory, cashier shifts, delivery orders, and ZATCA invoice records.
+          BuildPOS · Al Binaa Building Materials Trading · Data source: POS transactions, inventory,
+          cashier shifts, delivery orders, and ZATCA invoice records.
         </footer>
       </div>
     </div>

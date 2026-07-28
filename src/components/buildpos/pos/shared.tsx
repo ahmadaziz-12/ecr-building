@@ -5,12 +5,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { MultiSelectFilter, DateRangeFilter, type DateRangeValue } from "@/components/buildpos/FilterControls";
 import type { Severity } from "@/lib/buildpos/format";
 
 export function statusTone(status: string): Severity {
   const k = status.toLowerCase();
-  if (/critical|failed|overdue|rejected|expired|offline|breach|voided|needsreview|needs review/.test(k)) return "critical";
+  if (/critical|failed|overdue|rejected|expired|offline|breach|voided|cancelled|needsreview|needs review/.test(k)) return "critical";
   if (/warn|pending|queued|idle|needs|quarantine|delayed|degraded|draft|low|expiring|monitor|partial|awaiting/.test(k)) return "warning";
   if (/active|healthy|cleared|completed|reconciled|received|resolved|delivered|submitted|valid|ok|compliant|paid|accepted|approved|closed/.test(k)) return "success";
   if (/dispatched|posted|open|in transit|in progress|assigned|sent|converted/.test(k)) return "info";
@@ -63,63 +63,75 @@ export function RowActionsMenu({ actions }: { actions: RowAction[] }) {
 
 export type FilterFieldDef =
   | { kind: "search"; key: string; placeholder: string }
-  | { kind: "date"; key: string; placeholder: string }
+  | { kind: "daterange"; key: string; placeholder: string }
   | { kind: "select"; key: string; placeholder: string; options: string[]; labels?: Record<string, string> };
 
-const ALL_VALUE = "__all__";
+export type FilterDraftValue = string | string[] | DateRangeValue;
 
-export function emptyFilterDraft(fields: FilterFieldDef[]): Record<string, string> {
-  return Object.fromEntries(fields.map((f) => [f.key, ""]));
+export function emptyFilterDraft(fields: FilterFieldDef[]): Record<string, FilterDraftValue> {
+  return Object.fromEntries(
+    fields.map((f) => [f.key, f.kind === "select" ? [] : f.kind === "daterange" ? { preset: "" } : ""]),
+  );
 }
 
 export function FilterBar({
   fields, draft, onDraftChange, onApply, onReset, resultLabel,
 }: {
   fields: FilterFieldDef[];
-  draft: Record<string, string>;
-  onDraftChange: (key: string, value: string) => void;
+  draft: Record<string, FilterDraftValue>;
+  onDraftChange: (key: string, value: FilterDraftValue) => void;
   onApply: () => void;
   onReset: () => void;
   resultLabel: string;
 }) {
+  // Search reads first and widest (the filter someone reaches for first), the rest of the fields
+  // sit smaller alongside it, and Date Range always trails last — regardless of the order a page
+  // declared its fields in, so this layout is consistent everywhere the shared bar is used.
+  const orderedFields = [
+    ...fields.filter((f) => f.kind === "search"),
+    ...fields.filter((f) => f.kind === "select"),
+    ...fields.filter((f) => f.kind === "daterange"),
+  ];
+
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 bg-white p-2 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
       <Filter className="ml-1 h-4 w-4 flex-none text-muted-foreground" />
-      {fields.map((f) => {
+      {orderedFields.map((f) => {
         if (f.kind === "search") {
           return (
             <div key={f.key} className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                className="h-8 w-52 pl-8"
+                className="h-9 w-72 pl-9 text-sm font-medium"
                 placeholder={f.placeholder}
-                value={draft[f.key] ?? ""}
+                value={(draft[f.key] as string) ?? ""}
                 onChange={(e) => onDraftChange(f.key, e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && onApply()}
               />
             </div>
           );
         }
-        if (f.kind === "date") {
+        if (f.kind === "daterange") {
           return (
-            <Input
+            <DateRangeFilter
               key={f.key}
-              type="date"
-              title={f.placeholder}
-              className="h-8 w-36"
-              value={draft[f.key] ?? ""}
-              onChange={(e) => onDraftChange(f.key, e.target.value)}
+              label={f.placeholder}
+              value={(draft[f.key] as DateRangeValue) ?? { preset: "" }}
+              onChange={(v) => onDraftChange(f.key, v)}
             />
           );
         }
         return (
-          <Select key={f.key} value={draft[f.key] || ALL_VALUE} onValueChange={(v) => onDraftChange(f.key, v === ALL_VALUE ? "" : v)}>
-            <SelectTrigger className="h-8 w-36"><SelectValue placeholder={f.placeholder} /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_VALUE}>{f.placeholder}</SelectItem>
-              {f.options.map((o) => <SelectItem key={o} value={o}>{f.labels?.[o] ?? o}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <MultiSelectFilter
+            key={f.key}
+            label={f.placeholder}
+            allLabel={`All ${f.placeholder}`}
+            options={f.options}
+            selected={(draft[f.key] as string[]) ?? []}
+            onChange={(next) => onDraftChange(f.key, next)}
+            labels={f.labels}
+            triggerClassName="w-36"
+          />
         );
       })}
       <Button size="sm" variant="ghost" className="h-8" onClick={onReset}>Reset</Button>

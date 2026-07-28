@@ -33,12 +33,14 @@ import {
   BranchPerformance,
 } from "@/components/buildpos/sections";
 import { useFilters } from "@/lib/buildpos/filter-context";
+import { resolveDateRangeBounds } from "@/components/buildpos/FilterControls";
 import { formatSAR, type Severity } from "@/lib/buildpos/format";
 import { useAuth } from "@/lib/api/auth";
 import { useOrders, useCashierShifts, useParkedSales, useCustomers } from "@/lib/api/pos";
 import {
   useStockLevels,
   useStockBatches,
+  useBranchStockBatches,
   useStockTransfers,
   useWarehouses,
 } from "@/lib/api/inventory";
@@ -90,51 +92,6 @@ function stageBucket(stage: string): string {
   return "Failed / Returned";
 }
 
-// Resolves the Date Range filter to a concrete [start, end) window. Returns null for the "All..."
-// sentinel (no filtering). Custom Range reads the two ISO date strings the FilterBar's inline
-// <input type="date"> fields write into filterValues.
-function resolveDateRange(
-  preset: string,
-  customStart: string,
-  customEnd: string,
-): { start: Date; end: Date } | null {
-  const now = new Date();
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const endOfDay = (d: Date) =>
-    new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
-  switch (preset) {
-    case "Today":
-      return { start: startOfDay(now), end: endOfDay(now) };
-    case "Yesterday": {
-      const y = new Date(now);
-      y.setDate(y.getDate() - 1);
-      return { start: startOfDay(y), end: endOfDay(y) };
-    }
-    case "Last 7 Days": {
-      const s = new Date(now);
-      s.setDate(s.getDate() - 6);
-      return { start: startOfDay(s), end: endOfDay(now) };
-    }
-    case "Last 30 Days": {
-      const s = new Date(now);
-      s.setDate(s.getDate() - 29);
-      return { start: startOfDay(s), end: endOfDay(now) };
-    }
-    case "This Month":
-      return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: endOfDay(now) };
-    case "Last Month": {
-      const s = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const e = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-      return { start: s, end: e };
-    }
-    case "Custom Range":
-      if (!customStart || !customEnd) return null;
-      return { start: startOfDay(new Date(customStart)), end: endOfDay(new Date(customEnd)) };
-    default:
-      return null;
-  }
-}
-
 function categoryIconFor(name: string): string {
   const n = name.toLowerCase();
   if (n.includes("cement")) return "layers";
@@ -159,59 +116,58 @@ const PAYMENT_META: Record<string, { tone: Severity; icon: string }> = {
 };
 
 function OverviewPage() {
-  const { activeTab, setActiveTab, values: filterValues } = useFilters();
+  const { activeTab, setActiveTab, values: filterValues, dateRange } = useFilters();
   const navigate = useNavigate();
-  const { hasAccess } = useAuth();
+  const { hasAccess, user } = useAuth();
 
-  const { data: orders } = useOrders(hasAccess("Orders"));
-  const { data: products } = useProducts(hasAccess("Inventory"));
-  const { data: stockLevels } = useStockLevels(hasAccess("Inventory"));
-  const { data: warehouses } = useWarehouses(hasAccess("Inventory"));
-  const { data: stockBatches } = useStockBatches(hasAccess("Inventory"));
-  const { data: stockTransfers } = useStockTransfers(hasAccess("Inventory"));
-  const { data: deliveryOrders } = useDeliveryOrdersApi(hasAccess("Delivery"));
-  const { data: cashierShifts } = useCashierShifts(hasAccess("Pos"));
-  const { data: zatcaInvoices } = useZatcaInvoices(undefined, hasAccess("Finance"));
-  const { data: returnsData } = useReturns(hasAccess("Finance"));
-  const { data: branches } = useBranches(hasAccess("Network"));
-  const { data: terminals } = useTerminals(hasAccess("Network"));
-  const { data: devices } = useDevices(hasAccess("Network"));
+  const { data: orders } = useOrders(hasAccess("/operate/orders"));
+  const { data: products } = useProducts(hasAccess("/stock/inventory"));
+  const { data: stockLevels } = useStockLevels(hasAccess("/stock/stocks"));
+  const { data: warehouses } = useWarehouses(hasAccess("/stock/warehouses"));
+  const { data: stockBatches } = useStockBatches(hasAccess("/stock/expiry"));
+  const { data: branchStockBatches } = useBranchStockBatches(hasAccess("/stock/expiry"));
+  const { data: stockTransfers } = useStockTransfers(hasAccess("/stock/transfers"));
+  const { data: deliveryOrders } = useDeliveryOrdersApi(hasAccess("/delivery/orders"));
+  const { data: cashierShifts } = useCashierShifts(hasAccess("/operate/cashier-shift"));
+  const { data: zatcaInvoices } = useZatcaInvoices(undefined, hasAccess("/admin/zatca-invoices"));
+  const { data: returnsData } = useReturns(hasAccess("/finance/returns"));
+  const { data: branches } = useBranches(hasAccess("/network/branches"));
+  const { data: terminals } = useTerminals(hasAccess("/network/terminals"));
+  const { data: devices } = useDevices(hasAccess("/network/devices"));
   const { data: notifications } = useNotifications();
-  const { data: customers } = useCustomers(hasAccess("Orders"));
+  const { data: customers } = useCustomers(hasAccess("/operate/customers"));
   const { data: employees } = useEmployeesApi();
   // Only 2 branches exist in this deployment — ParkedSalesController requires a branchId per
   // call, so summing the two known branches is the only way to get a cross-branch total (a
   // third call per new branch would be needed if the network grows).
-  const { data: parkedBranch1 } = useParkedSales(1, hasAccess("Pos"));
-  const { data: parkedBranch2 } = useParkedSales(2, hasAccess("Pos"));
+  const { data: parkedBranch1 } = useParkedSales(1, hasAccess("/operate/pos-checkout"));
+  const { data: parkedBranch2 } = useParkedSales(2, hasAccess("/operate/pos-checkout"));
 
-  const productMap = useMemo(() => new Map((products ?? []).map((p) => [p.id, p])), [products]);
-  const customerMap = useMemo(() => new Map((customers ?? []).map((c) => [c.id, c])), [customers]);
-  const terminalsList = terminals ?? [];
-  // Best-effort join only — Order/CashierShift carry cashierName (string), not an employee FK, so
-  // this matches by full name and silently misses cashiers whose seeded name diverges from HR.
-  const departmentByName = useMemo(
-    () => new Map((employees ?? []).map((e) => [`${e.firstName} ${e.lastName}`, e.departmentName])),
-    [employees],
-  );
-
-  // --- Filter predicates, one per FilterBar control, applied where each is semantically meaningful ---
-  const selectedBranchId = (branches ?? []).find((b) => b.nameEn === filterValues.Branch)?.id;
-  const selectedTerminalId = terminalsList.find((t) => t.code === filterValues.Terminal)?.id;
-  const dateWindow = resolveDateRange(
-    filterValues["Date Range"],
-    filterValues["Custom Range Start"],
-    filterValues["Custom Range End"],
-  );
-  const inDateWindow = (iso: string) => {
-    if (!dateWindow) return true;
+  // Every FilterBar group is multi-select (an empty selection means "no filter" — see
+  // MultiSelectFilter) and options come from live data, so these narrow every KPI/chart/table by
+  // filtering at the source rather than comparing against labels that never occur.
+  const selectedBranchIds = (filterValues.Branch ?? []).length
+    ? new Set(
+        (branches ?? []).filter((b) => filterValues.Branch.includes(b.nameEn)).map((b) => b.id),
+      )
+    : null;
+  const selectedTerminalIds = (filterValues.Terminal ?? []).length
+    ? new Set(
+        (terminals ?? []).filter((t) => filterValues.Terminal.includes(t.code)).map((t) => t.id),
+      )
+    : null;
+  const selectedCashiers = (filterValues.Cashier ?? []).length
+    ? new Set(filterValues.Cashier)
+    : null;
+  const selectedStatuses = (filterValues.Status ?? []).length ? new Set(filterValues.Status) : null;
+  const dateBounds = useMemo(() => resolveDateRangeBounds(dateRange), [dateRange]);
+  const inDateBounds = (iso: string) => {
+    if (!dateBounds) return true;
     const t = new Date(iso).getTime();
-    return t >= dateWindow.start.getTime() && t <= dateWindow.end.getTime();
+    return t >= dateBounds.from.getTime() && t <= dateBounds.to.getTime();
   };
-  const cashierOk = (name: string) =>
-    filterValues.Cashier === "All Cashiers" || name === filterValues.Cashier;
-  const statusOk = (status: string) =>
-    filterValues.Status === "All" || status === filterValues.Status;
+
+  const customerMap = useMemo(() => new Map((customers ?? []).map((c) => [c.id, c])), [customers]);
   const customerTierOf = (customerId: number | null): string => {
     if (customerId === null) return "Walk-in";
     const c = customerMap.get(customerId);
@@ -219,107 +175,189 @@ function OverviewPage() {
     if (c.loyaltyEnrolled) return "Loyalty Member";
     return c.type === "WalkIn" ? "Walk-in" : "Retail";
   };
-  const customerTierOk = (customerId: number | null) =>
-    filterValues.Customer === "All" || customerTierOf(customerId) === filterValues.Customer;
-  const contractorOk = (customerId: number | null) => {
-    if (filterValues["Contractor Account"] === "All") return true;
-    const c = customerId === null ? undefined : customerMap.get(customerId);
-    return c?.nameEn === filterValues["Contractor Account"];
-  };
-  const paymentMethodOk = (o: { payments: { method: string }[] }) =>
-    filterValues["Payment Method"] === "All" ||
-    o.payments.some((p) => p.method === filterValues["Payment Method"]);
-  const departmentOk = (cashierName: string) =>
-    filterValues["Employee Department"] === "All" ||
-    departmentByName.get(cashierName) === filterValues["Employee Department"];
-  const shiftStatusOk = (status: string) => {
-    const sel = filterValues["Shift Status"];
-    if (sel === "All") return true;
-    return status === (sel === "Needs Review" ? "NeedsReview" : sel);
-  };
+  const selectedCustomerTiers = (filterValues.Customer ?? []).length
+    ? new Set(filterValues.Customer)
+    : null;
+  const selectedContractors = (filterValues["Contractor Account"] ?? []).length
+    ? new Set(filterValues["Contractor Account"])
+    : null;
+  const selectedPaymentMethods = (filterValues["Payment Method"] ?? []).length
+    ? new Set(filterValues["Payment Method"])
+    : null;
+  const selectedReturnTypes = (filterValues["Return Type"] ?? []).length
+    ? new Set(filterValues["Return Type"])
+    : null;
+  const selectedStockStatuses = (filterValues["Stock Status"] ?? []).length
+    ? new Set(filterValues["Stock Status"])
+    : null;
+  const selectedDeliveryStatuses = (filterValues["Delivery Status"] ?? []).length
+    ? new Set(filterValues["Delivery Status"])
+    : null;
+  const selectedInvoiceStatuses = (filterValues["Invoice Status"] ?? []).length
+    ? new Set(filterValues["Invoice Status"])
+    : null;
+  const selectedSuppliers = (filterValues.Supplier ?? []).length
+    ? new Set(filterValues.Supplier)
+    : null;
+
+  const terminalsList = terminals ?? [];
+  // Best-effort join only — Order/CashierShift carry cashierName (string), not an employee FK, so
+  // this matches by full name and silently misses cashiers whose seeded name diverges from HR.
+  const departmentByName = useMemo(
+    () => new Map((employees ?? []).map((e) => [`${e.firstName} ${e.lastName}`, e.departmentName])),
+    [employees],
+  );
+  const selectedDepartments = (filterValues["Employee Department"] ?? []).length
+    ? new Set(filterValues["Employee Department"])
+    : null;
+  // "Needs Review" (display label) has no space in the real CashierShiftStatus enum.
+  const selectedShiftStatuses = (filterValues["Shift Status"] ?? []).length
+    ? new Set(filterValues["Shift Status"].map((s) => (s === "Needs Review" ? "NeedsReview" : s)))
+    : null;
 
   const orderList = useMemo(
     () =>
-      (orders ?? []).filter(
-        (o) =>
-          (selectedBranchId === undefined || o.branchId === selectedBranchId) &&
-          (selectedTerminalId === undefined || o.terminalId === selectedTerminalId) &&
-          inDateWindow(o.createdAt) &&
-          cashierOk(o.cashierName) &&
-          statusOk(o.status) &&
-          customerTierOk(o.customerId) &&
-          contractorOk(o.customerId) &&
-          paymentMethodOk(o) &&
-          departmentOk(o.cashierName),
-      ),
+      (orders ?? [])
+        .filter((o) => !selectedBranchIds || selectedBranchIds.has(o.branchId))
+        .filter(
+          (o) =>
+            !selectedTerminalIds ||
+            (o.terminalId !== null && selectedTerminalIds.has(o.terminalId)),
+        )
+        .filter((o) => !selectedCashiers || selectedCashiers.has(o.cashierName))
+        .filter((o) => !selectedStatuses || selectedStatuses.has(o.status))
+        .filter(
+          (o) => !selectedCustomerTiers || selectedCustomerTiers.has(customerTierOf(o.customerId)),
+        )
+        .filter((o) => {
+          if (!selectedContractors) return true;
+          const c = o.customerId === null ? undefined : customerMap.get(o.customerId);
+          return c ? selectedContractors.has(c.nameEn) : false;
+        })
+        .filter(
+          (o) =>
+            !selectedPaymentMethods || o.payments.some((p) => selectedPaymentMethods.has(p.method)),
+        )
+        .filter(
+          (o) =>
+            !selectedDepartments ||
+            selectedDepartments.has(departmentByName.get(o.cashierName) ?? ""),
+        )
+        .filter((o) => inDateBounds(o.createdAt)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [orders, selectedBranchId, selectedTerminalId, dateWindow, filterValues],
+    [
+      orders,
+      selectedBranchIds,
+      selectedTerminalIds,
+      selectedCashiers,
+      selectedStatuses,
+      selectedCustomerTiers,
+      selectedContractors,
+      selectedPaymentMethods,
+      selectedDepartments,
+      customerMap,
+      departmentByName,
+      dateBounds,
+    ],
   );
-  const completedOrders = useMemo(
-    () => orderList.filter((o) => o.status === "Completed"),
-    [orderList],
+  // Revenue = every order that wasn't voided — the same rule the Reports console applies
+  // (ReportsController.CompletedOrders). Filtering on status === "Completed" instead silently
+  // dropped Dispatched/Delivered/Returned orders, so the dashboard and the Sales Summary report
+  // disagreed on gross sales the moment a sale moved past the register.
+  const revenueOrders = useMemo(() => orderList.filter((o) => o.status !== "Voided"), [orderList]);
+  const productMap = useMemo(() => new Map((products ?? []).map((p) => [p.id, p])), [products]);
+  const stockLevelsList = useMemo(
+    () =>
+      (stockLevels ?? []).filter((s) => {
+        if (!selectedStockStatuses) return true;
+        if (selectedStockStatuses.has("Out of Stock") && s.available === 0) return true;
+        // "Quarantine" is a stock-batch state, not a StockLevel status — never matches here.
+        return selectedStockStatuses.has(s.status);
+      }),
+    [stockLevels, selectedStockStatuses],
   );
-  const stockLevelsList = useMemo(() => {
-    const sel = filterValues["Stock Status"];
-    return (stockLevels ?? []).filter((s) => {
-      if (sel === "All") return true;
-      if (sel === "Out of Stock") return s.available === 0;
-      if (sel === "Quarantine") return false; // Quarantine is a stock-batch state, not a StockLevel status.
-      return s.status === sel;
-    });
-  }, [stockLevels, filterValues]);
-  const deliveryList = useMemo(() => {
-    const sel = filterValues["Delivery Status"];
-    return (deliveryOrders ?? []).filter(
-      (d) => (sel === "All" || stageBucket(d.stage) === sel) && inDateWindow(d.promisedDate),
-    );
+  const deliveryList = useMemo(
+    () =>
+      (deliveryOrders ?? [])
+        .filter(
+          (d) => !selectedDeliveryStatuses || selectedDeliveryStatuses.has(stageBucket(d.stage)),
+        )
+        .filter((d) => inDateBounds(d.promisedDate)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deliveryOrders, filterValues, dateWindow]);
-  const zatcaList = useMemo(() => {
-    const sel = filterValues["Invoice Status"];
-    return (zatcaInvoices ?? []).filter(
-      (i) => (sel === "All" || i.status === sel) && inDateWindow(i.issueDate),
-    );
+    [deliveryOrders, selectedDeliveryStatuses, dateBounds],
+  );
+  const zatcaList = useMemo(
+    () =>
+      (zatcaInvoices ?? [])
+        .filter((i) => !selectedInvoiceStatuses || selectedInvoiceStatuses.has(i.status))
+        .filter((i) => inDateBounds(i.issueDate)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zatcaInvoices, filterValues, dateWindow]);
+    [zatcaInvoices, selectedInvoiceStatuses, dateBounds],
+  );
   const zatcaByOrderId = useMemo(() => new Map(zatcaList.map((i) => [i.orderId, i])), [zatcaList]);
-  const returnsList = useMemo(() => {
-    const sel = filterValues["Return Type"];
-    return (returnsData ?? []).filter(
-      (r) => (sel === "All" || r.type === sel) && inDateWindow(r.createdAt),
-    );
+  // Returns honour the same branch/cashier/date filters as the order-derived KPIs plus Return Type
+  // — left global, the refund tile stayed frozen while every sales figure next to it moved with
+  // the filter bar, and it could never reconcile against the Customer Returns report for the same
+  // period.
+  const returnsList = useMemo(
+    () =>
+      (returnsData ?? [])
+        .filter(
+          (r) => !selectedBranchIds || (r.branchId !== null && selectedBranchIds.has(r.branchId)),
+        )
+        .filter(
+          (r) =>
+            !selectedCashiers || (r.cashierName !== null && selectedCashiers.has(r.cashierName)),
+        )
+        .filter((r) => !selectedReturnTypes || selectedReturnTypes.has(r.type))
+        .filter((r) => inDateBounds(r.createdAt)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [returnsData, filterValues, dateWindow]);
+    [returnsData, selectedBranchIds, selectedCashiers, selectedReturnTypes, dateBounds],
+  );
   const cashierShiftsList = useMemo(
     () =>
-      (cashierShifts ?? []).filter(
-        (s) =>
-          (selectedTerminalId === undefined || s.terminalId === selectedTerminalId) &&
-          cashierOk(s.cashierName) &&
-          shiftStatusOk(s.status) &&
-          departmentOk(s.cashierName) &&
-          inDateWindow(s.openedAt),
-      ),
+      (cashierShifts ?? [])
+        .filter((s) => !selectedTerminalIds || selectedTerminalIds.has(s.terminalId))
+        .filter((s) => !selectedCashiers || selectedCashiers.has(s.cashierName))
+        .filter((s) => !selectedShiftStatuses || selectedShiftStatuses.has(s.status))
+        .filter(
+          (s) =>
+            !selectedDepartments ||
+            selectedDepartments.has(departmentByName.get(s.cashierName) ?? ""),
+        )
+        .filter((s) => inDateBounds(s.openedAt)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [cashierShifts, selectedTerminalId, dateWindow, filterValues],
+    [
+      cashierShifts,
+      selectedTerminalIds,
+      selectedCashiers,
+      selectedShiftStatuses,
+      selectedDepartments,
+      departmentByName,
+      dateBounds,
+    ],
   );
   const parkedSalesAll = [...(parkedBranch1 ?? []), ...(parkedBranch2 ?? [])];
 
-  const grossSales = completedOrders.reduce((s, o) => s + o.subTotal, 0);
-  const discountsTotal = completedOrders.reduce((s, o) => s + o.discountTotal, 0);
-  const netSales = grossSales - discountsTotal;
-  const grandTotalSum = completedOrders.reduce((s, o) => s + o.grandTotal, 0);
-  const txCount = completedOrders.length;
-  const avgBasket = txCount ? Math.round(grandTotalSum / txCount) : 0;
+  const grossSales = revenueOrders.reduce((s, o) => s + o.subTotal, 0);
+  const discountsTotal = revenueOrders.reduce((s, o) => s + o.discountTotal, 0);
+  const grandTotalSum = revenueOrders.reduce((s, o) => s + o.grandTotal, 0);
+  const txCount = revenueOrders.length;
+  // Two decimals, matching Sales Summary's avgBasket. Rounding to whole riyals here made the two
+  // screens disagree by up to half a riyal on the same set of orders.
+  const avgBasket = txCount ? Math.round((grandTotalSum / txCount) * 100) / 100 : 0;
 
   const lowStockCount = stockLevelsList.filter((s) => s.status === "Low").length;
   const criticalStockCount = stockLevelsList.filter((s) => s.status === "Critical").length;
   const availableUnits = stockLevelsList.reduce((s, x) => s + x.available, 0);
   const reservedUnits = stockLevelsList.reduce((s, x) => s + x.reserved, 0);
   const stockValue = stockLevelsList.reduce((s, x) => s + x.value, 0);
-  const quarantineBatches = (stockBatches ?? []).filter((b) => b.status === "Quarantine");
+  // Batches sitting at a branch (post-transfer/receive) expire just as much as warehouse-backroom
+  // ones — omitting them here would undercount exactly the stock closest to actually being sold.
+  const allBatches = [...(stockBatches ?? []), ...(branchStockBatches ?? [])];
+  const quarantineBatches = allBatches.filter((b) => b.status === "Quarantine");
   const quarantineQty = quarantineBatches.reduce((s, b) => s + b.qty, 0);
-  const expiringBatches = (stockBatches ?? []).filter((b) => b.daysLeft >= 0 && b.daysLeft <= 30);
+  const expiringBatches = allBatches.filter((b) => b.daysLeft >= 0 && b.daysLeft <= 30);
   const pendingTransfers = (stockTransfers ?? []).filter(
     (t) => t.status !== "Received" && t.status !== "Cancelled",
   );
@@ -338,20 +376,25 @@ function OverviewPage() {
   )[0];
   const offlineTerminalsList = terminalsList.filter((t) => t.status !== "Online");
 
+  // KPI wording is deliberately the same vocabulary the Reports console uses, because these are
+  // the same measures: "Net Takings" here is Sales Summary's Net Takings (Σ GrandTotal), and
+  // "Gross Sales" is its Gross Sales (Σ SubTotal, ex-VAT, before discounts). Previously the tile
+  // showing Σ GrandTotal was called "Total Material Sales" and a *different* figure was called
+  // "Net Sales", so the two screens appeared to contradict each other.
   const overviewKpisReal = [
     {
       key: "sales",
-      title: "Total Material Sales",
+      title: "Net Takings",
       value: formatSAR(grandTotalSum),
-      sub: `${txCount} transactions`,
+      sub: `${txCount} transactions · incl. VAT`,
       tone: "success" as Severity,
       icon: "trending",
     },
     {
       key: "net",
-      title: "Net Sales",
-      value: formatSAR(netSales),
-      sub: "After discounts",
+      title: "Gross Sales",
+      value: formatSAR(grossSales),
+      sub: `Ex-VAT · less ${formatSAR(discountsTotal)} discounts`,
       tone: "info" as Severity,
       icon: "receipt",
     },
@@ -367,7 +410,7 @@ function OverviewPage() {
       key: "low",
       title: "Low Stock Materials",
       value: `${lowStockCount + criticalStockCount} SKUs`,
-      sub: `${criticalStockCount} out of stock`,
+      sub: `${criticalStockCount} out of stock · warehouse`,
       tone: (criticalStockCount > 0
         ? "critical"
         : lowStockCount > 0
@@ -397,7 +440,7 @@ function OverviewPage() {
 
   const hourlyReal = useMemo(() => {
     const buckets = new Map<string, { gross: number; net: number; returns: number; vat: number }>();
-    for (const o of completedOrders) {
+    for (const o of revenueOrders) {
       const label = `${String(new Date(o.createdAt).getHours()).padStart(2, "0")}:00`;
       const cur = buckets.get(label) ?? { gross: 0, net: 0, returns: 0, vat: 0 };
       cur.gross += o.subTotal;
@@ -408,7 +451,7 @@ function OverviewPage() {
     return [...buckets.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([time, v]) => ({ time, ...v }));
-  }, [completedOrders]);
+  }, [revenueOrders]);
 
   const dispatchPipelineReal = useMemo(() => {
     const toneFor: Record<string, Severity> = {
@@ -490,7 +533,7 @@ function OverviewPage() {
     const map = new Map<string, { sales: number; units: number; uom: string }>();
     const catHealth = new Map<string, string>();
     const rank: Record<string, number> = { Healthy: 0, Low: 1, Critical: 2 };
-    for (const o of completedOrders) {
+    for (const o of revenueOrders) {
       for (const l of o.lines) {
         const p = productMap.get(l.productId);
         const cat = p?.categoryName ?? "Uncategorized";
@@ -520,11 +563,11 @@ function OverviewPage() {
         icon: categoryIconFor(name),
       }))
       .sort((a, b) => b.sales - a.sales);
-  }, [completedOrders, productMap, stockLevelsList]);
+  }, [revenueOrders, productMap, stockLevelsList]);
 
   const topProductByCategoryReal = useMemo(() => {
     const map = new Map<string, { name: string; total: number }>();
-    for (const o of completedOrders) {
+    for (const o of revenueOrders) {
       for (const l of o.lines) {
         const p = productMap.get(l.productId);
         const cat = p?.categoryName ?? "Uncategorized";
@@ -534,9 +577,9 @@ function OverviewPage() {
       }
     }
     return Object.fromEntries([...map.entries()].map(([k, v]) => [k, v.name]));
-  }, [completedOrders, productMap]);
+  }, [revenueOrders, productMap]);
 
-  const contractorOrdersList = completedOrders.filter((o) => o.type === "Contractor");
+  const contractorOrdersList = revenueOrders.filter((o) => o.type === "Contractor");
   const contractorSalesTotal = contractorOrdersList.reduce((s, o) => s + o.grandTotal, 0);
   const contractorPct = grandTotalSum
     ? Math.round((contractorSalesTotal / grandTotalSum) * 100)
@@ -548,15 +591,15 @@ function OverviewPage() {
       key: "gross",
       title: "Gross Sales",
       value: formatSAR(grossSales),
-      sub: "All completed orders",
+      sub: "Ex-VAT, before discounts",
       tone: "success" as Severity,
       icon: "trending",
     },
     {
       key: "net",
-      title: "Net Sales",
-      value: formatSAR(netSales),
-      sub: "After discounts",
+      title: "Net Takings",
+      value: formatSAR(grandTotalSum),
+      sub: "Incl. VAT & fees",
       tone: "info" as Severity,
       icon: "receipt",
     },
@@ -570,9 +613,9 @@ function OverviewPage() {
     },
     {
       key: "returns",
-      title: "Completed Returns",
+      title: "Refunds Paid",
       value: formatSAR(returnsTotal),
-      sub: `${returnsList.length} items`,
+      sub: `${returnsList.length} return tickets`,
       tone: (returnsTotal > 0 ? "warning" : "success") as Severity,
       icon: "history",
     },
@@ -588,7 +631,7 @@ function OverviewPage() {
       key: "contractor",
       title: "Contractor Sales",
       value: formatSAR(contractorSalesTotal),
-      sub: `${contractorPct}% of gross`,
+      sub: `${contractorPct}% of net takings`,
       tone: "success" as Severity,
       icon: "users",
     },
@@ -612,8 +655,8 @@ function OverviewPage() {
   );
 
   const branchPerformanceReal = useMemo(() => {
-    const ordersByBranch = new Map<number, typeof completedOrders>();
-    for (const o of completedOrders)
+    const ordersByBranch = new Map<number, typeof revenueOrders>();
+    for (const o of revenueOrders)
       ordersByBranch.set(o.branchId, [...(ordersByBranch.get(o.branchId) ?? []), o]);
     const shiftsByTerminal = new Map(terminalsList.map((t) => [t.id, t.branchId]));
     const warehouseBranchMap = new Map((warehouses ?? []).map((w) => [w.id, w.branchId]));
@@ -640,7 +683,7 @@ function OverviewPage() {
         shifts: branchOpenShifts,
       };
     });
-  }, [branches, completedOrders, terminalsList, cashierShifts, stockLevelsList, warehouses]);
+  }, [branches, revenueOrders, terminalsList, cashierShifts, stockLevelsList, warehouses]);
 
   const inventoryKpisReal = [
     {
@@ -699,8 +742,8 @@ function OverviewPage() {
         .filter((s) => s.status !== "Healthy")
         .filter(
           (s) =>
-            filterValues.Supplier === "All" ||
-            productMap.get(s.productId)?.supplierName === filterValues.Supplier,
+            !selectedSuppliers ||
+            selectedSuppliers.has(productMap.get(s.productId)?.supplierName ?? ""),
         )
         .map((s) => ({
           sku: s.sku,
@@ -712,7 +755,7 @@ function OverviewPage() {
           supplier: productMap.get(s.productId)?.supplierName ?? "—",
           status: s.status as Severity,
         })),
-    [stockLevelsList, productMap, filterValues.Supplier],
+    [stockLevelsList, productMap, selectedSuppliers],
   );
 
   const inventorySummaryReal = [
@@ -820,7 +863,7 @@ function OverviewPage() {
 
   const paymentBreakdownReal = useMemo(() => {
     const map = new Map<string, { amount: number; tx: number }>();
-    for (const o of completedOrders) {
+    for (const o of revenueOrders) {
       for (const p of o.payments) {
         const cur = map.get(p.method) ?? { amount: 0, tx: 0 };
         cur.amount += p.amount;
@@ -837,7 +880,7 @@ function OverviewPage() {
         icon: PAYMENT_META[method]?.icon ?? "receipt",
       }))
       .sort((a, b) => b.tx - a.tx);
-  }, [completedOrders]);
+  }, [revenueOrders]);
 
   const returnBreakdownReal = useMemo(() => {
     const standard = returnsList.filter((r) => r.type === "Standard");
@@ -876,24 +919,27 @@ function OverviewPage() {
     [notifications],
   );
 
-  // BRD §10.1: cross-register reporting/analytics is a Supervisor+ concern. Cashier/Senior Cashier
-  // are the only two seeded roles with Insights = None, so gating these 5 tabs behind it naturally
-  // restricts them to Overview + Cashier & Terminal (their own shift) without hardcoding role names.
+  // BRD §10.1: cross-register reporting/analytics (X-Reports and above) is a Supervisor+ concern.
+  // posCeilings.canViewXReport is exactly that ladder line (false for Cashier/Senior Cashier, true
+  // from Supervisor up — see PosTier presets in DbSeeder.cs) — gating on it restricts those two
+  // roles to Overview + Cashier & Terminal (their own shift) without hardcoding role names or
+  // depending on a page-route permission, since no single page covers "all analytics".
+  const canViewAnalyticsTabs = user?.posCeilings.canViewXReport ?? false;
   const tabs: {
     value: string;
     label: string;
     icon: typeof LayoutDashboard;
-    module?: "Insights";
+    requiresAnalytics?: boolean;
   }[] = [
     { value: "overview", label: "Overview", icon: LayoutDashboard },
-    { value: "sales", label: "Sales Performance", icon: TrendingUp, module: "Insights" },
-    { value: "inventory", label: "Inventory Health", icon: Boxes, module: "Insights" },
-    { value: "delivery", label: "Delivery & Dispatch", icon: Truck, module: "Insights" },
+    { value: "sales", label: "Sales Performance", icon: TrendingUp, requiresAnalytics: true },
+    { value: "inventory", label: "Inventory Health", icon: Boxes, requiresAnalytics: true },
+    { value: "delivery", label: "Delivery & Dispatch", icon: Truck, requiresAnalytics: true },
     { value: "cashier", label: "Cashier & Terminal", icon: UserSquare2 },
-    { value: "payments", label: "Payments & Returns", icon: Wallet, module: "Insights" },
-    { value: "compliance", label: "Compliance & Alerts", icon: Shield, module: "Insights" },
+    { value: "payments", label: "Payments & Returns", icon: Wallet, requiresAnalytics: true },
+    { value: "compliance", label: "Compliance & Alerts", icon: Shield, requiresAnalytics: true },
   ];
-  const visibleTabs = tabs.filter((t) => !t.module || hasAccess(t.module));
+  const visibleTabs = tabs.filter((t) => !t.requiresAnalytics || canViewAnalyticsTabs);
   useEffect(() => {
     if (!visibleTabs.some((t) => t.value === activeTab))
       setActiveTab(visibleTabs[0]?.value ?? "overview");

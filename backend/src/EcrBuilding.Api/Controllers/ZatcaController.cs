@@ -13,7 +13,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/zatca")]
 [Authorize]
-[RequireModule(ModuleArea.Finance, AccessLevel.View)]
+[RequireModule("/admin/zatca-settings", PermissionAction.View)]
 public class ZatcaController(AppDbContext db, IZatcaService zatca, IAuditService audit) : ControllerBase
 {
     // One row per branch (Model B) — lets the frontend show onboarding status for every branch
@@ -34,22 +34,22 @@ public class ZatcaController(AppDbContext db, IZatcaService zatca, IAuditService
     public async Task<ActionResult<ZatcaIdentityDto>> GetIdentity(int branchId, CancellationToken ct) => Ok(await zatca.GetIdentityAsync(branchId, ct));
 
     [HttpPost("onboarding/{branchId:int}/csr")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/admin/zatca-settings", PermissionAction.Edit)]
     public async Task<ActionResult<ZatcaIdentityDto>> GenerateCsr(int branchId, CancellationToken ct) =>
         Ok(await zatca.GenerateCsrAsync(branchId, ct));
 
     [HttpPost("onboarding/{branchId:int}/compliance-csid")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/admin/zatca-settings", PermissionAction.Edit)]
     public async Task<ActionResult<ZatcaIdentityDto>> GetComplianceCsid(int branchId, ComplianceCsidRequest request, CancellationToken ct) =>
         Ok(await zatca.GetComplianceCsidAsync(branchId, request.Otp, ct));
 
     [HttpPost("onboarding/{branchId:int}/production-csid")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/admin/zatca-settings", PermissionAction.Edit)]
     public async Task<ActionResult<ZatcaProductionOnboardingResultDto>> RunProductionOnboarding(int branchId, CancellationToken ct) =>
         Ok(await zatca.RunProductionOnboardingAsync(branchId, ct));
 
     [HttpPut("identity/{branchId:int}/environment")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/admin/zatca-settings", PermissionAction.Edit)]
     public async Task<ActionResult<ZatcaIdentityDto>> SetEnvironment(int branchId, SetZatcaEnvironmentRequest request, CancellationToken ct) =>
         Ok(await zatca.SetEnvironmentAsync(branchId, request.Environment, ct));
 
@@ -61,7 +61,7 @@ public class ZatcaController(AppDbContext db, IZatcaService zatca, IAuditService
     }
 
     [HttpPut("settings")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/admin/zatca-settings", PermissionAction.Edit)]
     public async Task<ActionResult<ZatcaSettingsDto>> UpsertSettings(UpsertZatcaSettingsRequest request, CancellationToken ct)
     {
         var settings = await db.ZatcaSettingsList.Include(s => s.Branch).FirstOrDefaultAsync(s => s.BranchId == request.BranchId, ct);
@@ -95,7 +95,7 @@ public class ZatcaController(AppDbContext db, IZatcaService zatca, IAuditService
     }
 
     [HttpPost("invoices/{orderId:int}/submit")]
-    [RequireModule(ModuleArea.Finance, AccessLevel.Edit)]
+    [RequireModule("/admin/zatca-settings", PermissionAction.Edit)]
     public async Task<ActionResult<ZatcaInvoiceDto>> SubmitInvoice(int orderId, CancellationToken ct)
     {
         var invoice = await zatca.SubmitInvoiceForOrderAsync(orderId, ct);
@@ -105,12 +105,13 @@ public class ZatcaController(AppDbContext db, IZatcaService zatca, IAuditService
     private static ZatcaSettingsDto Map(ZatcaSettings s) => new(s.BranchId, s.Branch?.NameEn ?? "", s.VatRegistrationNumber, s.SellerName, s.CrNumber, s.Street, s.City, s.PostalCode, s.BuildingNumber);
 }
 
-// Separate controller (Orders-module gate, not Finance) — any cashier needs the invoice/QR for
-// the receipt they just printed, regardless of whether their role can manage ZATCA settings.
+// Separate controller (gated on the Orders page, not ZATCA Settings) — any cashier needs the
+// invoice/QR for the receipt they just printed, regardless of whether their role can manage ZATCA
+// settings.
 [ApiController]
 [Route("api/zatca/invoices")]
 [Authorize]
-[RequireModule(ModuleArea.Orders, AccessLevel.View)]
+[RequireModule("/operate/orders", PermissionAction.View)]
 public class ZatcaReceiptController(AppDbContext db) : ControllerBase
 {
     [HttpGet("by-order/{orderId:int}")]

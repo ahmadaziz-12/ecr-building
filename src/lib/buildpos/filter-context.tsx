@@ -1,26 +1,16 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import type { DateRangeValue } from "@/components/buildpos/FilterControls";
 
 /* Spec §6 — Global Filters. Options are static per the BuildPOS blueprint.
-   NOTE: FilterBar (sections.tsx) swaps the Category and Branch options for the live
-   category/branch names once loaded — these static lists are only the pre-load fallback. */
+   NOTE: FilterBar (sections.tsx) swaps the Category/Branch/Terminal/Cashier options for the live
+   names once loaded — these static lists are only the pre-load fallback.
+   Every group here is multi-select: an empty selection means "All" (no filtering) rather than a
+   literal "All X" option living inside the options array — see MultiSelectFilter. */
 
 export const primaryFilterGroups: { label: string; options: string[] }[] = [
   {
-    label: "Date Range",
-    options: [
-      "Today",
-      "Yesterday",
-      "Last 7 Days",
-      "Last 30 Days",
-      "This Month",
-      "Last Month",
-      "Custom Range",
-    ],
-  },
-  {
     label: "Branch",
     options: [
-      "All Permitted Branches",
       "Riyadh Main Branch",
       "Jeddah Branch",
       "Dammam Branch",
@@ -30,12 +20,11 @@ export const primaryFilterGroups: { label: string; options: string[] }[] = [
   },
   {
     label: "Terminal",
-    options: ["All Terminals", "POS-01", "POS-02", "POS-03", "POS-04", "POS-05", "POS-06"],
+    options: ["POS-01", "POS-02", "POS-03", "POS-04", "POS-05", "POS-06"],
   },
   {
     label: "Cashier",
     options: [
-      "All Cashiers",
       "Ahmed Al-Harbi",
       "Fahad Al-Qahtani",
       "Sara Al-Otaibi",
@@ -47,7 +36,6 @@ export const primaryFilterGroups: { label: string; options: string[] }[] = [
   {
     label: "Category",
     options: [
-      "All Categories",
       "Cement & Binders",
       "Aggregates & Sand",
       "Steel & Reinforcement",
@@ -65,79 +53,79 @@ export const primaryFilterGroups: { label: string; options: string[] }[] = [
     ],
   },
   {
-    // Matches the real OrderStatus enum (Order.cs) so it can actually filter order data.
+    // Matches the real OrderDto.status values (see src/lib/api/pos.ts) so this filter can
+    // actually narrow live orders instead of comparing against labels that never occur.
     label: "Status",
-    options: ["All", "Pending", "Completed", "Dispatched", "Delivered", "Returned", "Voided"],
+    options: ["Pending", "Completed", "Dispatched", "Delivered", "Returned", "Voided"],
   },
 ];
 
 export const moreFilterGroups: { label: string; options: string[] }[] = [
-  { label: "Customer", options: ["All", "Walk-in", "Retail", "Loyalty Member"] },
-  // Contractor Account and Supplier option lists are placeholders here — FilterBar swaps them for
-  // live contractor customer / supplier names once loaded, same mechanism as Category/Branch.
+  { label: "Customer", options: ["Walk-in", "Retail", "Loyalty Member"] },
   {
     label: "Contractor Account",
-    options: ["All", "Al Noor Contracting", "Modern Villas Est.", "Gulf Build Co."],
+    options: ["Al Noor Contracting", "Modern Villas Est.", "Gulf Build Co."],
   },
   {
     label: "Supplier",
-    options: [
-      "All",
-      "Al Noor Cement",
-      "Gulf Steel Supply",
-      "Saudi Tiles Trading",
-      "ColorPro Paints",
-    ],
+    options: ["Al Noor Cement", "Gulf Steel Supply", "Saudi Tiles Trading", "ColorPro Paints"],
   },
   // Matches the real PaymentMethod enum (Order.cs).
   {
     label: "Payment Method",
-    options: ["All", "Cash", "Mada", "ApplePay", "StcPay", "Transfer", "Loyalty", "AccountCredit"],
+    options: ["Cash", "Mada", "ApplePay", "StcPay", "Transfer", "Loyalty", "AccountCredit"],
+  },
+  {
+    label: "Order Status",
+    options: ["Draft", "Confirmed", "Delivery Planned", "Completed", "Voided"],
   },
   {
     label: "Delivery Status",
-    options: [
-      "All",
-      "Pending",
-      "Assigned",
-      "Loading",
-      "Dispatched",
-      "Delivered",
-      "Failed / Returned",
-    ],
+    options: ["Pending", "Assigned", "Loading", "Dispatched", "Delivered", "Failed / Returned"],
   },
-  {
-    label: "Stock Status",
-    options: ["All", "Healthy", "Low", "Critical", "Out of Stock", "Quarantine"],
-  },
-  { label: "Return Type", options: ["All", "Standard", "Damaged", "Surplus", "Exchange"] },
+  { label: "Stock Status", options: ["Healthy", "Low", "Critical", "Out of Stock", "Quarantine"] },
+  { label: "Return Type", options: ["Standard", "Damaged", "Surplus", "Exchange"] },
   // Matches the real ZatcaInvoiceStatus enum (Zatca.cs) — "Queued" doesn't exist, "Pending" does.
-  { label: "Invoice Status", options: ["All", "Pending", "Submitted", "Cleared", "Failed"] },
-  {
-    label: "Employee Department",
-    options: ["All", "Sales", "Warehouse", "Dispatch", "Finance", "Admin"],
-  },
-  { label: "Shift Status", options: ["All", "Open", "Closed", "Needs Review"] },
+  { label: "Invoice Status", options: ["Pending", "Submitted", "Cleared", "Failed"] },
+  { label: "Employee Department", options: ["Sales", "Warehouse", "Dispatch", "Finance", "Admin"] },
+  { label: "Shift Status", options: ["Open", "Closed", "Needs Review"] },
 ];
 
 export const filterGroups = primaryFilterGroups;
 
-// Not real dropdown groups — two ISO-date values written by native <input type="date"> fields that
-// FilterBar renders inline only when Date Range === "Custom Range". Kept in the same `values` map
-// (rather than separate state) so Reset / Save View / Load View cover them for free.
-export const customRangeKeys = ["Custom Range Start", "Custom Range End"];
-
-export const filterDefaults: Record<string, string> = {
-  ...Object.fromEntries(
-    [...primaryFilterGroups, ...moreFilterGroups].map((g) => [g.label, g.options[0]]),
-  ),
-  ...Object.fromEntries(customRangeKeys.map((k) => [k, ""])),
+// The closed trigger's "nothing picked" label — "All Categories" rather than the bare group name
+// "Category" — for every multi-select group in the bar.
+export const allLabels: Record<string, string> = {
+  Branch: "All Branches",
+  Terminal: "All Terminals",
+  Cashier: "All Cashiers",
+  Category: "All Categories",
+  Status: "All Statuses",
+  Customer: "All Customers",
+  "Contractor Account": "All Contractor Accounts",
+  Supplier: "All Suppliers",
+  "Payment Method": "All Payment Methods",
+  "Order Status": "All Order Statuses",
+  "Delivery Status": "All Delivery Statuses",
+  "Stock Status": "All Stock Statuses",
+  "Return Type": "All Return Types",
+  "Invoice Status": "All Invoice Statuses",
+  "Employee Department": "All Departments",
+  "Shift Status": "All Shift Statuses",
 };
 
+export const filterDefaults: Record<string, string[]> = Object.fromEntries(
+  [...primaryFilterGroups, ...moreFilterGroups].map((g) => [g.label, []]),
+);
+
+const DATE_RANGE_DEFAULT: DateRangeValue = { preset: "" };
+
 type Ctx = {
-  values: Record<string, string>;
-  setValue: (label: string, value: string) => void;
-  setValues: (v: Record<string, string>) => void;
+  values: Record<string, string[]>;
+  setValue: (label: string, values: string[]) => void;
+  setValues: (v: Record<string, string[]>) => void;
+  dateRange: DateRangeValue;
+  setDateRange: (v: DateRangeValue) => void;
   reset: () => void;
   activeTab: string;
   setActiveTab: (t: string) => void;
@@ -146,15 +134,28 @@ type Ctx = {
 const FilterCtx = createContext<Ctx | null>(null);
 
 export function FilterProvider({ children }: { children: ReactNode }) {
-  const [values, setValuesState] = useState<Record<string, string>>(filterDefaults);
+  const [values, setValuesState] = useState<Record<string, string[]>>(filterDefaults);
+  const [dateRange, setDateRange] = useState<DateRangeValue>(DATE_RANGE_DEFAULT);
   const [activeTab, setActiveTab] = useState("overview");
-  const setValue = useCallback((label: string, value: string) => {
-    setValuesState((s) => ({ ...s, [label]: value }));
+  const setValue = useCallback((label: string, next: string[]) => {
+    setValuesState((s) => ({ ...s, [label]: next }));
   }, []);
-  const reset = useCallback(() => setValuesState(filterDefaults), []);
+  const reset = useCallback(() => {
+    setValuesState(filterDefaults);
+    setDateRange(DATE_RANGE_DEFAULT);
+  }, []);
   const ctx = useMemo(
-    () => ({ values, setValue, setValues: setValuesState, reset, activeTab, setActiveTab }),
-    [values, setValue, reset, activeTab],
+    () => ({
+      values,
+      setValue,
+      setValues: setValuesState,
+      dateRange,
+      setDateRange,
+      reset,
+      activeTab,
+      setActiveTab,
+    }),
+    [values, setValue, dateRange, reset, activeTab],
   );
   return <FilterCtx.Provider value={ctx}>{children}</FilterCtx.Provider>;
 }
@@ -165,12 +166,10 @@ export function useFilters() {
   return ctx;
 }
 
-/** Map a top-category display name to the closest Category filter option. */
-export function categoryToFilter(name: string): string {
+/** Map a top-category display name to the closest Category filter option, or null if none match
+ *  (null means "show all" — the caller should clear the Category selection instead of guessing). */
+export function categoryToFilter(name: string): string | null {
   const cats = primaryFilterGroups.find((g) => g.label === "Category")!.options;
   const lower = name.toLowerCase();
-  return (
-    cats.find((c) => c !== "All Categories" && lower.includes(c.split(" ")[0].toLowerCase())) ??
-    "All Categories"
-  );
+  return cats.find((c) => lower.includes(c.split(" ")[0].toLowerCase())) ?? null;
 }

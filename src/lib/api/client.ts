@@ -47,6 +47,12 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
+        // Timestamps are stored and returned as UTC instants, but a report's "today" means the
+        // viewer's calendar day. Without this the server windowed on UTC days, so in Riyadh (UTC+3)
+        // a 01:00 sale landed in the previous UTC day and dropped out of "today" — while the
+        // dashboard, which filters the same orders on local instants in the browser, still counted
+        // it. Sending the offset makes both screens describe the same hours.
+        "X-Tz-Offset": String(new Date().getTimezoneOffset()),
         ...options.headers,
       },
     });

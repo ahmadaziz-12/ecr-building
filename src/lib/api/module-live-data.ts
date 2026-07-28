@@ -1,22 +1,85 @@
 import {
-  useUsers, useRoles, useBranches, useTerminals, useDevices, useSettings, useRules, useCompliance,
-  useMaintenance, useSubscription, useAuditLogs, mapUsers, mapRoles, mapBranches, mapTerminals, mapDevices,
-  mapSystemSettings, mapPosSettings, mapRules, mapCompliance, mapMaintenance, mapPlans, mapAuditLogs, type LiveTable,
+  useUsers,
+  useBranches,
+  useTerminals,
+  useDevices,
+  useSettings,
+  useRules,
+  useCompliance,
+  useMaintenance,
+  useSubscription,
+  useAuditLogs,
+  mapUsers,
+  mapBranches,
+  mapTerminals,
+  mapDevices,
+  mapSystemSettings,
+  mapPosSettings,
+  mapRules,
+  mapCompliance,
+  mapMaintenance,
+  mapPlans,
+  mapAuditLogs,
+  type LiveTable,
 } from "./admin";
 import { useCategories, useProducts, mapCategories, mapProducts } from "./catalog";
 import { useBundles, mapBundles } from "./bundles";
-import { useWarehouses, useStockLevels, useBranchStockLevels, useStockBatches, useStockTransfers, useStockMovements, mapWarehouses, mapStockLevels, mapBranchStockLevels, mapStockBatches, mapStockTransfers, mapStockMovements } from "./inventory";
-import { useSuppliers, usePurchaseOrders, useReturnsToSupplier, mapSuppliers, mapPurchaseOrders, mapRts } from "./procurement";
+import {
+  useWarehouses,
+  useStockLevels,
+  useBranchStockLevels,
+  useStockBatches,
+  useBranchStockBatches,
+  useStockTransfers,
+  useStockMovements,
+  mapWarehouses,
+  mapStockLevels,
+  mapBranchStockLevels,
+  mapStockBatches,
+  mapStockTransfers,
+  mapStockMovements,
+} from "./inventory";
+import {
+  useSuppliers,
+  usePurchaseOrders,
+  useReturnsToSupplier,
+  mapSuppliers,
+  mapPurchaseOrders,
+  mapRts,
+} from "./procurement";
 import { usePricingRules, mapPricingRules } from "./pos";
-import { useExpenses, useTaxCodes, useReturns, mapExpenses, mapTaxCodes, mapReturns } from "./finance";
-import { useZatcaInvoices, useZatcaIdentities, useZatcaSettings, mapZatcaInvoices, mapZatcaConfiguration } from "./zatca";
-import { useInsightsSales, useInsightsKpi, useInsightsReports, useInsightsBi, useAdminOverview, mapSales, mapKpis, mapReports, mapBiFeeds, mapOverview } from "./insights";
+import {
+  useExpenses,
+  useTaxCodes,
+  useReturns,
+  mapExpenses,
+  mapTaxCodes,
+  mapReturns,
+} from "./finance";
+import {
+  useZatcaInvoices,
+  useZatcaIdentities,
+  useZatcaSettings,
+  mapZatcaInvoices,
+  mapZatcaConfiguration,
+} from "./zatca";
+import {
+  useInsightsSales,
+  useInsightsKpi,
+  useInsightsReports,
+  useInsightsBi,
+  useAdminOverview,
+  mapSales,
+  mapKpis,
+  mapReports,
+  mapBiFeeds,
+  mapOverview,
+} from "./insights";
 
 // Registry of routes that are wired to the real backend — everything else keeps using the static
 // src/lib/buildpos/modules.ts mock rows until its phase is wired.
 export function useModuleLiveData(pathname: string): LiveTable | undefined {
   const users = useUsers(pathname === "/admin/users");
-  const roles = useRoles(pathname === "/admin/roles");
   const branches = useBranches(pathname === "/network/branches");
   const terminals = useTerminals(pathname === "/network/terminals");
   const devices = useDevices(pathname === "/network/devices");
@@ -34,6 +97,7 @@ export function useModuleLiveData(pathname: string): LiveTable | undefined {
   const stockLevels = useStockLevels(pathname === "/stock/stocks");
   const branchStockLevels = useBranchStockLevels(pathname === "/stock/branch-stock");
   const stockBatches = useStockBatches(pathname === "/stock/expiry");
+  const branchStockBatches = useBranchStockBatches(pathname === "/stock/expiry");
   const transfers = useStockTransfers(pathname === "/stock/transfers");
   const movements = useStockMovements(pathname === "/stock/movements");
   const bundles = useBundles(pathname === "/stock/bundles");
@@ -57,8 +121,6 @@ export function useModuleLiveData(pathname: string): LiveTable | undefined {
   switch (pathname) {
     case "/admin/users":
       return users.data ? mapUsers(users.data) : undefined;
-    case "/admin/roles":
-      return roles.data ? mapRoles(roles.data) : undefined;
     case "/network/branches":
       return branches.data ? mapBranches(branches.data) : undefined;
     case "/network/terminals":
@@ -90,7 +152,9 @@ export function useModuleLiveData(pathname: string): LiveTable | undefined {
     case "/stock/branch-stock":
       return branchStockLevels.data ? mapBranchStockLevels(branchStockLevels.data) : undefined;
     case "/stock/expiry":
-      return stockBatches.data ? mapStockBatches(stockBatches.data) : undefined;
+      return stockBatches.data
+        ? mapStockBatches(stockBatches.data, branchStockBatches.data ?? [])
+        : undefined;
     case "/stock/transfers":
       return transfers.data ? mapStockTransfers(transfers.data) : undefined;
     case "/stock/movements":
@@ -114,7 +178,9 @@ export function useModuleLiveData(pathname: string): LiveTable | undefined {
     case "/admin/zatca-invoices":
       return zatcaInvoices.data ? mapZatcaInvoices(zatcaInvoices.data) : undefined;
     case "/admin/zatca-settings":
-      return zatcaIdentities.data && zatcaSettingsList.data ? mapZatcaConfiguration(zatcaIdentities.data, zatcaSettingsList.data) : undefined;
+      return zatcaIdentities.data && zatcaSettingsList.data
+        ? mapZatcaConfiguration(zatcaIdentities.data, zatcaSettingsList.data)
+        : undefined;
     case "/insights/sales":
       return sales.data ? mapSales(sales.data) : undefined;
     case "/insights/kpi":

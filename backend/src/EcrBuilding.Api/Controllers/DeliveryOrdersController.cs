@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
+using EcrBuilding.Application.Auth;
 using EcrBuilding.Application.Delivery;
 using EcrBuilding.Domain.Entities;
 using EcrBuilding.Domain.Enums;
@@ -15,8 +16,8 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/delivery/orders")]
 [Authorize]
-[RequireModule(ModuleArea.Delivery, AccessLevel.View)]
-public class DeliveryOrdersController(AppDbContext db, IAuditService audit) : ControllerBase
+[RequireModule("/delivery/orders", PermissionAction.View)]
+public class DeliveryOrdersController(AppDbContext db, IAuditService audit, IPermissionResolver permissionResolver) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<DeliveryOrderDto>>> List(CancellationToken ct)
@@ -33,7 +34,7 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit) : Co
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Delivery, AccessLevel.Edit)]
+    [RequireModule("/delivery/orders", PermissionAction.Create)]
     public async Task<ActionResult<DeliveryOrderDto>> Create(CreateDeliveryOrderRequest request, CancellationToken ct)
     {
         var vat = Math.Round((request.Charges.Fee + request.Charges.Handling + request.Charges.Heavy - request.Charges.Discount) * 0.15m, 2);
@@ -77,7 +78,7 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit) : Co
     // user's request — see ApproveMove below). A user with Full never enters the request/approve
     // pipeline at all, since they can just move the order themselves.
     [HttpPut("{id:int}/transition")]
-    [RequireModule(ModuleArea.Delivery, AccessLevel.Edit)]
+    [RequireModule("/delivery/orders", PermissionAction.Edit)]
     public async Task<ActionResult<TransitionResponseDto>> Transition(int id, TransitionRequest request, CancellationToken ct)
     {
         var order = await db.DeliveryOrders.Include(o => o.Lines).Include(o => o.Driver).Include(o => o.Vehicle)
@@ -91,7 +92,7 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit) : Co
 
         var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
-        if (!HasDeliveryLevel(AccessLevel.Full))
+        if (!await permissionResolver.HasAsync(userId, "/delivery/orders", PermissionAction.Approve, ct))
         {
             var effectiveDriverId = request.DriverId ?? order.DriverId;
             var effectiveVehicleId = request.VehicleId ?? order.VehicleId;
@@ -148,7 +149,7 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit) : Co
     }
 
     [HttpPut("approvals/{approvalId:int}/approve")]
-    [RequireModule(ModuleArea.Delivery, AccessLevel.Full)]
+    [RequireModule("/delivery/orders", PermissionAction.Approve)]
     public async Task<ActionResult<TransitionResponseDto>> ApproveMove(int approvalId, CancellationToken ct)
     {
         var approval = await db.ApprovalRequests.FirstOrDefaultAsync(a => a.Id == approvalId && a.Type == ApprovalType.DeliveryStageChange, ct);
@@ -188,7 +189,7 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit) : Co
     }
 
     [HttpPut("approvals/{approvalId:int}/reject")]
-    [RequireModule(ModuleArea.Delivery, AccessLevel.Full)]
+    [RequireModule("/delivery/orders", PermissionAction.Approve)]
     public async Task<ActionResult<DeliveryApprovalDto>> RejectMove(int approvalId, CancellationToken ct)
     {
         var approval = await db.ApprovalRequests.FirstOrDefaultAsync(a => a.Id == approvalId && a.Type == ApprovalType.DeliveryStageChange, ct);
@@ -209,13 +210,6 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit) : Co
 
         var resolved = await ApprovalsQuery().FirstAsync(a => a.Id == approvalId, ct);
         return Ok(MapApproval(resolved));
-    }
-
-    private bool HasDeliveryLevel(AccessLevel min)
-    {
-        var claim = User.FindFirst($"perm:{ModuleArea.Delivery}")?.Value;
-        var level = Enum.TryParse<AccessLevel>(claim, out var parsed) ? parsed : AccessLevel.None;
-        return level >= min;
     }
 
     private IQueryable<ApprovalRequest> ApprovalsQuery() => db.ApprovalRequests
@@ -254,7 +248,7 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit) : Co
     }
 
     [HttpPut("{id:int}/reserve-stock")]
-    [RequireModule(ModuleArea.Delivery, AccessLevel.Edit)]
+    [RequireModule("/delivery/orders", PermissionAction.Edit)]
     public async Task<ActionResult<DeliveryOrderDto>> ReserveStock(int id, CancellationToken ct)
     {
         var order = await db.DeliveryOrders.Include(o => o.Lines).FirstOrDefaultAsync(o => o.Id == id, ct);

@@ -53,14 +53,12 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  MultiSelectFilter,
+  DateRangeFilter,
+  type DateRangeValue,
+} from "@/components/buildpos/FilterControls";
 import {
   Table,
   TableBody,
@@ -103,8 +101,8 @@ import {
   zatcaInvoices,
 } from "@/lib/buildpos/data";
 import {
+  allLabels,
   categoryToFilter,
-  customRangeKeys,
   filterDefaults,
   moreFilterGroups,
   primaryFilterGroups,
@@ -113,7 +111,7 @@ import {
 import { useAuth } from "@/lib/api/auth";
 import { useCategories } from "@/lib/api/catalog";
 import { useBranches, useTerminals } from "@/lib/api/admin";
-import { useOrders, useCashierShifts, useCustomers } from "@/lib/api/pos";
+import { useOrders, useCustomers } from "@/lib/api/pos";
 import { useSuppliers } from "@/lib/api/procurement";
 import { useDepartmentsApi } from "@/lib/api/hr";
 import { useSavedViews, useCreateSavedView, useDeleteSavedView } from "@/lib/api/insights";
@@ -251,7 +249,7 @@ export function FilterBar({
   compact?: boolean;
   exportData?: { filename: string; columns: string[]; rows: (string | number)[][] } | null;
 }) {
-  const { values, setValue, setValues, reset } = useFilters();
+  const { values, setValue, setValues, dateRange, setDateRange, reset } = useFilters();
   const queryClient = useQueryClient();
   const { hasAccess } = useAuth();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -259,45 +257,53 @@ export function FilterBar({
   // The static blueprint option names ("Cement & Binders", "Riyadh Main Branch") don't match the
   // live category/branch/terminal/cashier/contractor/supplier/department names, so wired consumers
   // would filter everything to nothing — swap in the real names once loaded.
-  const { data: liveCategories } = useCategories(hasAccess("Inventory"));
-  const { data: liveBranches } = useBranches(hasAccess("Network"));
-  const { data: liveTerminals } = useTerminals(hasAccess("Network"));
-  const { data: liveOrders } = useOrders(hasAccess("Orders"));
-  const { data: liveShifts } = useCashierShifts(hasAccess("Pos"));
-  const { data: liveCustomers } = useCustomers(hasAccess("Orders"));
-  const { data: liveSuppliers } = useSuppliers(hasAccess("Suppliers"));
+  const { data: liveCategories } = useCategories(hasAccess("/admin/categories"));
+  const { data: liveBranches } = useBranches(hasAccess("/network/branches"));
+  const { data: liveTerminals } = useTerminals(hasAccess("/network/terminals"));
+  const { data: liveOrders } = useOrders(hasAccess("/operate/orders"));
+  const { data: liveCustomers } = useCustomers(hasAccess("/operate/customers"));
+  const { data: liveSuppliers } = useSuppliers(hasAccess("/suppliers/suppliers"));
   const { data: liveDepartments } = useDepartmentsApi();
-  const liveCashierNames = [
-    ...new Set([
-      ...(liveOrders ?? []).map((o) => o.cashierName),
-      ...(liveShifts ?? []).map((s) => s.cashierName),
-    ]),
+  const liveCashiers = [
+    ...new Set((liveOrders ?? []).map((o) => o.cashierName).filter(Boolean)),
   ].sort();
   const liveContractors = (liveCustomers ?? [])
     .filter((c) => c.type === "Contractor" || c.type === "B2B")
     .map((c) => c.nameEn);
   const liveOptions = (g: { label: string; options: string[] }): string[] => {
     if (g.label === "Category" && liveCategories?.length)
-      return ["All Categories", ...liveCategories.map((c) => c.nameEn)];
-    if (g.label === "Branch" && liveBranches?.length)
-      return ["All Permitted Branches", ...liveBranches.map((b) => b.nameEn)];
-    if (g.label === "Terminal" && liveTerminals?.length)
-      return ["All Terminals", ...liveTerminals.map((t) => t.code)];
-    if (g.label === "Cashier" && liveCashierNames.length)
-      return ["All Cashiers", ...liveCashierNames];
-    if (g.label === "Contractor Account" && liveContractors.length)
-      return ["All", ...liveContractors];
-    if (g.label === "Supplier" && liveSuppliers?.length)
-      return ["All", ...liveSuppliers.map((s) => s.nameEn)];
+      return liveCategories.map((c) => c.nameEn);
+    if (g.label === "Branch" && liveBranches?.length) return liveBranches.map((b) => b.nameEn);
+    if (g.label === "Terminal" && liveTerminals?.length) return liveTerminals.map((t) => t.code);
+    if (g.label === "Cashier" && liveCashiers.length) return liveCashiers;
+    if (g.label === "Contractor Account" && liveContractors.length) return liveContractors;
+    if (g.label === "Supplier" && liveSuppliers?.length) return liveSuppliers.map((s) => s.nameEn);
     if (g.label === "Employee Department" && liveDepartments?.length)
-      return ["All", ...liveDepartments.map((d) => d.name)];
+      return liveDepartments.map((d) => d.name);
     return g.options;
   };
   const shown = compact ? primaryFilterGroups.slice(0, 4) : primaryFilterGroups;
   const allGroups = [...primaryFilterGroups, ...moreFilterGroups];
-  const activeChips = allGroups
-    .filter((g) => values[g.label] && values[g.label] !== filterDefaults[g.label])
-    .map((g) => ({ label: g.label, value: values[g.label] }));
+  const activeChips: { label: string; value: string }[] = [
+    ...(dateRange.preset
+      ? [
+          {
+            label: "Date Range",
+            value:
+              dateRange.preset === "Custom Range" && dateRange.from && dateRange.to
+                ? `${dateRange.from} – ${dateRange.to}`
+                : dateRange.preset,
+          },
+        ]
+      : []),
+    ...allGroups
+      .filter((g) => (values[g.label] ?? []).length > 0)
+      .map((g) => ({
+        label: g.label,
+        value:
+          values[g.label].length === 1 ? values[g.label][0] : `${values[g.label].length} selected`,
+      })),
+  ];
 
   const { data: savedViews } = useSavedViews();
   const createSavedView = useCreateSavedView();
@@ -352,7 +358,7 @@ export function FilterBar({
                   const name = window.prompt("Name this view:");
                   if (!name) return;
                   createSavedView.mutate(
-                    { name, filters: values },
+                    { name, filtersJson: JSON.stringify({ values, dateRange }) },
                     {
                       onSuccess: () => toast.success(`View "${name}" saved.`),
                       onError: () => toast.error("Couldn't save this view."),
@@ -378,10 +384,12 @@ export function FilterBar({
                       type="button"
                       className="flex-1 truncate text-left text-xs font-medium text-foreground/80"
                       onClick={() => {
-                        setValues({
-                          ...filterDefaults,
-                          ...(JSON.parse(v.filtersJson) as Record<string, string>),
-                        });
+                        const parsed = JSON.parse(v.filtersJson) as {
+                          values: Record<string, string[]>;
+                          dateRange: DateRangeValue;
+                        };
+                        setValues({ ...filterDefaults, ...parsed.values });
+                        setDateRange(parsed.dateRange ?? { preset: "" });
                         setViewsOpen(false);
                         toast.success(`Loaded "${v.name}"`);
                       }}
@@ -453,46 +461,21 @@ export function FilterBar({
             <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               {g.label}
             </label>
-            <Select value={values[g.label]} onValueChange={(v) => setValue(g.label, v)}>
-              <SelectTrigger className="h-8 w-auto min-w-[150px] border-black/10 bg-white text-xs transition hover:border-brand/40">
-                <SelectValue placeholder={g.label} />
-              </SelectTrigger>
-              <SelectContent>
-                {liveOptions(g).map((o) => (
-                  <SelectItem key={o} value={o}>
-                    {o}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MultiSelectFilter
+              label={g.label}
+              allLabel={allLabels[g.label] ?? `All ${g.label}`}
+              options={liveOptions(g)}
+              selected={values[g.label] ?? []}
+              onChange={(next) => setValue(g.label, next)}
+            />
           </div>
         ))}
-        {values["Date Range"] === "Custom Range" && (
-          <div className="flex items-end gap-1.5">
-            <div className="flex flex-col gap-1">
-              <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                From
-              </label>
-              <input
-                type="date"
-                value={values[customRangeKeys[0]]}
-                onChange={(e) => setValue(customRangeKeys[0], e.target.value)}
-                className="h-8 rounded-md border border-black/10 bg-white px-2 text-xs"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                To
-              </label>
-              <input
-                type="date"
-                value={values[customRangeKeys[1]]}
-                onChange={(e) => setValue(customRangeKeys[1], e.target.value)}
-                className="h-8 rounded-md border border-black/10 bg-white px-2 text-xs"
-              />
-            </div>
-          </div>
-        )}
+        <div className="flex flex-col gap-1">
+          <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Date Range
+          </label>
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
+        </div>
         <Popover open={moreOpen} onOpenChange={setMoreOpen}>
           <PopoverTrigger asChild>
             <Button variant="outline" size="sm" className="h-8 gap-1 border-dashed text-xs">
@@ -508,18 +491,14 @@ export function FilterBar({
               {moreFilterGroups.map((g) => (
                 <div key={g.label} className="flex items-center justify-between gap-2">
                   <label className="text-[11px] font-medium text-foreground/80">{g.label}</label>
-                  <Select value={values[g.label]} onValueChange={(v) => setValue(g.label, v)}>
-                    <SelectTrigger className="h-8 w-40 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {g.options.map((o) => (
-                        <SelectItem key={o} value={o}>
-                          {o}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <MultiSelectFilter
+                    label={g.label}
+                    allLabel={allLabels[g.label] ?? `All ${g.label}`}
+                    options={liveOptions(g)}
+                    selected={values[g.label] ?? []}
+                    onChange={(next) => setValue(g.label, next)}
+                    triggerClassName="w-40"
+                  />
                 </div>
               ))}
             </div>
@@ -533,7 +512,9 @@ export function FilterBar({
             <button
               key={c.label}
               type="button"
-              onClick={() => setValue(c.label, filterDefaults[c.label])}
+              onClick={() =>
+                c.label === "Date Range" ? setDateRange({ preset: "" }) : setValue(c.label, [])
+              }
               className="bp-fade group inline-flex items-center gap-1 rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[11px] font-medium text-brand transition hover:bg-brand/15"
             >
               <span className="text-brand/70">{c.label}:</span> {c.value}
@@ -750,23 +731,23 @@ export function PaymentCollection() {
 
 export function TopCategories() {
   const { values, setValue, setActiveTab } = useFilters();
-  const active = values.Category;
+  const active = values.Category ?? [];
   return (
     <SectionCard
       title="Top Material Categories"
       desc="Click a category to filter inventory, stock alerts & tables."
       action={
-        active !== "All Categories" ? (
+        active.length > 0 ? (
           <Button
             size="sm"
             variant="ghost"
             className="h-7 text-xs text-brand hover:bg-brand/5 hover:text-brand"
             onClick={() => {
-              setValue("Category", "All Categories");
+              setValue("Category", []);
               toast.info("Category filter cleared");
             }}
           >
-            Clear · {active}
+            Clear · {active.join(", ")}
           </Button>
         ) : undefined
       }
@@ -777,15 +758,15 @@ export function TopCategories() {
           const tone = toneForStatus(c.health);
           const img = categoryImage[c.name];
           const catValue = categoryToFilter(c.name);
-          const isActive = active === catValue;
+          const isActive = !!catValue && active.includes(catValue);
           return (
             <button
               type="button"
               key={c.name}
               onClick={() => {
-                setValue("Category", catValue);
+                setValue("Category", catValue ? [catValue] : []);
                 setActiveTab("inventory");
-                toast.success(`Filtered by ${catValue}`, {
+                toast.success(catValue ? `Filtered by ${catValue}` : "Showing all categories", {
                   description: "Inventory & stock alerts updated.",
                 });
               }}
@@ -859,27 +840,27 @@ export function InventoryHealth({
 }) {
   const { values, setValue } = useFilters();
   const navigate = useNavigate();
-  const cat = values.Category;
+  const cat = values.Category ?? [];
   const rows =
-    cat === "All Categories"
+    cat.length === 0
       ? allRows
-      : allRows.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
+      : allRows.filter((r) => cat.some((c) => r.cat.toLowerCase() === c.toLowerCase()));
   return (
     <SectionCard
       title="Stock Health & Availability"
       desc={
-        cat === "All Categories"
+        cat.length === 0
           ? "Availability across branches and warehouses."
-          : `Filtered by category · ${cat} (${rows.length} SKUs)`
+          : `Filtered by category · ${cat.join(", ")} (${rows.length} SKUs)`
       }
       action={
         <div className="flex items-center gap-2">
-          {cat !== "All Categories" && (
+          {cat.length > 0 && (
             <Button
               variant="ghost"
               size="sm"
               className="h-7 text-xs text-muted-foreground hover:text-brand"
-              onClick={() => setValue("Category", "All Categories")}
+              onClick={() => setValue("Category", [])}
             >
               Clear filter
             </Button>

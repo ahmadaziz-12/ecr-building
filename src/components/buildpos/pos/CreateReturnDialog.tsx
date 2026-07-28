@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Minus, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useCreateReturn, useReturnPreview, type ReturnPreviewDto } from "@/lib/api/finance";
+import { useCreateReturn, useReturnPreview, type ExchangeLineInput, type ReturnPreviewDto } from "@/lib/api/finance";
+import { useProducts } from "@/lib/api/catalog";
 import type { OrderDto } from "@/lib/api/pos";
 
 const RETURN_TYPES = ["Standard", "Surplus", "Damaged", "Exchange"];
@@ -24,6 +25,9 @@ const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 
 // Module 6 (BRD §3.2): per-line quantity selection with server-computed Return Value Calculation
 // shown BEFORE the cashier confirms — greyed-out non-returnable lines, damage codes + photo reference
 // for damaged returns, restocking fee and VAT reversal displayed transparently.
+// BRD §3.2.1 exchange workflow: one replacement item the cashier has added to the swap.
+type ExchangeItem = { productId: number; sku: string; name: string; uom: string; qty: number };
+
 export function CreateReturnDialog({ order, onClose }: { order: OrderDto | null; onClose: () => void }) {
   const [type, setType] = useState("Standard");
   const [reason, setReason] = useState("");
@@ -34,25 +38,54 @@ export function CreateReturnDialog({ order, onClose }: { order: OrderDto | null;
   const createReturn = useCreateReturn();
   const previewMutation = useReturnPreview();
 
+  // BRD §3.2.1: the replacement item(s) the customer is picking for an Exchange — a real
+  // product-picker + running price difference, not just a status label.
+  const [exchangeItems, setExchangeItems] = useState<ExchangeItem[]>([]);
+  const [exchangeSearch, setExchangeSearch] = useState("");
+  const { data: products } = useProducts(type === "Exchange");
+  const exchangeSuggestions = useMemo(() => {
+    const term = exchangeSearch.trim().toLowerCase();
+    if (term.length < 1) return [];
+    return (products ?? [])
+      .filter((p) => p.sku.toLowerCase().includes(term) || p.nameEn.toLowerCase().includes(term))
+      .filter((p) => !exchangeItems.some((i) => i.productId === p.id))
+      .slice(0, 8);
+  }, [exchangeSearch, products, exchangeItems]);
+
+  function addExchangeItem(p: { id: number; sku: string; nameEn: string; stockUom: string }) {
+    setExchangeItems((items) => [...items, { productId: p.id, sku: p.sku, name: p.nameEn, uom: p.stockUom, qty: 1 }]);
+    setExchangeSearch("");
+  }
+  function setExchangeQty(productId: number, qty: number) {
+    setExchangeItems((items) => items.map((i) => (i.productId === productId ? { ...i, qty: Math.max(0.01, qty) } : i)));
+  }
+  function removeExchangeItem(productId: number) {
+    setExchangeItems((items) => items.filter((i) => i.productId !== productId));
+  }
+
   const selectedLines = useMemo(
     () => Object.entries(qtyByLine).filter(([, qty]) => qty > 0).map(([id, qty]) => ({ orderLineId: Number(id), qty })),
     [qtyByLine],
   );
+  const exchangeLineInputs: ExchangeLineInput[] = useMemo(
+    () => exchangeItems.map((i) => ({ productId: i.productId, qty: i.qty, uom: i.uom })),
+    [exchangeItems],
+  );
 
-  // Server-computed preview refreshes whenever the selection or type changes — the numbers the
-  // cashier reviews are exactly what Create will freeze onto the return.
+  // Server-computed preview refreshes whenever the selection, type, or replacement items change —
+  // the numbers the cashier reviews are exactly what Create will freeze onto the return.
   useEffect(() => {
     if (!order) return;
     let cancelled = false;
     previewMutation
-      .mutateAsync({ orderId: order.id, type, lines: selectedLines })
+      .mutateAsync({ orderId: order.id, type, lines: selectedLines, exchangeLines: type === "Exchange" ? exchangeLineInputs : undefined })
       .then((p) => !cancelled && setPreview(p))
       .catch(() => !cancelled && setPreview(null));
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order?.id, type, selectedLines]);
+  }, [order?.id, type, selectedLines, exchangeLineInputs]);
 
   function reset() {
     setType("Standard");
@@ -61,6 +94,8 @@ export function CreateReturnDialog({ order, onClose }: { order: OrderDto | null;
     setPhotoRef("");
     setQtyByLine({});
     setPreview(null);
+    setExchangeItems([]);
+    setExchangeSearch("");
   }
 
   // State must reset whenever the dialog targets a DIFFERENT order (or closes) — leftover qtyByLine
@@ -77,6 +112,10 @@ export function CreateReturnDialog({ order, onClose }: { order: OrderDto | null;
       toast.error("Select a damage reason code.");
       return;
     }
+    if (type === "Exchange" && exchangeItems.length === 0) {
+      toast.error("Add at least one replacement item.");
+      return;
+    }
     try {
       const created = await createReturn.mutateAsync({
         orderId: order.id,
@@ -85,10 +124,13 @@ export function CreateReturnDialog({ order, onClose }: { order: OrderDto | null;
         lines: selectedLines,
         damageReasonCode: type === "Damaged" ? damageCode : undefined,
         photoReference: type === "Damaged" && photoRef.trim() ? photoRef.trim() : undefined,
+        exchangeLines: type === "Exchange" ? exchangeLineInputs : undefined,
       });
       toast.success(
         created.dgrnNo ? `${created.dgrnNo} issued` : `${created.returnNo} created`,
-        { description: type === "Damaged" ? "Stock will be quarantined on approval." : `Cashback ${money(created.netCashback)} pending approval.` },
+        { description: type === "Exchange"
+          ? `Net ${(created.exchangeNetPayable ?? 0) >= 0 ? "owed" : "refund"} ${money(Math.abs(created.exchangeNetPayable ?? 0))} pending approval.`
+          : type === "Damaged" ? "Stock will be quarantined on approval." : `Cashback ${money(created.netCashback)} pending approval.` },
       );
       reset();
       onClose();
@@ -159,6 +201,67 @@ export function CreateReturnDialog({ order, onClose }: { order: OrderDto | null;
           <Input value={photoRef} onChange={(e) => setPhotoRef(e.target.value)} placeholder="Photo reference # (optional)" className="h-9" />
         )}
 
+        {/* BRD §3.2.1 exchange workflow: pick the replacement item(s) — a real product picker, not
+            just a status label. Price difference is shown live below. */}
+        {type === "Exchange" && (
+          <div className="space-y-2 rounded-lg border border-black/10 p-2.5">
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Replacement Item(s) <span className="text-critical">*</span>
+            </label>
+            <div className="relative">
+              <Input
+                value={exchangeSearch}
+                onChange={(e) => setExchangeSearch(e.target.value)}
+                placeholder="Search SKU or product name to add…"
+                className="h-8"
+              />
+              {exchangeSuggestions.length > 0 && (
+                <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-black/10 bg-white shadow-sm">
+                  {exchangeSuggestions.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => addExchangeItem(p)}
+                      className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-brand/5"
+                    >
+                      <span className="truncate font-medium text-foreground">{p.sku} — {p.nameEn}</span>
+                      <span className="shrink-0 font-mono text-muted-foreground">{money(p.sellingPrice)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {exchangeItems.length > 0 && (
+              <div className="space-y-1">
+                {exchangeItems.map((i) => (
+                  <div key={i.productId} className="flex items-center justify-between gap-2 rounded-md bg-canvas px-2 py-1.5 text-xs">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{i.name}</p>
+                      <p className="font-mono text-[10px] text-muted-foreground">{i.sku}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button type="button" onClick={() => setExchangeQty(i.productId, i.qty - 1)} className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-black/5">
+                        <Minus className="h-3 w-3" />
+                      </button>
+                      <Input
+                        type="number" min={0.01} step="any" value={i.qty} aria-label={`${i.sku} quantity`}
+                        onChange={(e) => setExchangeQty(i.productId, Number(e.target.value) || 0)}
+                        className="h-6 w-14 text-center font-mono text-xs"
+                      />
+                      <button type="button" onClick={() => setExchangeQty(i.productId, i.qty + 1)} className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-black/5">
+                        <Plus className="h-3 w-3" />
+                      </button>
+                      <button type="button" onClick={() => removeExchangeItem(i.productId)} className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-critical/10 hover:text-critical">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div>
           <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Reason <span className="text-critical">*</span>
@@ -177,8 +280,19 @@ export function CreateReturnDialog({ order, onClose }: { order: OrderDto | null;
               </div>
             )}
             <div className="flex justify-between border-t border-black/10 pt-1 text-sm font-semibold">
-              <span>Net cashback</span><span className="font-mono">{money(preview.netCashback)}</span>
+              <span>{type === "Exchange" ? "Return credit" : "Net cashback"}</span><span className="font-mono">{money(preview.netCashback)}</span>
             </div>
+            {type === "Exchange" && exchangeItems.length > 0 && (
+              <>
+                <div className="flex justify-between pt-1"><span className="text-muted-foreground">Replacement item(s) total</span><span className="font-mono">{money(preview.exchangeLinesTotal)}</span></div>
+                <div className={`flex justify-between border-t border-black/10 pt-1 text-sm font-semibold ${
+                  (preview.exchangeNetPayable ?? 0) > 0 ? "text-critical" : (preview.exchangeNetPayable ?? 0) < 0 ? "text-success" : ""
+                }`}>
+                  <span>{(preview.exchangeNetPayable ?? 0) > 0 ? "Customer pays" : (preview.exchangeNetPayable ?? 0) < 0 ? "Customer is refunded" : "Even exchange"}</span>
+                  <span className="font-mono">{money(Math.abs(preview.exchangeNetPayable ?? 0))}</span>
+                </div>
+              </>
+            )}
             {preview.requiresWindowOverride && (
               <p className="pt-1 font-medium text-warning-foreground text-[11px]">
                 ⚠ Outside the {preview.windowDays}-day return window — supervisor approval (Refund request) is required before this can be created.
@@ -191,11 +305,18 @@ export function CreateReturnDialog({ order, onClose }: { order: OrderDto | null;
           <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
           <Button
             size="sm"
-            disabled={!reason.trim() || selectedLines.length === 0 || (type === "Damaged" && !damageCode) || createReturn.isPending}
+            disabled={
+              !reason.trim() || selectedLines.length === 0 || (type === "Damaged" && !damageCode)
+              || (type === "Exchange" && exchangeItems.length === 0) || createReturn.isPending
+            }
             onClick={confirm}
             className="bg-brand text-brand-foreground hover:bg-brand/90"
           >
-            {createReturn.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : type === "Damaged" ? "Issue DGRN & Create Return" : "Create Return"}
+            {createReturn.isPending
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : type === "Damaged" ? "Issue DGRN & Create Return"
+              : type === "Exchange" ? "Create Exchange"
+              : "Create Return"}
           </Button>
         </DialogFooter>
       </DialogContent>

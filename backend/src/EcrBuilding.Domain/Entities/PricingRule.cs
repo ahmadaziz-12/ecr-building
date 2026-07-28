@@ -21,6 +21,9 @@ public class PricingRule : BaseEntity
     public string Condition { get; set; } = string.Empty;
     public string Action { get; set; } = string.Empty;
     public int Priority { get; set; }
+    // BRD §7 (CR-040): a Promotional rule's start date — null means "active immediately" (matches
+    // every other rule type's existing behavior, which never had a start gate before this field).
+    public DateTime? ValidFrom { get; set; }
     public DateTime? ValidUntil { get; set; }
     public PricingRuleStatus Status { get; set; } = PricingRuleStatus.Active;
 

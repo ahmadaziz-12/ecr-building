@@ -2,20 +2,22 @@ using System.Security.Cryptography;
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
 using EcrBuilding.Application.Admin;
+using EcrBuilding.Application.Auth;
 using EcrBuilding.Domain.Entities;
 using EcrBuilding.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using EcrBuilding.Infrastructure.Persistence;
+using EcrBuilding.Infrastructure.Persistence.Seed;
 
 namespace EcrBuilding.Api.Controllers;
 
 [ApiController]
 [Route("api/admin/users")]
 [Authorize]
-[RequireModule(ModuleArea.Admin, AccessLevel.View)]
-public class UsersController(AppDbContext db, IPasswordHasher hasher, IAuditService audit) : ControllerBase
+[RequireModule("/admin/users", PermissionAction.View)]
+public class UsersController(AppDbContext db, IPasswordHasher hasher, IAuditService audit, IPermissionResolver permissionResolver) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<UserDto>>> List(CancellationToken ct)
@@ -25,7 +27,7 @@ public class UsersController(AppDbContext db, IPasswordHasher hasher, IAuditServ
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/users", PermissionAction.Create)]
     public async Task<ActionResult<UserDto>> Create(CreateUserRequest request, CancellationToken ct)
     {
         if (await db.Users.AnyAsync(u => u.Email == request.Email, ct))
@@ -51,7 +53,7 @@ public class UsersController(AppDbContext db, IPasswordHasher hasher, IAuditServ
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/users", PermissionAction.Edit)]
     public async Task<ActionResult<UserDto>> Update(int id, UpdateUserRequest request, CancellationToken ct)
     {
         var user = await db.Users.Include(u => u.Role).Include(u => u.Branch).FirstOrDefaultAsync(u => u.Id == id, ct);
@@ -71,7 +73,7 @@ public class UsersController(AppDbContext db, IPasswordHasher hasher, IAuditServ
     }
 
     [HttpPost("{id:int}/reset-pin")]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/users", PermissionAction.Edit)]
     public async Task<ActionResult<ResetPinResponse>> ResetPin(int id, CancellationToken ct)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id, ct);
@@ -82,6 +84,76 @@ public class UsersController(AppDbContext db, IPasswordHasher hasher, IAuditServ
         await db.SaveChangesAsync(ct);
         await audit.LogAsync("admin", "USER_PIN_RESET", id.ToString(), cancellationToken: ct);
         return Ok(new ResetPinResponse(pin));
+    }
+
+    // Powers the "Custom Permissions — {user}" dialog: the user's effective grid (role default with
+    // any existing override merged in) for every page, flagging which pages already carry an
+    // explicit override so the UI can visually distinguish them from inherited role defaults.
+    [HttpGet("{id:int}/permission-overrides")]
+    public async Task<ActionResult<List<EffectivePermissionEntry>>> GetPermissionOverrides(int id, CancellationToken ct)
+    {
+        if (!await db.Users.AnyAsync(u => u.Id == id, ct)) return NotFound();
+
+        var grid = await permissionResolver.GetEffectiveGridAsync(id, ct);
+        var overridden = (await db.UserPermissionOverrides.Where(o => o.UserId == id).Select(o => o.ModuleKey).ToListAsync(ct)).ToHashSet();
+
+        var result = PermissionCatalog.Pages.Select(page =>
+        {
+            var cell = grid.TryGetValue(page.Key, out var c) ? c : PermissionCell.None;
+            return new EffectivePermissionEntry(page.Key, cell.View, cell.Create, cell.Edit, cell.Delete, cell.Approve, cell.Export, overridden.Contains(page.Key));
+        }).ToList();
+
+        return Ok(result);
+    }
+
+    // Replace-on-save, same pattern as RolesController.Update: every existing override row for this
+    // user is dropped and rebuilt from the payload. A row where every action is null carries no
+    // actual override (full inherit) and is simply omitted from the rebuild.
+    [HttpPut("{id:int}/permission-overrides")]
+    [RequireModule("/admin/users", PermissionAction.Edit)]
+    public async Task<ActionResult<List<EffectivePermissionEntry>>> SavePermissionOverrides(int id, List<UserPermissionOverrideEntry> request, CancellationToken ct)
+    {
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id, ct);
+        if (user is null) return NotFound();
+
+        var invalidKeys = request.Select(e => e.Module).Where(k => !PermissionCatalog.ValidKeys.Contains(k)).ToList();
+        if (invalidKeys.Count > 0)
+        {
+            return BadRequest(new { error = $"Unknown page(s): {string.Join(", ", invalidKeys)}" });
+        }
+
+        var existing = await db.UserPermissionOverrides.Where(o => o.UserId == id).ToListAsync(ct);
+        db.UserPermissionOverrides.RemoveRange(existing);
+
+        var rows = request
+            .Where(e => e.CanView is not null || e.CanCreate is not null || e.CanEdit is not null
+                || e.CanDelete is not null || e.CanApprove is not null || e.CanExport is not null)
+            .Select(e => new UserPermissionOverride
+            {
+                UserId = id,
+                ModuleKey = e.Module,
+                CanView = e.CanView,
+                CanCreate = e.CanCreate,
+                CanEdit = e.CanEdit,
+                CanDelete = e.CanDelete,
+                CanApprove = e.CanApprove,
+                CanExport = e.CanExport,
+            }).ToList();
+        db.UserPermissionOverrides.AddRange(rows);
+
+        var epoch = await db.PermissionsEpochs.FirstOrDefaultAsync(ct);
+        if (epoch is null) db.PermissionsEpochs.Add(new PermissionsEpoch { Value = 1 });
+        else epoch.Value++;
+
+        await db.SaveChangesAsync(ct);
+        permissionResolver.InvalidateEpoch();
+        // Log the plain request DTOs, not the EF-tracked `rows` entities — those get a `User`
+        // back-reference auto-wired by change tracking (the User is already tracked from the lookup
+        // above), and User.PermissionOverrides -> User -> PermissionOverrides -> ... is a cycle the
+        // JSON serializer can't handle.
+        await audit.LogAsync("admin", "USER_PERMISSIONS_CUSTOMIZED", id.ToString(), newValue: request, cancellationToken: ct);
+
+        return await GetPermissionOverrides(id, ct);
     }
 
     private static UserDto Map(User u) => new(

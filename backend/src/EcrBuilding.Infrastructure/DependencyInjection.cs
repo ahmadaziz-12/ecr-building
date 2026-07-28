@@ -22,11 +22,13 @@ public static class DependencyInjection
         services.AddDbContext<AppDbContext>(options =>
             options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
 
+        services.AddMemoryCache();
         services.AddScoped<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IAuditService, AuditService>();
         services.AddScoped<IStockMovementService, StockMovementService>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IPermissionResolver, PermissionResolver>();
         services.AddScoped<IPaymentGateway, MockPaymentGateway>();
         services.AddScoped<IGlPostingService, GlPostingService>();
         services.AddScoped<IZatcaService, ZatcaService>();

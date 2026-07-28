@@ -132,7 +132,7 @@ export const useSavedViews = (enabled = true) =>
 export function useCreateSavedView() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name: string; filters: Record<string, string> }) =>
+    mutationFn: (body: { name: string; filtersJson: string }) =>
       apiPost<SavedDashboardViewDto>("/api/insights/saved-views", body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["insights", "saved-views"] }),
   });

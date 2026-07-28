@@ -15,7 +15,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/catalog/categories")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/admin/categories", PermissionAction.View)]
 public class CategoriesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -26,7 +26,7 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/admin/categories", PermissionAction.Create)]
     public async Task<ActionResult<CategoryDto>> Create(UpsertCategoryRequest request, CancellationToken ct)
     {
         var category = new Category
@@ -45,7 +45,7 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/admin/categories", PermissionAction.Edit)]
     public async Task<ActionResult<CategoryDto>> Update(int id, UpsertCategoryRequest request, CancellationToken ct)
     {
         var category = await db.Categories.Include(c => c.Parent).Include(c => c.Products).FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -64,7 +64,7 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/admin/categories", PermissionAction.Delete)]
     public async Task<ActionResult<CategoryDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
     {
         var category = await db.Categories.Include(c => c.Parent).Include(c => c.Products).FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -86,7 +86,7 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
 [ApiController]
 [Route("api/catalog/products")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/stock/inventory", PermissionAction.View)]
 public class ProductsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -109,7 +109,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/inventory", PermissionAction.Create)]
     public async Task<ActionResult<ProductDto>> Create(UpsertProductRequest request, CancellationToken ct)
     {
         if (await db.Products.AnyAsync(p => p.Sku == request.Sku, ct))
@@ -122,6 +122,11 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             return BadRequest(new { error = $"\"{request.Barcode}\" is not a valid EAN-13 barcode (checksum failed)." });
         }
 
+        if (!CanSetPriceLists() && (request.ContractorPrice is not null || request.WholesalePrice is not null || request.ProjectPrice is not null))
+        {
+            return StatusCode(403, new { error = "Setting a Contractor/Wholesale/Project price requires the Manage Price List & Users permission." });
+        }
+
         var product = new Product
         {
             Sku = request.Sku, Barcode = request.Barcode, NameEn = request.NameEn, NameAr = request.NameAr,
@@ -129,8 +134,9 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             SellingPrice = request.SellingPrice, VatRate = request.VatRate, StockUom = request.StockUom,
             SellUomsJson = JsonSerializer.Serialize(request.SellUoms), Weight = request.Weight,
             Returnable = request.Returnable, ReorderLevel = request.ReorderLevel, ReorderQty = request.ReorderQty,
-            ImageUrl = request.ImageUrl, IsCutToSize = request.IsCutToSize,
+            ImageUrl = request.ImageUrl, IsCutToSize = request.IsCutToSize, CutToSizeUnit = request.CutToSizeUnit,
             SupplierId = request.SupplierId, BinLocation = request.BinLocation,
+            ContractorPrice = request.ContractorPrice, WholesalePrice = request.WholesalePrice, ProjectPrice = request.ProjectPrice,
         };
         product.UomConversions = BuildUomConversions(request.UomConversions, request.StockUom);
         product.Attributes = BuildAttributes(request.Attributes);
@@ -143,7 +149,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/inventory", PermissionAction.Edit)]
     public async Task<ActionResult<ProductDto>> Update(int id, UpsertProductRequest request, CancellationToken ct)
     {
         var product = await db.Products.Include(p => p.Category).Include(p => p.StockLevels).Include(p => p.UomConversions)
@@ -160,14 +166,23 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         {
             return BadRequest(new { error = $"\"{request.Barcode}\" is not a valid EAN-13 barcode (checksum failed)." });
         }
+        // BRD §7 (CR-039): editing Contractor/Wholesale/Project list prices is gated separately from
+        // the rest of the catalog form — a plain Inventory editor can still fix the SKU/name/stock
+        // fields on a row that already carries price-list overrides without being blocked.
+        if (!CanSetPriceLists() && (request.ContractorPrice != product.ContractorPrice
+            || request.WholesalePrice != product.WholesalePrice || request.ProjectPrice != product.ProjectPrice))
+        {
+            return StatusCode(403, new { error = "Setting a Contractor/Wholesale/Project price requires the Manage Price List & Users permission." });
+        }
 
         product.Sku = request.Sku; product.Barcode = request.Barcode; product.NameEn = request.NameEn; product.NameAr = request.NameAr;
         product.CategoryId = request.CategoryId; product.Brand = request.Brand; product.CostPrice = request.CostPrice;
         product.SellingPrice = request.SellingPrice; product.VatRate = request.VatRate; product.StockUom = request.StockUom;
         product.SellUomsJson = JsonSerializer.Serialize(request.SellUoms); product.Weight = request.Weight;
         product.Returnable = request.Returnable; product.ReorderLevel = request.ReorderLevel; product.ReorderQty = request.ReorderQty;
-        product.ImageUrl = request.ImageUrl; product.IsCutToSize = request.IsCutToSize;
+        product.ImageUrl = request.ImageUrl; product.IsCutToSize = request.IsCutToSize; product.CutToSizeUnit = request.CutToSizeUnit;
         product.SupplierId = request.SupplierId; product.BinLocation = request.BinLocation;
+        product.ContractorPrice = request.ContractorPrice; product.WholesalePrice = request.WholesalePrice; product.ProjectPrice = request.ProjectPrice;
         // Replace-all, same pattern as RolePermissions in RolesController.Update — the request's list
         // is the complete intended state, not a delta.
         db.ProductUomConversions.RemoveRange(product.UomConversions);
@@ -182,7 +197,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/inventory", PermissionAction.Delete)]
     public async Task<ActionResult<ProductDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
     {
         var product = await db.Products.Include(p => p.Category).Include(p => p.StockLevels).FirstOrDefaultAsync(p => p.Id == id, ct);
@@ -194,6 +209,12 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         await audit.LogAsync("inventory", "PRODUCT_STATUS_CHANGED", product.Id.ToString(), newValue: request, cancellationToken: ct);
         return Ok(Map(product));
     }
+
+    // BRD §7 (CR-039): "restrict manual price changes based on user permissions" — reuses the
+    // existing Role.CanManagePriceListAndUsers ceiling (already issued as a JWT claim and already
+    // editable on the Roles admin page; it just had no consumer before this).
+    private bool CanSetPriceLists() =>
+        string.Equals(User.FindFirst("posCeiling:canManagePriceListAndUsers")?.Value, "True", StringComparison.OrdinalIgnoreCase);
 
     private static List<ProductAttribute> BuildAttributes(List<ProductAttributeDto>? attributes) =>
         (attributes ?? [])
@@ -228,7 +249,8 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
                 p.SellingPrice, p.VatRate, p.StockUom, JsonSerializer.Deserialize<string[]>(p.SellUomsJson) ?? [], p.Weight,
                 p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
                 branchLevels.Sum(s => s.OnHand), branchLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
-                attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation);
+                attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit,
+                p.ContractorPrice, p.WholesalePrice, p.ProjectPrice);
         }
 
         return new(
@@ -236,14 +258,15 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             p.SellingPrice, p.VatRate, p.StockUom, JsonSerializer.Deserialize<string[]>(p.SellUomsJson) ?? [], p.Weight,
             p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
             p.StockLevels.Sum(s => s.OnHand), p.StockLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
-            attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation);
+            attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit,
+            p.ContractorPrice, p.WholesalePrice, p.ProjectPrice);
     }
 }
 
 [ApiController]
 [Route("api/catalog/bundles")]
 [Authorize]
-[RequireModule(ModuleArea.Inventory, AccessLevel.View)]
+[RequireModule("/stock/bundles", PermissionAction.View)]
 public class BundlesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -255,7 +278,7 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/bundles", PermissionAction.Create)]
     public async Task<ActionResult<BundleDto>> Create(UpsertBundleRequest request, CancellationToken ct)
     {
         if (await db.ProductBundles.AnyAsync(b => b.Code == request.Code, ct))
@@ -279,7 +302,7 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/bundles", PermissionAction.Edit)]
     public async Task<ActionResult<BundleDto>> Update(int id, UpsertBundleRequest request, CancellationToken ct)
     {
         var bundle = await db.ProductBundles.Include(b => b.Lines).FirstOrDefaultAsync(b => b.Id == id, ct);
@@ -301,7 +324,7 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Inventory, AccessLevel.Edit)]
+    [RequireModule("/stock/bundles", PermissionAction.Delete)]
     public async Task<ActionResult<BundleDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
     {
         var bundle = await db.ProductBundles.Include(b => b.Lines).ThenInclude(l => l.Product).FirstOrDefaultAsync(b => b.Id == id, ct);

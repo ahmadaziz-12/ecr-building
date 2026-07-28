@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
-import { Barcode, Check, ChevronLeft, ChevronRight, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Barcode, Check, ChevronLeft, ChevronRight, ImageOff, Loader2, Lock, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { Field, Flow, LineItemColumn } from "@/lib/buildpos/flows";
 import { useCategories, useProducts } from "@/lib/api/catalog";
 import { useBranches, useTerminals, useUsers, useRoles } from "@/lib/api/admin";
+import { useAuth } from "@/lib/api/auth";
 import { useStockLevels, useBranchStockLevels } from "@/lib/api/inventory";
 import { sellableUoms, unitPriceFor, factorToStock } from "@/lib/buildpos/uom";
+import { fileToCompressedDataUrl } from "@/lib/buildpos/image";
+import { SearchableSelect } from "@/components/buildpos/SearchableSelect";
 
 type LineItemRow = Record<string, string>;
 
@@ -166,17 +169,19 @@ function LineItemsField({
                 <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{c.label}</label>
                 {c.type === "product" ? (
                   <>
-                    <select className={inputClass} value={row[c.key] ?? ""} onChange={(e) => updateCell(rowIdx, c.key, e.target.value)}>
-                      <option value="">Select item…</option>
-                      {products?.map((p) => {
+                    <SearchableSelect
+                      value={row[c.key] ?? ""}
+                      onChange={(v) => updateCell(rowIdx, c.key, v)}
+                      placeholder="Select item…"
+                      searchPlaceholder="Search SKU or name…"
+                      options={(products ?? []).map((p) => {
                         const avail = showsAvailability ? availabilityMap!.get(p.sku) : undefined;
-                        return (
-                          <option key={p.id} value={p.sku}>
-                            {p.sku} — {p.nameEn}{avail !== undefined ? ` (Avail: ${avail})` : ""}
-                          </option>
-                        );
+                        return {
+                          value: p.sku,
+                          label: `${p.sku} — ${p.nameEn}${avail !== undefined ? ` (Avail: ${avail})` : ""}`,
+                        };
                       })}
-                    </select>
+                    />
                     {showsAvailability && rowSku && (
                       <p className={`mt-1 text-[11px] ${rowAvailable !== undefined && rowAvailable <= 0 ? "text-critical" : "text-muted-foreground"}`}>
                         {rowAvailable !== undefined ? `Available: ${rowAvailable}` : "No stock record at this location."}
@@ -246,9 +251,56 @@ function LineItemsField({
   );
 }
 
-function FieldControl({ field, value, onChange }: { field: Field; value: string; onChange: (v: string) => void }) {
+// Product photo picker: compresses the chosen file client-side into a base64 JPEG data URL (see
+// lib/buildpos/image.ts — there's no file-upload/blob-storage backend, Product.ImageUrl stores the
+// data URL directly) and previews it as a thumbnail. "Remove" clears the field back to no photo.
+function ImagePickerField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleFile(file: File | undefined) {
+    if (!file) return;
+    setLoading(true);
+    try {
+      onChange(await fileToCompressedDataUrl(file));
+    } catch {
+      toast.error("Could not read that image — try a different file.");
+    } finally {
+      setLoading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-lg border border-black/10 bg-canvas">
+        {value ? (
+          <img src={value} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <ImageOff className="h-5 w-5 text-muted-foreground" />
+        )}
+      </div>
+      <div className="flex gap-2">
+        <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => inputRef.current?.click()}>
+          {loading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+          {value ? "Change photo" : "Upload photo"}
+        </Button>
+        {value && (
+          <Button type="button" size="sm" variant="ghost" className="text-critical hover:text-critical" onClick={() => onChange("")}>
+            Remove
+          </Button>
+        )}
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+    </div>
+  );
+}
+
+function FieldControl({
+  field, value, onChange, disabled,
+}: { field: Field; value: string; onChange: (v: string) => void; disabled?: boolean }) {
   const base =
-    "h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15";
+    "h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-foreground outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15 disabled:cursor-not-allowed disabled:bg-black/[0.03] disabled:text-muted-foreground";
 
   if (field.scannable) {
     return (
@@ -260,6 +312,7 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
           placeholder={field.placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
           autoFocus
         />
       </div>
@@ -273,13 +326,14 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
         placeholder={field.placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
       />
     );
   }
   if (field.type === "select") {
     return (
-      <select className={base} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Select…</option>
+      <select className={base} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
+        <option value="">{field.placeholder ?? "Select…"}</option>
         {field.options?.map((o) => (
           <option key={o} value={o}>
             {o}
@@ -293,10 +347,11 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
     return (
       <button
         type="button"
-        onClick={() => onChange(on ? "" : "on")}
+        onClick={() => !disabled && onChange(on ? "" : "on")}
+        disabled={disabled}
         className={`inline-flex h-8 w-14 items-center rounded-full border transition ${
           on ? "border-brand/40 bg-brand" : "border-black/10 bg-canvas"
-        }`}
+        } disabled:cursor-not-allowed disabled:opacity-50`}
       >
         <span
           className={`h-6 w-6 rounded-full bg-white shadow transition ${on ? "translate-x-7" : "translate-x-1"}`}
@@ -311,8 +366,12 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
         placeholder={field.placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
       />
     );
+  }
+  if (field.type === "image") {
+    return <ImagePickerField value={value} onChange={onChange} />;
   }
   return (
     <input
@@ -321,6 +380,7 @@ function FieldControl({ field, value, onChange }: { field: Field; value: string;
       placeholder={field.placeholder}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
     />
   );
 }
@@ -344,6 +404,7 @@ export function FlowDialog({
    *  "lines" lineItems field's "line" column options, since those choices aren't static. */
   fieldOverrides?: Record<string, Partial<Field>>;
 }) {
+  const { user } = useAuth();
   const [step, setStep] = useState(0);
   const [values, setValues] = useState<Record<string, string>>({});
   const [done, setDone] = useState(false);
@@ -395,24 +456,48 @@ export function FlowDialog({
   }, [steps]);
   const { data: liveBranches } = useBranches(open && optionsSources.has("branches"));
   const { data: liveTerminals } = useTerminals(open && optionsSources.has("terminals"));
-  const { data: liveCategories } = useCategories(open && optionsSources.has("categories"));
+  const { data: liveCategories } = useCategories(
+    open && (optionsSources.has("topCategories") || optionsSources.has("subcategories")),
+  );
   const { data: liveUsers } = useUsers(open && optionsSources.has("users"));
   const { data: liveRoles } = useRoles(open && optionsSources.has("roles"));
-  const liveOptions: Record<NonNullable<Field["optionsSource"]>, string[] | undefined> = {
+  const liveOptions: Record<Exclude<NonNullable<Field["optionsSource"]>, "subcategories">, string[] | undefined> = {
     branches: liveBranches?.map((b) => b.nameEn),
     terminals: liveTerminals?.map((t) => t.code),
-    categories: liveCategories?.map((c) => c.nameEn),
+    topCategories: liveCategories?.filter((c) => c.parentId == null).map((c) => c.nameEn),
     users: liveUsers?.map((u) => u.name),
     roles: liveRoles?.map((r) => r.name),
   };
 
   function resolveField(f: Field): Field {
     const override = fieldOverrides?.[f.name];
-    const merged = override ? { ...f, ...override } : f;
-    if (!merged.optionsSource) return merged;
-    // Static options on an optionsSource field are special leading entries ("Unassigned",
-    // "— None (top level) —"); the real choices come from the live list.
-    return { ...merged, options: [...(merged.options ?? []), ...(liveOptions[merged.optionsSource] ?? [])] };
+    let merged = override ? { ...f, ...override } : f;
+    if (merged.optionsSource === "subcategories") {
+      // Narrowed live by whichever top-level category is currently picked in the sibling
+      // `dependsOn` field — e.g. picking "Electric" lists only Electric's own subcategories.
+      const parentName = merged.dependsOn ? values[merged.dependsOn] : undefined;
+      const parent = parentName
+        ? liveCategories?.find((c) => c.parentId == null && c.nameEn.toLowerCase() === parentName.toLowerCase())
+        : undefined;
+      const children = parent ? (liveCategories?.filter((c) => c.parentId === parent.id).map((c) => c.nameEn) ?? []) : [];
+      const placeholder = !parentName
+        ? "Pick a category first"
+        : children.length === 0
+          ? `No subcategories for "${parentName}" — leave blank`
+          : merged.placeholder;
+      merged = { ...merged, options: [...(merged.options ?? []), ...children], placeholder };
+    } else if (merged.optionsSource) {
+      // Static options on an optionsSource field are special leading entries ("Unassigned",
+      // "— This is a Main Category —"); the real choices come from the live list.
+      merged = { ...merged, options: [...(merged.options ?? []), ...(liveOptions[merged.optionsSource] ?? [])] };
+    }
+    // Applies to every source (static, live, or subcategory-narrowed): a field that must not
+    // offer whatever a sibling already holds — e.g. Stock Transfer's "to" can't be the "from".
+    if (merged.excludeValueOf && merged.options) {
+      const excluded = values[merged.excludeValueOf];
+      if (excluded) merged = { ...merged, options: merged.options.filter((o) => o !== excluded) };
+    }
+    return merged;
   }
 
   function summarizeLineItems(field: Field, raw: string): string {
@@ -437,13 +522,35 @@ export function FlowDialog({
         .map((rawF) => {
           const f = resolveField(rawF);
           const raw = values[f.name];
-          const val = f.type === "lineItems" ? summarizeLineItems(f, raw ?? "") : raw;
+          // An image field's value is a giant base64 data URL — never worth dumping into the
+          // review step as text.
+          const val = f.type === "lineItems" ? summarizeLineItems(f, raw ?? "") : f.type === "image" ? (raw ? "Photo attached" : "") : raw;
           return { label: f.label, val };
         })
         .filter((x) => x.val && x.val.trim().length > 0),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [steps, values, fieldOverrides]);
+
+  // Setting a field's value cascades to the two kinds of field that depend on it, because both
+  // can be left holding a selection their own option list no longer offers:
+  //  • excludeValueOf — e.g. changing Stock Transfer's "from" to whatever "to" already held would
+  //    leave "to" showing a value it now excludes.
+  //  • dependsOn — e.g. Subcategory is narrowed by Category, so changing Category strands a
+  //    subcategory that doesn't belong under the new parent.
+  // Both sweep every step, not just the current one, since a dependent field can live further on.
+  function handleFieldChange(fieldName: string, v: string) {
+    setValues((s) => {
+      const next = { ...s, [fieldName]: v };
+      for (const step of steps) {
+        for (const field of step.fields) {
+          if (field.excludeValueOf === fieldName && next[field.name] === v) next[field.name] = "";
+          if (field.dependsOn === fieldName) next[field.name] = "";
+        }
+      }
+      return next;
+    });
+  }
 
   function reset() {
     setStep(0);
@@ -456,7 +563,39 @@ export function FlowDialog({
     if (!v) setTimeout(reset, 200);
   }
 
+  // A field's `required` flag (flows.ts) was previously cosmetic — it drew a red asterisk but
+  // never actually blocked Continue/Save, so a flow could be submitted with blank required
+  // fields or a lineItems field carrying zero rows. This makes it real: a lineItems field counts
+  // as satisfied only once at least one row has some cell filled in.
+  function isFieldSatisfied(f: Field): boolean {
+    if (!f.required) return true;
+    const val = values[f.name] ?? f.default;
+    if (f.type === "lineItems") {
+      return parseRows(val ?? "").some((row) => Object.values(row).some((v) => v != null && String(v).trim() !== ""));
+    }
+    return !!val && val.trim().length > 0;
+  }
+
+  function firstMissingField(stepIdx: number): Field | undefined {
+    return steps[stepIdx]?.fields.map(resolveField).find((f) => !isFieldSatisfied(f));
+  }
+
+  function firstMissingFieldOverall(): Field | undefined {
+    for (let i = 0; i < steps.length; i++) {
+      const missing = firstMissingField(i);
+      if (missing) return missing;
+    }
+    return undefined;
+  }
+
   async function save() {
+    const missing = firstMissingFieldOverall();
+    if (missing) {
+      toast.error(`${missing.label} is required.`, {
+        description: missing.type === "lineItems" ? "Add at least one line item." : undefined,
+      });
+      return;
+    }
     if (!onSubmit) {
       setDone(true);
       toast.success(flow?.successTitle ?? `${flow?.title} saved`, {
@@ -482,6 +621,8 @@ export function FlowDialog({
   if (!flow) return null;
   const Icon = flow.icon;
   const current = steps[step];
+  const stepMissing = isReview ? undefined : firstMissingField(step);
+  const overallMissing = isReview ? firstMissingFieldOverall() : undefined;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -614,11 +755,13 @@ export function FlowDialog({
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   {current?.fields.map((rawF) => {
                     const f = resolveField(rawF);
+                    const locked = f.requiresCeiling ? !(user?.posCeilings[f.requiresCeiling] ?? false) : false;
                     return (
                       <div key={f.name} className={f.full ? "md:col-span-2" : ""}>
                         <label className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                           {f.label}
                           {f.required && <span className="text-critical">*</span>}
+                          {locked && <Lock className="h-3 w-3 text-muted-foreground" aria-label="Locked by permission" />}
                         </label>
                         {f.type === "lineItems" ? (
                           <LineItemsField
@@ -631,7 +774,8 @@ export function FlowDialog({
                           <FieldControl
                             field={f}
                             value={values[f.name] ?? f.default ?? ""}
-                            onChange={(v) => setValues((s) => ({ ...s, [f.name]: v }))}
+                            onChange={(v) => handleFieldChange(f.name, v)}
+                            disabled={locked}
                           />
                         )}
                         {f.hint && <p className="mt-1 text-[11px] text-muted-foreground">{f.hint}</p>}
@@ -660,7 +804,7 @@ export function FlowDialog({
                   <Button
                     size="sm"
                     onClick={save}
-                    disabled={done || saving}
+                    disabled={done || saving || !!overallMissing}
                     className="gap-1 bg-brand text-brand-foreground hover:bg-brand/90"
                   >
                     <Check className="h-4 w-4" /> {saving ? "Saving…" : `Save ${flow.title}`}
@@ -669,6 +813,7 @@ export function FlowDialog({
                   <Button
                     size="sm"
                     onClick={() => setStep((s) => s + 1)}
+                    disabled={!!stepMissing}
                     className="gap-1 bg-brand text-brand-foreground hover:bg-brand/90"
                   >
                     Continue <ChevronRight className="h-4 w-4" />

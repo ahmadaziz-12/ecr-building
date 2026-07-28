@@ -19,10 +19,10 @@ public static class UserClaimsFactory
             ["approvalCap"] = (user.Role?.ApprovalCap ?? 0).ToString(CultureInfo.InvariantCulture),
         };
         if (user.BranchId is not null) claims["branchId"] = user.BranchId.Value.ToString();
-        foreach (var perm in user.Role?.Permissions ?? [])
-        {
-            claims[$"perm:{perm.Module}"] = perm.Level.ToString();
-        }
+
+        // Page permissions are deliberately NOT baked in here — RequireModuleAttribute resolves them
+        // per request via IPermissionResolver instead, so a "Customize Permissions" edit takes
+        // effect on the user's very next request rather than waiting for the next token refresh.
 
         // BRD §10.1 POS authorization ceilings (see Role.cs) — a ceiling claim is omitted entirely
         // when the underlying value is null, which callers must read as "no cap".

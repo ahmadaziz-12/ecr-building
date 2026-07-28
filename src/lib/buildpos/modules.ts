@@ -16,7 +16,11 @@ export type ModuleCatalog = {
   actions?: string[];
   primaryAction?: string;
   layout?: "table" | "cards"; // default "table"
-  cardConfig?: { titleCol: number; subtitleCol?: number; statCols?: { label: string; col: number }[] };
+  cardConfig?: {
+    titleCol: number;
+    subtitleCol?: number;
+    statCols?: { label: string; col: number }[];
+  };
   dateRangeFilters?: string[]; // filter labels rendered as a from/to date-input pair instead of a select
 };
 
@@ -119,7 +123,9 @@ export const catalog: ModuleCatalog[] = [
       { label: "In Transit", value: "9", sub: "Branch transfers", tone: "info" },
       { label: "Adjustments Today", value: "4", sub: "1 pending approval", tone: "warning" },
     ],
-    filters: [...F.base, "Category", "Warehouse", "Availability"],
+    // Warehouse stock is a live snapshot with no date or branch column of its own (the branch is
+    // a property of the warehouse) — F.base's "Date Range"/"Branch" had nothing to filter here.
+    filters: ["Search", "Item", "Category", "Warehouse", "Availability"],
     tableTitle: "Stock Availability",
     columns: [
       "SKU",
@@ -201,9 +207,20 @@ export const catalog: ModuleCatalog[] = [
       { label: "Critical / Out", value: "—", sub: "Can't be sold right now", tone: "critical" },
       { label: "Stock Value", value: "—", sub: "At cost, all branches", tone: "info" },
     ],
-    filters: [...F.base, "Category", "Branch", "Availability"],
+    filters: ["Search", "Item", "Category", "Branch", "Availability"],
     tableTitle: "Branch Stock Availability",
-    columns: ["SKU", "Product", "Category", "Branch", "On Hand", "Reserved", "Available", "Reorder", "Value (ر.س)", "Status"],
+    columns: [
+      "SKU",
+      "Product",
+      "Category",
+      "Branch",
+      "On Hand",
+      "Reserved",
+      "Available",
+      "Reorder",
+      "Value (ر.س)",
+      "Status",
+    ],
     rows: [],
     statusCol: 9,
     actions: ["Export"],
@@ -242,7 +259,9 @@ export const catalog: ModuleCatalog[] = [
       { label: "Bundle Items", value: "62", sub: "12 expired", tone: "info" },
       { label: "Price Changes", value: "18", sub: "Last 7 days", tone: "info" },
     ],
-    filters: [...F.base, "Category", "Brand", "Supplier", "UOM Type", "VAT Rate"],
+    // The product master is a catalog, not a transaction log — no date or branch dimension. Status
+    // stays (it's a real column); "Supplier" doesn't exist on this table and is dropped.
+    filters: ["Search", "Category", "Brand", "UOM Type", "VAT Rate", "Status"],
     tableTitle: "Product Master",
     columns: [
       "SKU",
@@ -356,7 +375,8 @@ export const catalog: ModuleCatalog[] = [
       { label: "Batches Received", value: "9", sub: "This week", tone: "info" },
       { label: "Auto-Alerts", value: "On", sub: "30/15/7 days", tone: "success" },
     ],
-    filters: [...F.base, "Category", "Days to Expiry"],
+    filters: ["Search", "Item", "Warehouse", "Days to Expiry", "Status"],
+    dateRangeFilters: ["Expires"],
     tableTitle: "Expiry & Batch Ledger",
     columns: [
       "SKU",
@@ -366,7 +386,7 @@ export const catalog: ModuleCatalog[] = [
       "Expires",
       "Days Left",
       "Qty",
-      "Branch",
+      "Location",
       "Status",
     ],
     rows: [
@@ -445,7 +465,7 @@ export const catalog: ModuleCatalog[] = [
       { label: "Discrepancies", value: "4", sub: "Under review", tone: "warning" },
       { label: "Value Held", value: "4,180,500 ر.س", sub: "All warehouses", tone: "info" },
     ],
-    filters: ["Branch", "Warehouse", "Status"],
+    filters: ["Search", "Branch", "Type", "Status"],
     tableTitle: "Warehouse Master",
     columns: [
       "Code",
@@ -494,9 +514,21 @@ export const catalog: ModuleCatalog[] = [
       { label: "This Week", value: "34 Transfers", sub: "5 branches", tone: "info" },
       { label: "Approval Pending", value: "3", sub: "Manager sign-off", tone: "warning" },
     ],
-    filters: ["Date", "From Branch", "To Branch", "Status"],
+    // Transfers carry an ETA, not a created date — that's the column a date filter can act on.
+    filters: ["Search", "From Branch", "To Branch", "Approver", "Status"],
+    dateRangeFilters: ["ETA"],
     tableTitle: "Transfer Ledger",
-    columns: ["Transfer #", "From", "To", "SKUs", "Qty", "Value (ر.س)", "Approver", "ETA", "Status"],
+    columns: [
+      "Transfer #",
+      "From",
+      "To",
+      "SKUs",
+      "Qty",
+      "Value (ر.س)",
+      "Approver",
+      "ETA",
+      "Status",
+    ],
     rows: [
       ["TR-2041", "WH-RUH-CW", "Jeddah", 22, 480, "38,400", "—", "03 Jul", "In Transit"],
       ["TR-2042", "WH-JED-CW", "Makkah", 8, 140, "12,200", "—", "02 Jul", "In Transit"],
@@ -560,7 +592,8 @@ export const catalog: ModuleCatalog[] = [
       { label: "Reimbursements", value: "5", sub: "4,200 ر.س", tone: "warning" },
       { label: "Recurring", value: "18 rules", sub: "Utilities, rent", tone: "info" },
     ],
-    filters: ["Date", "Branch", "Category", "Status"],
+    filters: ["Search", "Branch", "Category", "Method", "Status"],
+    dateRangeFilters: ["Date"],
     tableTitle: "Expense Ledger",
     columns: [
       "Expense #",
@@ -666,7 +699,10 @@ export const catalog: ModuleCatalog[] = [
       { label: "Avg Lead Time", value: "6.4 days", sub: "-0.5 vs last month", tone: "success" },
       { label: "Match Rate", value: "94%", sub: "PO ↔ Invoice", tone: "success" },
     ],
-    filters: ["Date", "Supplier", "Branch", "Status"],
+    // The PO ledger's only date column is the expected-delivery ETA — that's what a date range
+    // here can narrow. (Ordered-date filtering lives on the Purchase Order Report, server-side.)
+    filters: ["Search", "Supplier", "Branch(es)", "Status"],
+    dateRangeFilters: ["ETA"],
     tableTitle: "Purchase Order Ledger",
     columns: ["PO #", "Supplier", "Branch", "ETA", "Lines", "PO Value", "Received %", "Status"],
     rows: [
@@ -833,7 +869,8 @@ export const catalog: ModuleCatalog[] = [
       { label: "Pending Approval", value: "3", sub: "Damaged / High-value", tone: "warning" },
       { label: "Quarantine Added", value: "17 Items", sub: "QC review", tone: "warning" },
     ],
-    filters: ["Date", "Branch", "Type", "Status", "Cashier"],
+    filters: ["Search", "Branch", "Type", "Status", "Cashier", "Reason"],
+    dateRangeFilters: ["Date"],
     tableTitle: "Return Ledger",
     columns: [
       "Return #",
@@ -925,7 +962,8 @@ export const catalog: ModuleCatalog[] = [
       { label: "Zero-rated Items", value: "12 SKUs", sub: "Export sales", tone: "info" },
       { label: "Fee Rules", value: "6", sub: "Restock, delivery", tone: "info" },
     ],
-    filters: ["Period", "Branch", "Type", "Status"],
+    filters: ["Search", "Branch", "Type", "Status"],
+    dateRangeFilters: ["Effective From"],
     tableTitle: "Tax & Fee Configuration",
     columns: [
       "Code",
@@ -1089,18 +1127,24 @@ export const catalog: ModuleCatalog[] = [
       { label: "Rejected by Supplier", value: "1", sub: "Escalated", tone: "critical" },
       { label: "Avg Cycle Time", value: "8.2 days", sub: "-1.4 days", tone: "success" },
     ],
-    filters: ["Date", "Supplier", "Branch", "Reason", "Status"],
+    // "Date" belongs in dateRangeFilters, not filters: as a plain column filter it renders as an
+    // exact-match multiselect over formatted day labels (and, since the column used to be called
+    // "Created", resolved to nothing at all and rendered as an inert chip). As a range filter it
+    // gets the shared presets + custom range and actually narrows the ledger.
+    filters: ["Search", "Supplier", "Branch", "Warehouse", "Reason", "Status"],
+    dateRangeFilters: ["Date"],
     tableTitle: "RTS Ledger",
     columns: [
       "RTS #",
       "Supplier",
       "Branch",
+      "Warehouse",
       "Linked PO",
       "Reason",
       "Items",
       "Value (ر.س)",
       "Credit Note",
-      "Created",
+      "Date",
       "Status",
     ],
     rows: [
@@ -1183,9 +1227,25 @@ export const catalog: ModuleCatalog[] = [
     ],
     filters: ["Search"],
     layout: "cards",
-    cardConfig: { titleCol: 1, subtitleCol: 2, statCols: [{ label: "Terminals", col: 5 }, { label: "Orders", col: 6 }] },
+    cardConfig: {
+      titleCol: 1,
+      subtitleCol: 2,
+      statCols: [
+        { label: "Terminals", col: 5 },
+        { label: "Orders", col: 6 },
+      ],
+    },
     tableTitle: "Branch Master",
-    columns: ["Code", "Branch", "City", "Business Hours", "VAT No.", "Terminals", "Orders", "Status"],
+    columns: [
+      "Code",
+      "Branch",
+      "City",
+      "Business Hours",
+      "VAT No.",
+      "Terminals",
+      "Orders",
+      "Status",
+    ],
     rows: [
       ["BR-01", "Riyadh Main", "Riyadh", "07:00 - 23:00", "310000000001", 6, 412, "Active"],
       ["BR-02", "Jeddah Branch", "Jeddah", "08:00 - 22:00", "310000000002", 5, 298, "Active"],
@@ -1239,12 +1299,66 @@ export const catalog: ModuleCatalog[] = [
     tableTitle: "Device Registry",
     columns: ["Device ID", "Type", "Terminal", "Branch", "Model", "Sync", "Last Test", "Status"],
     rows: [
-      ["DEV-1101", "Receipt Printer", "POS-01", "Riyadh Main", "Epson TM-T88VI", "Synced", "02 Jul", "Healthy"],
-      ["DEV-1102", "Barcode Scanner", "POS-01", "Riyadh Main", "Zebra DS2208", "Synced", "02 Jul", "Healthy"],
-      ["DEV-1103", "Cash Drawer", "POS-01", "Riyadh Main", "APG Vasario", "Synced", "01 Jul", "Healthy"],
-      ["DEV-1104", "Card Reader (Mada)", "POS-01", "Riyadh Main", "Ingenico Move/5000", "Synced", "02 Jul", "Healthy"],
-      ["DEV-1130", "Receipt Printer", "POS-03", "Riyadh Main", "Epson TM-T88VI", "Failed", "01 Jul", "Disconnected"],
-      ["DEV-1140", "Label Printer", "POS-04", "Riyadh Main", "Zebra ZD421", "Pending", "30 Jun", "Faulty"],
+      [
+        "DEV-1101",
+        "Receipt Printer",
+        "POS-01",
+        "Riyadh Main",
+        "Epson TM-T88VI",
+        "Synced",
+        "02 Jul",
+        "Healthy",
+      ],
+      [
+        "DEV-1102",
+        "Barcode Scanner",
+        "POS-01",
+        "Riyadh Main",
+        "Zebra DS2208",
+        "Synced",
+        "02 Jul",
+        "Healthy",
+      ],
+      [
+        "DEV-1103",
+        "Cash Drawer",
+        "POS-01",
+        "Riyadh Main",
+        "APG Vasario",
+        "Synced",
+        "01 Jul",
+        "Healthy",
+      ],
+      [
+        "DEV-1104",
+        "Card Reader (Mada)",
+        "POS-01",
+        "Riyadh Main",
+        "Ingenico Move/5000",
+        "Synced",
+        "02 Jul",
+        "Healthy",
+      ],
+      [
+        "DEV-1130",
+        "Receipt Printer",
+        "POS-03",
+        "Riyadh Main",
+        "Epson TM-T88VI",
+        "Failed",
+        "01 Jul",
+        "Disconnected",
+      ],
+      [
+        "DEV-1140",
+        "Label Printer",
+        "POS-04",
+        "Riyadh Main",
+        "Zebra ZD421",
+        "Pending",
+        "30 Jun",
+        "Faulty",
+      ],
     ],
     statusCol: 7,
     actions: ["Pair Device", "Test Print", "Open Drawer", "Troubleshoot"],
@@ -1267,7 +1381,9 @@ export const catalog: ModuleCatalog[] = [
       { label: "Basket Size", value: "171 ر.س", sub: "B2B: 1,240 ر.س", tone: "info" },
       { label: "Discount Ratio", value: "3.8%", sub: "Within target", tone: "success" },
     ],
-    filters: ["Period", "Branch", "Category", "Customer Type", "Payment Method"],
+    // This page is a pre-aggregated segment breakdown — the only real cut is the segment itself.
+    // Period/branch/category slicing lives on Insights → Reports, which filters server-side.
+    filters: ["Search", "Segment"],
     tableTitle: "Sales by Segment",
     columns: [
       "Segment",
@@ -1417,7 +1533,7 @@ export const catalog: ModuleCatalog[] = [
       { label: "Top Cashier", value: "Ahmed Al-Harbi", sub: "128% productivity", tone: "success" },
       { label: "Review Cycle", value: "Monthly", sub: "Next: 05 Aug", tone: "info" },
     ],
-    filters: ["Period", "Branch", "Owner", "Category"],
+    filters: ["Search", "Category", "Owner", "Period", "Status"],
     tableTitle: "KPI Scorecard",
     columns: ["KPI", "Category", "Owner", "Target", "Actual", "Variance", "Status", "Period"],
     rows: [
@@ -1484,7 +1600,8 @@ export const catalog: ModuleCatalog[] = [
       { label: "Data Quality Score", value: "96%", sub: "Healthy", tone: "success" },
       { label: "Sensitive Masking", value: "On", sub: "PII / Margin", tone: "success" },
     ],
-    filters: ["Feed", "Status", "Period"],
+    filters: ["Search", "Feed", "Source", "Frequency", "Status"],
+    dateRangeFilters: ["Last Run"],
     tableTitle: "Data Feed Health",
     columns: [
       "Feed",
@@ -1565,7 +1682,7 @@ export const catalog: ModuleCatalog[] = [
       { label: "Compliance Tasks", value: "3 due", sub: "This week", tone: "warning" },
       { label: "License Usage", value: "26 / 30", sub: "Terminals", tone: "success" },
     ],
-    filters: ["Module", "Severity", "Date"],
+    filters: ["Search", "Area", "Owner", "Status"],
     tableTitle: "Health Overview",
     columns: ["Area", "Status", "Since", "Owner", "Metric", "Value", "SLA", "Next Action"],
     rows: [
@@ -1611,29 +1728,23 @@ export const catalog: ModuleCatalog[] = [
       { label: "Non-Returnable", value: "3", sub: "Paint, Chem, Custom Glass", tone: "warning" },
       { label: "Recently Edited", value: "6", sub: "Last 7 days", tone: "info" },
     ],
-    filters: ["Level", "Return Rule", "Search"],
+    filters: ["Search", "Parent", "Return Rule", "Default UOM", "Status"],
     tableTitle: "Category Tree",
-    columns: [
-      "Code",
-      "Category",
-      "Parent",
-      "SKUs",
-      "Attributes",
-      "Return Rule",
-      "Default UOM",
-      "Status",
-    ],
+    columns: ["Code", "Category", "SKUs", "Attributes", "Return Rule", "Default UOM", "Status"],
     rows: [
-      ["CAT-01", "Cement", "—", 42, 6, "Standard 15 days", "Bag", "Active"],
-      ["CAT-02", "Aggregates", "—", 28, 4, "Standard 15 days", "Ton", "Active"],
-      ["CAT-03", "Steel & Rebar", "—", 84, 8, "Standard 15 days", "Bundle", "Active"],
-      ["CAT-04", "Tiles & Flooring", "—", 612, 10, "Standard 15 days", "Box", "Active"],
-      ["CAT-05", "Paint & Chemicals", "—", 384, 12, "Non-Returnable", "Can", "Active"],
-      ["CAT-06", "Plumbing", "—", 940, 6, "Standard 15 days", "Piece", "Active"],
-      ["CAT-07", "Electrical", "—", 820, 8, "Standard 15 days", "Piece", "Active"],
-      ["CAT-08", "Glass & Aluminum", "—", 128, 10, "Non-Returnable (Custom)", "m²", "Active"],
+      ["CAT-01", "Cement", 42, 6, "Standard 15 days", "Bag", "Active"],
+      ["CAT-02", "Aggregates", 28, 4, "Standard 15 days", "Ton", "Active"],
+      ["CAT-03", "Steel & Rebar", 84, 8, "Standard 15 days", "Bundle", "Active"],
+      ["CAT-04", "Tiles & Flooring", 612, 10, "Standard 15 days", "Box", "Active"],
+      ["CAT-05", "Paint & Chemicals", 384, 12, "Non-Returnable", "Can", "Active"],
+      ["CAT-06", "Plumbing", 940, 6, "Standard 15 days", "Piece", "Active"],
+      ["CAT-06a", "↳ Pipes", 420, 4, "Standard 15 days", "Piece", "Active"],
+      ["CAT-07", "Electrical", 820, 8, "Standard 15 days", "Piece", "Active"],
+      ["CAT-07a", "↳ Switches", 260, 4, "Standard 15 days", "Piece", "Active"],
+      ["CAT-07b", "↳ Wire", 340, 3, "Standard 15 days", "Roll", "Active"],
+      ["CAT-08", "Glass & Aluminum", 128, 10, "Non-Returnable (Custom)", "m²", "Active"],
     ],
-    statusCol: 7,
+    statusCol: 6,
     actions: ["Create Category", "Export"],
     primaryAction: "Create Category",
   },
@@ -1650,7 +1761,7 @@ export const catalog: ModuleCatalog[] = [
       { label: "Failed Tests", value: "2", sub: "Fix before activate", tone: "critical" },
       { label: "Last Change", value: "12 min ago", sub: "By admin_ali", tone: "info" },
     ],
-    filters: ["Module", "Type", "Status", "Branch"],
+    filters: ["Search", "Module", "Trigger", "Approver", "Status"],
     tableTitle: "Rules Catalog",
     columns: [
       "Rule ID",
@@ -1847,46 +1958,6 @@ export const catalog: ModuleCatalog[] = [
     primaryAction: "Add User",
   },
   {
-    path: "/admin/roles",
-    group: "Admin",
-    title: "Roles & Permissions",
-    desc: "Permission templates, approval thresholds and column masking.",
-    kpis: [
-      { label: "Roles", value: "6", sub: "System + custom", tone: "info" },
-      { label: "Permissions", value: "148", sub: "12 modules", tone: "info" },
-      { label: "Approval Thresholds", value: "18", sub: "Discount / Refund / Void", tone: "info" },
-      { label: "Masked Columns", value: "12", sub: "Margin / VAT reg", tone: "warning" },
-      { label: "Recent Changes", value: "3", sub: "Last 7 days", tone: "warning" },
-      { label: "Dual-Approval Rules", value: "6", sub: "Sensitive settings", tone: "success" },
-      { label: "Users Assigned", value: "42", sub: "100% mapped", tone: "success" },
-      { label: "Access Denied (24h)", value: "7", sub: "Logged", tone: "info" },
-    ],
-    filters: ["Role", "Module", "Search"],
-    tableTitle: "Role Matrix",
-    columns: [
-      "Role",
-      "Users",
-      "POS",
-      "Orders",
-      "Inventory",
-      "Finance",
-      "Admin",
-      "Approval Cap (ر.س)",
-      "Status",
-    ],
-    rows: [
-      ["Tenant Admin", 2, "Full", "Full", "Full", "Full", "Full", "Unlimited", "Active"],
-      ["Store Manager", 6, "Full", "Full", "Edit", "View", "Edit", "5,000", "Active"],
-      ["Supervisor", 8, "Full", "Full", "View", "View", "None", "1,000", "Active"],
-      ["Cashier", 20, "Edit", "View", "View", "None", "None", "0", "Active"],
-      ["Inventory Mgr", 3, "View", "View", "Full", "Edit", "None", "50,000", "Active"],
-      ["Auditor", 3, "View", "View", "View", "View", "View", "0", "Active"],
-    ],
-    statusCol: 8,
-    actions: ["Create Role", "Assign Permissions", "Audit"],
-    primaryAction: "Create Role",
-  },
-  {
     path: "/admin/maintenance",
     group: "Admin",
     title: "Maintenance",
@@ -1991,7 +2062,8 @@ export const catalog: ModuleCatalog[] = [
       { label: "Avg Clearance Time", value: "1.8s", sub: "Healthy", tone: "success" },
       { label: "CSID Valid Until", value: "12 May 2027", sub: "Auto-renew on", tone: "success" },
     ],
-    filters: ["Date", "Branch", "Type", "Status"],
+    filters: ["Search", "Type", "Status"],
+    dateRangeFilters: ["Submitted"],
     tableTitle: "Invoice Submission Log",
     columns: [
       "Invoice",
@@ -2159,7 +2231,8 @@ export const catalog: ModuleCatalog[] = [
       { label: "Sign-offs Pending", value: "2", sub: "Q2 VAT return", tone: "warning" },
       { label: "Encryption at Rest", value: "AES-256", sub: "Enabled", tone: "success" },
     ],
-    filters: ["Control", "Owner", "Status", "Period"],
+    filters: ["Search", "Framework", "Owner", "Status"],
+    dateRangeFilters: ["Next Due"],
     tableTitle: "Compliance Controls",
     columns: [
       "Control",
@@ -2245,7 +2318,7 @@ export const catalog: ModuleCatalog[] = [
       { label: "Shift Rules", value: "4", sub: "Open/Close/Float/IO", tone: "info" },
       { label: "Effective Date", value: "01 Jul 2026", sub: "Last change", tone: "info" },
     ],
-    filters: ["Setting Group", "Branch", "Status"],
+    filters: ["Search", "Group", "Scope", "Status"],
     tableTitle: "POS Configuration",
     columns: ["Setting", "Group", "Scope", "Value", "Effective From", "Changed By", "Status"],
     rows: [
@@ -2331,7 +2404,8 @@ export const catalog: ModuleCatalog[] = [
       { label: "Tamper Checks", value: "OK", sub: "Chain valid", tone: "success" },
       { label: "Storage Used", value: "22 GB", sub: "of 100 GB", tone: "info" },
     ],
-    filters: ["Module", "Action", "User", "Severity", "Date"],
+    filters: ["Search", "Module", "Action", "User", "Branch", "Severity"],
+    dateRangeFilters: ["Date"],
     tableTitle: "Audit Trail",
     columns: [
       "Event #",
@@ -2442,7 +2516,7 @@ export const catalog: ModuleCatalog[] = [
       { label: "Add-ons", value: "3", sub: "BI, WMS, ZATCA+", tone: "info" },
       { label: "Invoices Paid YTD", value: "6", sub: "All on time", tone: "success" },
     ],
-    filters: ["Period", "Type"],
+    filters: ["Search", "Entitlement", "Status"],
     tableTitle: "Subscription & Entitlements",
     columns: [
       "Module / Feature",

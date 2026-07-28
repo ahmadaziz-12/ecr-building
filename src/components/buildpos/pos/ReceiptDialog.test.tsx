@@ -16,7 +16,7 @@ function baseOrder(overrides: Partial<OrderDto> = {}): OrderDto {
     cashierName: "Cashier", customerId: 1, customerName: "Ahmed Al-Rashid", type: "Retail", status: "Completed",
     paymentStatus: "Paid", subTotal: 100, discountTotal: 0, vatTotal: 0, feesTotal: 0, grandTotal: 100,
     createdAt: new Date(0).toISOString(),
-    lines: [{ id: 1, productId: 1, sku: "CEM-001", productName: "Portland Cement 50kg", qty: 1, unitPrice: 100, discountPct: 0, vatRate: 0, lineTotal: 100, uom: "Bag", stockQty: 1, lengthM: null, widthM: null, bundleId: null, bundleName: null }],
+    lines: [{ id: 1, productId: 1, sku: "CEM-001", productName: "Portland Cement 50kg", qty: 1, unitPrice: 100, discountPct: 0, vatRate: 0, lineTotal: 100, uom: "Bag", stockQty: 1, lengthM: null, widthM: null, heightM: null, bundleId: null, bundleName: null, lineWeight: 0 }],
     payments: [{ method: "Cash", amount: 100, referenceNumber: null, status: "Completed", createdAt: new Date(0).toISOString() }],
     fees: [],
     loyaltyPointsEarned: null, loyaltyPointsBalance: null, loyaltyNextTierThreshold: null, loyaltyPointsRedeemed: null,

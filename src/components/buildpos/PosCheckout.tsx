@@ -33,13 +33,21 @@ import {
   Tag,
   User,
   ChevronRight,
+  ChevronDown,
+  Check,
+  FolderTree,
   ReceiptText,
   Truck,
+  StickyNote,
+  PenLine,
+  Play,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { productImage } from "@/lib/buildpos/product-images";
-import { useProducts, type ProductUomConversionDto } from "@/lib/api/catalog";
-import { areaOf, factorToStock, sellableUoms, toStockQty, unitPriceFor } from "@/lib/buildpos/uom";
+import { categoryDisplayLabel, useCategories, useProducts, type CategoryDto, type ProductUomConversionDto, type CutToSizeUnit } from "@/lib/api/catalog";
+import { areaOf, lengthOf, volumeOf, factorToStock, sellableUoms, toStockQty, unitPriceFor } from "@/lib/buildpos/uom";
 import { nextTierProgress, qualifiesForFreeDelivery, tierDiscountPct, type LoyaltyTierConfig } from "@/lib/buildpos/loyalty";
 import { useBundles, type BundleDto } from "@/lib/api/bundles";
 import { enqueueCheckout, isNetworkError, newClientRequestId, readQueue, replayQueue } from "@/lib/buildpos/offline-queue";
@@ -47,7 +55,7 @@ import { useCreateQuotation } from "@/lib/api/pos";
 import { apiPost } from "@/lib/api/client";
 import { useTerminals, useBranches } from "@/lib/api/admin";
 import {
-  useCustomers, useCheckout, useHoldSale, useResumeSale, useParkedSales, useCreateCustomer, useLoyaltyConfig,
+  useCustomers, useCheckout, useHoldSale, useResumeSale, useParkedSales, useCreateCustomer, useLoyaltyConfig, usePricingRules,
   lookupCustomerByPhone, validateCoupon, type CustomerDto, type ValidateCouponResponse, type PaymentInput, type DeliveryDetailsInput,
 } from "@/lib/api/pos";
 import { useZonesApi, useDriversApi, useVehiclesApi } from "@/lib/api/delivery";
@@ -80,6 +88,14 @@ const productIcon: Record<string, IconType> = {
   "SEAL-SILC-300": Droplet,
 };
 
+// BRD §2.3 items 5-6: which dimensions matter — and how they combine into the billed qty — depends
+// on the product's cut-to-size unit. Mirrors the backend's OrdersController.Checkout branch exactly.
+function cutToSizeQty(unit: CutToSizeUnit, lengthM: number, widthM: number, heightM: number): number {
+  if (unit === "Length") return lengthOf(lengthM);
+  if (unit === "Volume") return volumeOf(lengthM, widthM, heightM);
+  return areaOf(lengthM, widthM);
+}
+
 function toneForStock(available: number): "success" | "warning" | "critical" {
   if (available <= 10) return "critical";
   if (available <= 40) return "warning";
@@ -94,21 +110,37 @@ const toneClass: Record<string, string> = {
 
 // BRD §2.3 UOM engine: `uom`/`price` are the SELLING unit the cashier picked (price = basePrice ×
 // factorToStock); `basePrice` stays per stock UOM so switching units re-derives instead of
-// compounding. Cut-to-size lines (isCutToSize) carry the entered dimensions and qty = computed m².
+// compounding. Cut-to-size lines (isCutToSize) carry the entered dimensions — cutToSizeUnit picks
+// which ones matter (Length: lengthM only; Area: length×width; Volume: length×width×height) — and
+// qty = the computed length/area/volume.
 type CartLine = {
   productId: number; sku: string; name: string; uom: string; price: number; vatRate: number; qty: number;
   stockUom: string; basePrice: number; factorToStock: number; conversions: ProductUomConversionDto[];
-  isCutToSize: boolean; lengthM?: number; widthM?: number;
+  isCutToSize: boolean; cutToSizeUnit: CutToSizeUnit; lengthM?: number; widthM?: number; heightM?: number;
+  // Real product photo (base64 data URL or absent) — falls back to the static demo map, then an icon.
+  imageUrl?: string | null;
   // BRD §3.5: cashier flags this line for delivery instead of counter pickup — a sale can mix
   // flagged and unflagged lines (partial delivery).
   requiresDelivery?: boolean;
+  // Per stock UOM (e.g. per Bundle/Bag) — matters for bundle/pallet items (rebar, cement) where the
+  // physical load size is what the yard crew and delivery truck actually care about.
+  weight: number;
+  // BRD §2.3: cashier's free-text note for this specific line (distinct from the order-wide Notes).
+  notes?: string;
+  // BRD §2.3/§6.2: cashier-entered per-line discount %, gated by the same authorization ceiling as
+  // the order-level manual discount (see discountNeedsApproval below) — doesn't stack with the
+  // auto contractor/tier/quantity discount, mirrors OrdersController.Checkout's "larger of" rule.
+  manualDiscountPct?: number;
+  // BRD §7 (CR-039): an absolute per-line price override — replaces `price` entirely (no discount
+  // stacks on top), gated by a DIFFERENT authorization ceiling (posCeilings.canOverrideItemPrice /
+  // an ApprovalType.PriceOverride request), distinct from a discount.
+  manualUnitPrice?: number;
 };
 type CustomFee = { label: string; amount: number };
 // Module 8 (BRD §5.2): a bundle in the cart — kept as one grouped entry (the server expands it into
 // constituent order lines at checkout). vatPerUnit = Σ constituent bundle-share price × its own VAT
 // rate, so the client total matches the server's per-item VAT math.
 type BundleCartEntry = { bundleId: number; code: string; name: string; qty: number; bundlePrice: number; individualTotal: number; vatPerUnit: number };
-const CONTRACTOR_DISCOUNT_PCT = 5;
 // BRD §10.2 default: auto-lock after 3 minutes of inactivity (Module 15).
 const IDLE_LOCK_MS = 3 * 60 * 1000;
 // sessionStorage key the Cashier Workspace uses to hand a parked-sale id to this screen for resume.
@@ -117,7 +149,15 @@ const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 
 
 export function PosCheckout() {
   const [query, setQuery] = useState("");
+  // Selected category/subcategory chip in the product browser — null means "All". Picking a
+  // parent category (e.g. "Electric") also matches every one of its subcategories' products.
+  const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [cart, setCart] = useState<CartLine[]>([]);
+  // sku of the cart line whose note input is currently expanded — null collapses all of them.
+  const [notesEditingSku, setNotesEditingSku] = useState<string | null>(null);
+  // sku of the cart line whose price-override input is currently expanded — null collapses all.
+  const [priceEditingSku, setPriceEditingSku] = useState<string | null>(null);
   const [bundleCart, setBundleCart] = useState<BundleCartEntry[]>([]);
   // Module 11: optional B2B PO reference + project code, carried to the tax invoice.
   const [poReference, setPoReference] = useState("");
@@ -154,6 +194,10 @@ export function PosCheckout() {
   // Same pattern as the discount ceiling above, for BRD §4.2 B2B credit-limit enforcement.
   const [creditApprovalId, setCreditApprovalId] = useState<number | null>(null);
   const [creditApprovalDialogOpen, setCreditApprovalDialogOpen] = useState(false);
+  // BRD §7 (CR-039): same pattern again for a per-line manual price override — distinct from a
+  // discount (Role.CanOverrideItemPrice / ApprovalType.PriceOverride), gated separately.
+  const [priceOverrideApprovalId, setPriceOverrideApprovalId] = useState<number | null>(null);
+  const [priceOverrideApprovalDialogOpen, setPriceOverrideApprovalDialogOpen] = useState(false);
 
   const [feeLabel, setFeeLabel] = useState("");
   const [feeAmount, setFeeAmount] = useState("");
@@ -173,6 +217,9 @@ export function PosCheckout() {
   const [deliveryZoneId, setDeliveryZoneId] = useState<number | null>(null);
   const [deliveryDriverId, setDeliveryDriverId] = useState<number | null>(null);
   const [deliveryVehicleId, setDeliveryVehicleId] = useState<number | null>(null);
+  // Searchable "use a saved customer's address" combobox inside the delivery panel itself, so the
+  // cashier doesn't have to scroll up to the header search to attach/change the sale's customer.
+  const [deliveryCustomerSearch, setDeliveryCustomerSearch] = useState("");
 
   const { user } = useAuth();
   const { data: terminals } = useTerminals();
@@ -181,6 +228,10 @@ export function PosCheckout() {
   const { data: deliveryZones } = useZonesApi();
   const { data: deliveryDrivers } = useDriversApi();
   const { data: deliveryVehicles } = useVehiclesApi();
+  // BRD §5.1/§6.2: Finance > Pricing's Trade Tier / Quantity rules — read here too, not just at
+  // checkout submission, so the cart total the cashier sees while building the sale already matches
+  // what OrdersController.Checkout will actually charge (see contractorDiscountPct/lineDiscountPct below).
+  const { data: pricingRules } = usePricingRules();
   const checkout = useCheckout();
   const holdSale = useHoldSale();
   const resumeSale = useResumeSale();
@@ -189,6 +240,69 @@ export function PosCheckout() {
 
   const effectiveBranchId = user?.branchId ?? selectedBranchId ?? branches?.[0]?.id ?? null;
   const { data: liveProducts } = useProducts(true, effectiveBranchId ?? undefined);
+  const { data: categories } = useCategories();
+  const topLevelCategories = useMemo(() => (categories ?? []).filter((c) => c.parentId == null), [categories]);
+  const childCategoriesOf = useMemo(() => {
+    const map = new Map<number, CategoryDto[]>();
+    for (const c of categories ?? []) {
+      if (c.parentId == null) continue;
+      const list = map.get(c.parentId) ?? [];
+      list.push(c);
+      map.set(c.parentId, list);
+    }
+    return map;
+  }, [categories]);
+  // A selected parent category (e.g. "Electric") must also match every one of its subcategories'
+  // products, not just products filed directly under it — walk the whole descendant subtree.
+  const categoryFilterIds = useMemo(() => {
+    if (categoryFilter == null) return null;
+    const ids = new Set<number>([categoryFilter]);
+    const stack = [categoryFilter];
+    while (stack.length) {
+      const id = stack.pop()!;
+      for (const child of childCategoriesOf.get(id) ?? []) {
+        if (!ids.has(child.id)) {
+          ids.add(child.id);
+          stack.push(child.id);
+        }
+      }
+    }
+    return ids;
+  }, [categoryFilter, childCategoriesOf]);
+  const categoriesById = useMemo(() => new Map((categories ?? []).map((c) => [c.id, c])), [categories]);
+  const activeCategory = categoryFilter != null ? categoriesById.get(categoryFilter) ?? null : null;
+  // Flattened depth-first walk of the whole category tree (any nesting depth, not just two levels)
+  // so a single searchable dropdown can render it instead of one chip per category — the chip
+  // layout fell apart once a catalog has hundreds of categories/subcategories.
+  const categoryTree = useMemo(() => {
+    const rows: { category: CategoryDto; depth: number }[] = [];
+    const visit = (parentId: number | null, depth: number) => {
+      for (const c of parentId == null ? topLevelCategories : childCategoriesOf.get(parentId) ?? []) {
+        rows.push({ category: c, depth });
+        visit(c.id, depth + 1);
+      }
+    };
+    visit(null, 0);
+    return rows;
+  }, [topLevelCategories, childCategoriesOf]);
+  // Full ancestor chain (e.g. "Electrical › Wiring › Cables"), since a category can be nested
+  // arbitrarily deep and the cashier needs to see where they are, not just the leaf name.
+  const categoryPath = (id: number) => {
+    const chain: string[] = [];
+    let cur = categoriesById.get(id);
+    while (cur) {
+      chain.unshift(cur.nameEn);
+      cur = cur.parentId != null ? categoriesById.get(cur.parentId) : undefined;
+    }
+    return chain.join(" › ");
+  };
+  const activeCategoryName = activeCategory ? categoryPath(activeCategory.id) : "All";
+  // Shown on each product tile so the cashier can visually confirm it's the right one when several
+  // products share a name across categories (e.g. "Pipe" under both Electric and Plumbing).
+  const categoryLabelFor = (categoryId: number) => {
+    const c = categoriesById.get(categoryId);
+    return c ? categoryDisplayLabel(c) : "";
+  };
   useEffect(() => {
     if (user?.branchId === null && selectedBranchId === null && branches?.[0]) setSelectedBranchId(branches[0].id);
   }, [user?.branchId, selectedBranchId, branches]);
@@ -201,27 +315,60 @@ export function PosCheckout() {
   // branch/terminal mismatch at checkout. No terminal in this branch → checkout proceeds untilled.
   const terminal = terminals?.find((t) => t.branchId === effectiveBranchId);
 
+  // BRD §7 (CR-038): resolve the CURRENT customer's assigned price list against each product's own
+  // Contractor/Wholesale/Project override — null on the product means "not configured," fall back
+  // to sellingPrice (Retail), mirroring OrdersController.Checkout's resolution exactly so the cart
+  // total the cashier sees matches what checkout will actually charge.
+  const listPriceFor = (p: { sellingPrice: number; contractorPrice?: number | null; wholesalePrice?: number | null; projectPrice?: number | null }) => {
+    switch (customer?.priceListType) {
+      case "Contractor": return p.contractorPrice ?? p.sellingPrice;
+      case "Wholesale": return p.wholesalePrice ?? p.sellingPrice;
+      case "Project": return p.projectPrice ?? p.sellingPrice;
+      default: return p.sellingPrice;
+    }
+  };
   const products = useMemo(
     () =>
       (liveProducts ?? []).map((p) => ({
-        productId: p.id, sku: p.sku, barcode: p.barcode, name: p.nameEn, cat: p.categoryName, uom: p.stockUom,
-        price: p.sellingPrice, vatRate: p.vatRate, stock: p.totalAvailable, tone: toneForStock(p.totalAvailable),
-        conversions: p.uomConversions ?? [], isCutToSize: p.isCutToSize ?? false,
+        productId: p.id, sku: p.sku, barcode: p.barcode, name: p.nameEn, cat: p.categoryName, categoryId: p.categoryId, uom: p.stockUom,
+        price: listPriceFor(p), vatRate: p.vatRate, stock: p.totalAvailable, tone: toneForStock(p.totalAvailable),
+        conversions: p.uomConversions ?? [], isCutToSize: p.isCutToSize ?? false, cutToSizeUnit: p.cutToSizeUnit ?? "Area",
+        weight: p.weight, imageUrl: p.imageUrl,
+        // Carried through so lineDiscountPct can tell whether THIS line actually got a distinct list
+        // price (and should suppress the legacy contractor trade % — see contractorDiscountPct below).
+        hasDistinctListPrice: listPriceFor(p) !== p.sellingPrice,
       })),
-    [liveProducts],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [liveProducts, customer?.priceListType],
   );
+
+  // A customer can be attached (or changed) AFTER items are already in the cart — re-sync existing
+  // lines' price to the newly-resolved list price so the cart total never drifts from what checkout
+  // will actually charge (which always resolves fresh from the customer on file at that moment).
+  useEffect(() => {
+    setCart((c) => c.map((l) => {
+      const prod = products.find((p) => p.sku === l.sku);
+      if (!prod || prod.price === l.basePrice) return l;
+      return { ...l, basePrice: prod.price, price: unitPriceFor(prod.price, l.factorToStock) };
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer?.priceListType]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return [];
+    // Browsing a category needs no typed text at all; typing with no category picked still searches
+    // every product as before. Neither one active means the idle scanning state (nothing shown).
+    if (!q && categoryFilterIds == null) return [];
     return products.filter(
       (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.sku.toLowerCase().includes(q) ||
-        p.cat.toLowerCase().includes(q) ||
-        (p.barcode?.toLowerCase().includes(q) ?? false),
+        (categoryFilterIds == null || categoryFilterIds.has(p.categoryId)) &&
+        (q === "" ||
+          p.name.toLowerCase().includes(q) ||
+          p.sku.toLowerCase().includes(q) ||
+          p.cat.toLowerCase().includes(q) ||
+          (p.barcode?.toLowerCase().includes(q) ?? false)),
     );
-  }, [query, products]);
+  }, [query, products, categoryFilterIds]);
 
   // Barcode scanners act as keyboards: they type the code then send Enter. A real POS should add
   // the item straight to the cart on that Enter, no manual click — this is what makes it "scan".
@@ -308,12 +455,16 @@ export function PosCheckout() {
     setCart((c) => {
       const existing = c.find((l) => l.sku === p.sku);
       if (existing) return c.map((l) => (l.sku === p.sku ? { ...l, qty: existing.qty + 1 } : l));
-      // Cut-to-size products start at 1m × 1m — the cashier edits the real dimensions on the line.
+      // Cut-to-size products start at 1m on every dimension the mode needs — the cashier edits the
+      // real measurements on the line.
       const isCut = p.isCutToSize;
       return [...c, {
         productId: p.productId, sku: p.sku, name: p.name, uom: p.uom, price: p.price, vatRate: p.vatRate,
         qty: 1, stockUom: p.uom, basePrice: p.price, factorToStock: 1, conversions: p.conversions,
-        isCutToSize: isCut, lengthM: isCut ? 1 : undefined, widthM: isCut ? 1 : undefined,
+        isCutToSize: isCut, cutToSizeUnit: p.cutToSizeUnit, lengthM: isCut ? 1 : undefined,
+        widthM: isCut && p.cutToSizeUnit !== "Length" ? 1 : undefined,
+        heightM: isCut && p.cutToSizeUnit === "Volume" ? 1 : undefined,
+        weight: p.weight, imageUrl: p.imageUrl,
       }];
     });
     setLastAdded(p.sku);
@@ -329,6 +480,22 @@ export function PosCheckout() {
       setCart((c) => c.filter((l) => l.sku !== sku));
       return;
     }
+    const available = products.find((p) => p.sku === sku)?.stock ?? Infinity;
+    if (toStockQty(nextQty, line.factorToStock) > available) {
+      toast.error(`Only ${available} ${line.stockUom} available at this branch.`);
+      return;
+    }
+    setCart((c) => c.map((l) => (l.sku === sku ? { ...l, qty: nextQty } : l)));
+  }
+
+  // Direct numeric entry alongside the +/- stepper (BRD §2.3 item 3: "easily modify item
+  // quantities") — bulk quantities (e.g. 500 units) shouldn't require 500 clicks. Same stock guard
+  // as the stepper; invalid/non-positive input is ignored rather than zeroing the line.
+  function setQtyDirect(sku: string, raw: string) {
+    const line = cart.find((l) => l.sku === sku);
+    if (!line) return;
+    const nextQty = Number(raw);
+    if (!Number.isFinite(nextQty) || nextQty <= 0) return;
     const available = products.find((p) => p.sku === sku)?.stock ?? Infinity;
     if (toStockQty(nextQty, line.factorToStock) > available) {
       toast.error(`Only ${available} ${line.stockUom} available at this branch.`);
@@ -358,33 +525,59 @@ export function PosCheckout() {
       : l)));
   }
 
-  // BRD §2.3 items 5-6: dimension entry for cut-to-size lines — qty becomes the computed area, priced
-  // per stock-UOM m². Zero/invalid input keeps the last valid dimensions rather than zeroing the line.
-  function changeDimension(sku: string, side: "lengthM" | "widthM", raw: string) {
+  // BRD §2.3 items 5-6: dimension entry for cut-to-size lines — qty becomes the computed
+  // length/area/volume (per the product's cut-to-size unit), priced per stock UOM. Zero/invalid
+  // input keeps the last valid dimensions rather than zeroing the line.
+  function changeDimension(sku: string, side: "lengthM" | "widthM" | "heightM", raw: string) {
     const value = Number(raw);
     if (!Number.isFinite(value) || value < 0) return;
-    // The computed area is stock demand in the stock UOM (m²) — validate it against branch
-    // availability exactly like every other qty change, or the cashier only finds out when the
-    // server rejects the whole checkout (BRD §2.3 item 7).
+    // The computed qty is stock demand in the stock UOM — validate it against branch availability
+    // exactly like every other qty change, or the cashier only finds out when the server rejects
+    // the whole checkout (BRD §2.3 item 7).
     const line = cart.find((l) => l.sku === sku && l.isCutToSize);
     if (line) {
-      const nextArea = areaOf(side === "lengthM" ? value : (line.lengthM ?? 0), side === "widthM" ? value : (line.widthM ?? 0));
+      const nextQty = cutToSizeQty(
+        line.cutToSizeUnit,
+        side === "lengthM" ? value : (line.lengthM ?? 0),
+        side === "widthM" ? value : (line.widthM ?? 0),
+        side === "heightM" ? value : (line.heightM ?? 0),
+      );
       const available = products.find((p) => p.sku === sku)?.stock ?? Infinity;
-      if (nextArea > available) {
-        toast.error(`Only ${available} ${line.stockUom} available at this branch — ${nextArea.toFixed(2)} needed.`);
+      if (nextQty > available) {
+        toast.error(`Only ${available} ${line.stockUom} available at this branch — ${nextQty.toFixed(2)} needed.`);
         return;
       }
     }
     setCart((c) => c.map((l) => {
       if (l.sku !== sku || !l.isCutToSize) return l;
       const next = { ...l, [side]: value } as CartLine;
-      const area = areaOf(next.lengthM ?? 0, next.widthM ?? 0);
-      return { ...next, qty: area > 0 ? area : l.qty };
+      const qty = cutToSizeQty(l.cutToSizeUnit, next.lengthM ?? 0, next.widthM ?? 0, next.heightM ?? 0);
+      return { ...next, qty: qty > 0 ? qty : l.qty };
     }));
   }
 
   function removeLine(sku: string) {
     setCart((c) => c.filter((l) => l.sku !== sku));
+  }
+
+  // BRD §2.3: per-line note the cashier attaches to a specific cart entry — pure client state until
+  // checkout, when it's carried on the line's CartLineInput and persisted to OrderLine.Notes.
+  function setLineNotes(sku: string, notes: string) {
+    setCart((c) => c.map((l) => (l.sku === sku ? { ...l, notes } : l)));
+  }
+
+  // BRD §2.3/§6.2: cashier-entered per-line discount % — same authorization ceiling as the
+  // order-level manual discount (see discountNeedsApproval), enforced again server-side.
+  function setLineDiscountPct(sku: string, raw: string) {
+    const value = raw === "" ? undefined : Math.max(0, Math.min(100, Number(raw) || 0));
+    setCart((c) => c.map((l) => (l.sku === sku ? { ...l, manualDiscountPct: value } : l)));
+  }
+
+  // BRD §7 (CR-039): an absolute per-line price override — a DIFFERENT authorization ceiling from
+  // the discount above (posCeilings.canOverrideItemPrice / an ApprovalType.PriceOverride request).
+  function setLineManualPrice(sku: string, raw: string) {
+    const value = raw === "" ? undefined : Math.max(0, Number(raw) || 0);
+    setCart((c) => c.map((l) => (l.sku === sku ? { ...l, manualUnitPrice: value } : l)));
   }
 
   // BRD §3.5: toggling a line's delivery flag never removes it from the cart — the customer still
@@ -465,6 +658,7 @@ export function PosCheckout() {
     setDeliveryZoneId(null);
     setDeliveryDriverId(null);
     setDeliveryVehicleId(null);
+    setDeliveryCustomerSearch("");
   }
 
   async function handleFindCustomer() {
@@ -568,6 +762,7 @@ export function PosCheckout() {
         price: l.unitPrice, vatRate: product?.vatRate ?? 15, qty: l.qty,
         stockUom: product?.uom ?? "Piece", basePrice: l.unitPrice, factorToStock: 1,
         conversions: product?.conversions ?? [], isCutToSize: product?.isCutToSize ?? false,
+        cutToSizeUnit: product?.cutToSizeUnit ?? "Area", weight: product?.weight ?? 0, imageUrl: product?.imageUrl,
       };
     });
     setCart(lines);
@@ -581,11 +776,67 @@ export function PosCheckout() {
   const { data: loyaltyConfig } = useLoyaltyConfig(Boolean(customer?.loyaltyEnrolled));
   const tierConfig: LoyaltyTierConfig | undefined = loyaltyConfig;
 
+  // BRD §5.1/§6.2, mirroring OrdersController.Checkout: Active rules scoped to this branch (or
+  // company-wide) and not past ValidUntil. Filtered here instead of trusting the API to pre-filter,
+  // since usePricingRules() returns every rule (the Finance > Pricing grid needs Expired/Pending
+  // ones too) and this cart preview must only ever apply what the server would actually apply.
+  const activePricingRules = useMemo(() => {
+    const now = Date.now();
+    return (pricingRules ?? []).filter((r) =>
+      r.status === "Active"
+      && (r.branchId == null || r.branchId === effectiveBranchId)
+      && (r.validFrom == null || new Date(r.validFrom).getTime() <= now)
+      && (r.validUntil == null || new Date(r.validUntil).getTime() >= now));
+  }, [pricingRules, effectiveBranchId]);
+
   const isContractor = customer?.type === "Contractor";
+  // The contractor rate comes only from an actual active Trade Tier pricing rule — same
+  // branch-first-then-priority tiebreak the server uses. No rule configured means no automatic
+  // contractor discount (a manager must create one on the Pricing page).
+  const tradeTierRule = useMemo(() => {
+    if (!isContractor) return null;
+    return activePricingRules
+      .filter((r) => r.type === "Trade Tier")
+      .sort((a, b) => (Number(b.branchId != null) - Number(a.branchId != null)) || b.priority - a.priority)[0] ?? null;
+  }, [activePricingRules, isContractor]);
   // Module 7 (BRD §4.3.2): per-line discount is the LARGER of contractor trade % and the customer's
   // loyalty tier % — mirrors OrdersController.Checkout exactly, so the display total matches the charge.
   const loyaltyTierPct = tierDiscountPct(customer?.loyaltyTier, customer?.loyaltyEnrolled, tierConfig);
-  const contractorDiscountPct = Math.max(isContractor ? CONTRACTOR_DISCOUNT_PCT : 0, loyaltyTierPct);
+  const contractorDiscountPct = Math.max(tradeTierRule?.value ?? 0, loyaltyTierPct);
+
+  // BRD §6.2 Quantity Discount: a per-SKU (or "any product" when Sku is null) quantity threshold —
+  // matched case-insensitively since a rule's Sku is uppercased at creation but a product's own Sku
+  // is stored exactly as entered in the catalog. Doesn't stack with the contractor/tier %; each line
+  // gets whichever is larger, same rule OrdersController.Checkout applies server-side.
+  const quantityRules = useMemo(
+    () => activePricingRules.filter((r) => r.type === "Quantity" && r.minQuantity != null),
+    [activePricingRules],
+  );
+  const quantityPctFor = (l: CartLine) => {
+    const stockQty = toStockQty(l.qty, l.factorToStock);
+    return quantityRules
+      .filter((r) => (!r.sku || r.sku.toUpperCase() === l.sku.toUpperCase()) && stockQty >= r.minQuantity!)
+      .reduce((max, r) => Math.max(max, r.value), 0);
+  };
+  // BRD §7 (CR-040): Promotional rules auto-apply within their date window — no coupon code needed.
+  const promoRules = useMemo(() => activePricingRules.filter((r) => r.type === "Promotional"), [activePricingRules]);
+  const promoPctFor = (l: CartLine) => promoRules
+    .filter((r) => !r.sku || r.sku.toUpperCase() === l.sku.toUpperCase())
+    .reduce((max, r) => Math.max(max, r.value), 0);
+  // BRD §7 (CR-038): once a line actually got a distinct Contractor/Wholesale/Project list price
+  // (see products/listPriceFor above), the legacy automatic contractor trade % would double-dip on
+  // top of an already-negotiated price — suppressed in that case, but loyalty-tier % still applies
+  // (mirrors OrdersController.Checkout's effectiveDiscountPct exactly).
+  const hasDistinctListPriceFor = (l: CartLine) => products.find((p) => p.sku === l.sku)?.hasDistinctListPrice ?? false;
+  const lineDiscountPct = (l: CartLine) => {
+    // A manual price override (BRD §7 CR-039) replaces the price entirely — no discount stacks.
+    if (l.manualUnitPrice != null) return 0;
+    const baseDiscountPct = hasDistinctListPriceFor(l) ? loyaltyTierPct : contractorDiscountPct;
+    return Math.max(Math.max(baseDiscountPct, quantityPctFor(l)), Math.max(promoPctFor(l), l.manualDiscountPct ?? 0));
+  };
+  // The actual per-unit price charged for this line — the manual override when set, else the
+  // resolved list price (see products/listPriceFor above).
+  const lineUnitPrice = (l: CartLine) => l.manualUnitPrice ?? l.price;
 
   // BRD §4.3.3: the points balance + SAR equivalent must be visible at checkout, not just inside
   // the Charge dialog — a cashier deciding whether to offer redemption needs it up front.
@@ -597,9 +848,15 @@ export function PosCheckout() {
   const bundleTaxable = bundleCart.reduce((s, b) => s + b.bundlePrice * b.qty, 0);
   const bundleSavings = bundleCart.reduce((s, b) => s + Math.max(0, b.individualTotal - b.bundlePrice) * b.qty, 0);
 
-  const subtotal = cart.reduce((s, l) => s + l.price * l.qty, 0) + bundleCart.reduce((s, b) => s + b.individualTotal * b.qty, 0);
-  const lineTotalsSum = cart.reduce((s, l) => s + l.price * l.qty * (1 - contractorDiscountPct / 100), 0) + bundleTaxable;
+  const subtotal = cart.reduce((s, l) => s + lineUnitPrice(l) * l.qty, 0) + bundleCart.reduce((s, b) => s + b.individualTotal * b.qty, 0);
+  // Total kg across the cart — matters for bundle/pallet items (rebar, cement) where the physical
+  // load size is what the yard crew and delivery truck actually care about, not just the SAR total.
+  const totalCartWeight = cart.reduce((s, l) => s + l.weight * toStockQty(l.qty, l.factorToStock), 0);
+  const lineTotalsSum = cart.reduce((s, l) => s + lineUnitPrice(l) * l.qty * (1 - lineDiscountPct(l) / 100), 0) + bundleTaxable;
   const contractorDiscount = subtotal - lineTotalsSum;
+  // True whenever at least one line's discount came entirely from a Quantity rule rather than the
+  // customer-level contractor/tier rate — drives which label the summary below shows.
+  const hasQuantityRuleDiscount = cart.some((l) => quantityPctFor(l) > contractorDiscountPct);
 
   const couponAmount = appliedCoupon?.valid
     ? appliedCoupon.discountType === "Percentage" ? (lineTotalsSum * appliedCoupon.value) / 100 : appliedCoupon.value
@@ -614,10 +871,16 @@ export function PosCheckout() {
   // discounts are gated by the cashier's own DiscountCeilingPercent. Shown here so the cashier sees
   // *before* attempting to pay, not just after the server rejects it.
   const discountCeiling = user?.posCeilings.discountCeilingPercent ?? null;
-  const discountNeedsApproval =
+  const orderDiscountNeedsApproval =
     discountType === "Fixed" && manualValue > 0
       ? !(discountCeiling === null || discountCeiling >= 15)
       : discountType === "Percentage" && manualValue > 0 && discountCeiling !== null && manualValue > discountCeiling;
+  // A cashier-entered per-line discount (BRD §2.3) is gated the same way — mirrors
+  // OrdersController.Checkout's maxLineManualPct check, so the banner below shows *before* the
+  // server would reject the sale, not just after.
+  const maxLineManualPct = cart.reduce((max, l) => Math.max(max, l.manualDiscountPct ?? 0), 0);
+  const lineDiscountNeedsApproval = maxLineManualPct > 0 && discountCeiling !== null && maxLineManualPct > discountCeiling;
+  const discountNeedsApproval = orderDiscountNeedsApproval || lineDiscountNeedsApproval;
   // "Ready" only means a request has been submitted, not that a supervisor has approved it yet — the
   // POS has no live channel to that, so the honest state is "requested, retry Charge once approved"
   // rather than claiming certainty. The server is still the source of truth at checkout time.
@@ -629,7 +892,22 @@ export function PosCheckout() {
     setDiscountApprovalId(null);
   }, [discountType, discountValue]);
 
-  const vat = cart.reduce((s, l) => s + l.price * l.qty * (1 - contractorDiscountPct / 100) * (1 - discountRatio) * (l.vatRate / 100), 0)
+  // BRD §7 (CR-039): a per-line manual price override is a DIFFERENT authorization from a discount —
+  // gated by posCeilings.canOverrideItemPrice, mirrors OrdersController.Checkout's own gate exactly.
+  const canOverrideItemPrice = user?.posCeilings.canOverrideItemPrice ?? false;
+  const hasPriceOverride = cart.some((l) => l.manualUnitPrice != null);
+  const priceOverrideNeedsApproval = hasPriceOverride && !canOverrideItemPrice;
+  const priceOverrideApprovalRequested = priceOverrideNeedsApproval && priceOverrideApprovalId !== null;
+
+  // A previously-granted approval only covers the override(s) it was requested for — clear it once
+  // any line's override value changes, same rule as the discount approval above.
+  const priceOverrideSignature = cart.map((l) => `${l.sku}:${l.manualUnitPrice ?? ""}`).join("|");
+  useEffect(() => {
+    setPriceOverrideApprovalId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceOverrideSignature]);
+
+  const vat = cart.reduce((s, l) => s + lineUnitPrice(l) * l.qty * (1 - lineDiscountPct(l) / 100) * (1 - discountRatio) * (l.vatRate / 100), 0)
     + bundleCart.reduce((s, b) => s + b.vatPerUnit * b.qty * (1 - discountRatio), 0);
   // Module 7 (BRD §4.3.2): Silver+ loyalty customers get delivery fees waived on orders over SAR 500
   // — must mirror the server's waiver exactly or the payment total won't match at checkout.
@@ -668,6 +946,7 @@ export function PosCheckout() {
     setDeliveryContactMobile((v) => v || customer.phone || "");
     setDeliveryCity((v) => v || customer.city || "");
     setDeliveryDistrict((v) => v || customer.district || "");
+    setDeliveryStreet((v) => v || customer.address || "");
   }, [customer]);
 
   const idle = query === "" && cart.length === 0 && bundleCart.length === 0;
@@ -684,6 +963,18 @@ export function PosCheckout() {
         || (c.phone ?? "").includes(term))
       .slice(0, 6);
   }, [phone, customers, customer]);
+
+  // Same substring match as the header search, but for the in-panel "Customer Address" combobox —
+  // lets the cashier find/attach a customer without leaving the delivery details block.
+  const deliveryCustomerSuggestions = useMemo(() => {
+    const term = deliveryCustomerSearch.trim().toLowerCase();
+    if (term.length < 2) return [];
+    return (customers ?? [])
+      .filter((c) => c.nameEn.toLowerCase().includes(term)
+        || (c.nameAr ?? "").toLowerCase().includes(term)
+        || (c.phone ?? "").includes(term))
+      .slice(0, 6);
+  }, [deliveryCustomerSearch, customers]);
 
   async function handleCharge(payments: PaymentInput[]) {
     if (!effectiveBranchId) throw new Error("No branch selected.");
@@ -702,9 +993,19 @@ export function PosCheckout() {
       terminalId: terminal?.id ?? null,
       customerId: customer?.id ?? null,
       type: isContractor ? "Contractor" : "Retail",
-      lines: cart.map((l) => l.isCutToSize && l.lengthM && l.widthM
-        ? { productId: l.productId, qty: 0, lengthM: l.lengthM, widthM: l.widthM, requiresDelivery: l.requiresDelivery }
-        : { productId: l.productId, qty: l.qty, uom: l.uom, requiresDelivery: l.requiresDelivery }),
+      lines: cart.map((l) => l.isCutToSize && l.lengthM
+        ? {
+            productId: l.productId, qty: 0, lengthM: l.lengthM,
+            widthM: l.cutToSizeUnit !== "Length" ? l.widthM : undefined,
+            heightM: l.cutToSizeUnit === "Volume" ? l.heightM : undefined,
+            requiresDelivery: l.requiresDelivery, notes: l.notes?.trim() || null, manualDiscountPct: l.manualDiscountPct ?? null,
+            manualUnitPrice: l.manualUnitPrice ?? null,
+          }
+        : {
+            productId: l.productId, qty: l.qty, uom: l.uom, requiresDelivery: l.requiresDelivery,
+            notes: l.notes?.trim() || null, manualDiscountPct: l.manualDiscountPct ?? null,
+            manualUnitPrice: l.manualUnitPrice ?? null,
+          }),
       payments,
       couponCode: appliedCoupon?.code ?? null,
       manualDiscount: discountType && manualValue > 0 ? { type: discountType, value: manualValue } : null,
@@ -714,6 +1015,7 @@ export function PosCheckout() {
       projectCode: orderProjectCode.trim() || null,
       discountApprovalRequestId: discountNeedsApproval ? discountApprovalId : null,
       creditOverrideApprovalRequestId: creditNeedsApproval ? creditApprovalId : null,
+      priceOverrideApprovalRequestId: priceOverrideNeedsApproval ? priceOverrideApprovalId : null,
       // Module 10: every checkout carries an idempotency key so an offline replay (or a retry after
       // a dropped response) can never double-sell.
       clientRequestId: newClientRequestId(),
@@ -790,7 +1092,11 @@ export function PosCheckout() {
   // Module 16 (BRD §3.4): convert the ACTIVE CART into a quotation — project code and customer
   // reference are mandatory, so a small prompt collects them before submitting.
   async function handleCreateQuotation() {
-    if (!effectiveBranchId || cart.length === 0) return;
+    if (!effectiveBranchId || cartIsEmpty) return;
+    if (cart.length === 0 && bundleCart.length > 0) {
+      toast.error("Quotations don't support bundles yet — complete or remove the bundle first.");
+      return;
+    }
     const projectCode = window.prompt("Project code (required):")?.trim();
     if (!projectCode) return;
     const customerReference = window.prompt("Customer reference (required):")?.trim();
@@ -918,22 +1224,6 @@ export function PosCheckout() {
               )}
             </div>
 
-            {idle && (
-              <div className="relative mt-4 grid grid-cols-3 gap-3 text-center text-[11px] text-white/60">
-                <div className="rounded-lg bg-white/5 px-2 py-2 ring-1 ring-white/10">
-                  <p className="font-display text-white text-sm">Cash · Mada · STC</p>
-                  <p>Payment ready</p>
-                </div>
-                <div className="rounded-lg bg-white/5 px-2 py-2 ring-1 ring-white/10">
-                  <p className="font-display text-white text-sm">ZATCA Phase 2</p>
-                  <p>Cleared · online</p>
-                </div>
-                <div className="rounded-lg bg-white/5 px-2 py-2 ring-1 ring-white/10">
-                  <p className="font-display text-white text-sm">{user?.name ?? "Cashier"}</p>
-                  <p>{user?.role ?? "cashier"}</p>
-                </div>
-              </div>
-            )}
           </div>
 
           {idle && (
@@ -984,14 +1274,97 @@ export function PosCheckout() {
           </div>
         )}
 
-        {/* Results appear UNDER the scanner only when searching */}
-        {query !== "" && (
+        {/* Category browser: a searchable dropdown listing every category and subcategory (any
+            nesting depth), indented into a tree — replaces a chip-per-category layout that turned
+            into an unreadable wall once the catalog grew past a couple dozen categories. */}
+        {topLevelCategories.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Popover open={categoryPickerOpen} onOpenChange={setCategoryPickerOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  className={`flex min-w-[240px] max-w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-xs font-medium shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition ${
+                    activeCategory
+                      ? "border-brand/40 bg-brand/5 text-brand"
+                      : "border-black/10 bg-white text-foreground hover:border-brand/40"
+                  }`}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <FolderTree className="h-4 w-4 flex-none" />
+                    <span className="truncate">{activeCategoryName === "All" ? "All Categories" : activeCategoryName}</span>
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[320px] p-0">
+                <Command>
+                  <CommandInput placeholder="Search categories..." />
+                  <CommandList className="max-h-[360px]">
+                    <CommandEmpty>No category found.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        value="All Categories"
+                        onSelect={() => {
+                          setCategoryFilter(null);
+                          setCategoryPickerOpen(false);
+                        }}
+                      >
+                        <span className="flex-1 truncate font-medium">All Categories</span>
+                        {categoryFilter == null && <Check className="h-4 w-4 flex-none text-brand" />}
+                      </CommandItem>
+                    </CommandGroup>
+                    <CommandGroup heading={`${categories?.length ?? 0} categories`}>
+                      {categoryTree.map(({ category: c, depth }) => (
+                        <CommandItem
+                          key={c.id}
+                          value={categoryPath(c.id)}
+                          onSelect={() => {
+                            setCategoryFilter(c.id);
+                            setCategoryPickerOpen(false);
+                          }}
+                          style={{ paddingLeft: `${8 + depth * 16}px` }}
+                          className="flex-col items-start gap-0"
+                        >
+                          <div className="flex w-full items-center gap-2">
+                            {depth > 0 && <span className="flex-none text-muted-foreground/50">└</span>}
+                            <span className={`flex-1 truncate ${depth === 0 ? "font-medium" : ""}`}>{c.nameEn}</span>
+                            {categoryFilter === c.id && <Check className="h-4 w-4 flex-none text-brand" />}
+                          </div>
+                          {/* Search can surface a deep subcategory with its parent(s) filtered out of view —
+                              always show the ancestor chain so the cashier knows which "Wire" this is. */}
+                          {c.parentId != null && (
+                            <span className="truncate pl-5 text-[10px] text-muted-foreground">{categoryPath(c.parentId)}</span>
+                          )}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            {activeCategory && (
+              <button onClick={() => setCategoryFilter(null)} className="text-[11px] font-medium text-muted-foreground hover:text-brand">
+                Clear
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Results appear UNDER the scanner when searching or browsing a category */}
+        {(query !== "" || categoryFilter != null) && (
           <div className="pos-slide-up rounded-2xl border border-black/5 bg-white p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
             <div className="mb-2 flex items-center justify-between px-1">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {shown.length} match{shown.length === 1 ? "" : "es"} for "{query}"
+                {query !== ""
+                  ? `${shown.length} match${shown.length === 1 ? "" : "es"} for "${query}"`
+                  : `${shown.length} product${shown.length === 1 ? "" : "s"} in ${activeCategoryName}`}
               </p>
-              <button onClick={() => setQuery("")} className="text-[11px] font-medium text-brand hover:underline">
+              <button
+                onClick={() => {
+                  setQuery("");
+                  setCategoryFilter(null);
+                }}
+                className="text-[11px] font-medium text-brand hover:underline"
+              >
                 Clear
               </button>
             </div>
@@ -1001,7 +1374,9 @@ export function PosCheckout() {
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
                 {shown.map((p, i) => {
                   const Icon = productIcon[p.sku] ?? Package;
-                  const img = productImage[p.sku];
+                  // A real uploaded photo (Product.ImageUrl) always wins; the static demo map is
+                  // only a fallback for the seeded sample catalog, then a generic category icon.
+                  const img = p.imageUrl || productImage[p.sku];
                   return (
                     <button
                       key={p.sku}
@@ -1029,6 +1404,9 @@ export function PosCheckout() {
                       </div>
                       <p className="mt-2 text-sm font-medium text-foreground line-clamp-2">{p.name}</p>
                       <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{p.sku}</p>
+                      {categoryLabelFor(p.categoryId) && (
+                        <p className="mt-0.5 truncate text-[10px] text-brand">{categoryLabelFor(p.categoryId)}</p>
+                      )}
                       <p className="mt-2 font-display text-lg font-bold text-foreground">
                         {p.price.toFixed(2)} <span className="text-xs font-medium text-muted-foreground">ر.س / {p.uom}</span>
                       </p>
@@ -1057,8 +1435,11 @@ export function PosCheckout() {
                     <p className="truncate text-sm font-medium text-foreground">{h.ticketNo} · {h.customerName ?? "Walk-in"}</p>
                     <p className="text-[11px] text-muted-foreground">{h.lines.length} item{h.lines.length === 1 ? "" : "s"} · {h.notes ?? "No notes"}</p>
                   </div>
-                  <span className="flex flex-none items-center gap-1 font-mono text-sm font-semibold text-foreground">
-                    {money(h.total)} <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="flex flex-none items-center gap-2">
+                    <span className="font-mono text-sm font-semibold text-foreground">{money(h.total)}</span>
+                    <span className="flex items-center gap-1 rounded-md bg-brand/10 px-2 py-1 text-xs font-semibold text-brand">
+                      <Play className="h-3 w-3" /> Resume
+                    </span>
                   </span>
                 </button>
               ))}
@@ -1081,38 +1462,38 @@ export function PosCheckout() {
               )}
             </p>
           </div>
-          <div className="flex gap-1">
+          <div className="flex gap-1.5">
             {customer ? (
               <button
                 onClick={() => setCustomer(null)}
-                className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5"
+                className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-black/5 hover:text-foreground"
                 title="Detach customer"
               >
-                <UserPlus className="h-4 w-4" />
+                <UserPlus className="h-3.5 w-3.5" /> Detach
               </button>
             ) : null}
             <button
               onClick={handleHold}
-              disabled={cart.length === 0 || holdSale.isPending}
-              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5 disabled:opacity-40"
+              disabled={cartIsEmpty || holdSale.isPending}
+              className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               title="Hold sale"
             >
-              {holdSale.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pause className="h-4 w-4" />}
+              {holdSale.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />} Hold
             </button>
             <button
               onClick={handleCreateQuotation}
-              disabled={cart.length === 0 || createQuotation.isPending}
-              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5 disabled:opacity-40"
+              disabled={cartIsEmpty || createQuotation.isPending}
+              className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               title="Convert cart to quotation"
             >
-              {createQuotation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              {createQuotation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />} Quote
             </button>
             <button
               onClick={() => toast.info("Process returns from Finance → Returns & Refunds.")}
-              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5"
+              className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-black/5 hover:text-foreground"
               title="Return"
             >
-              <RotateCcw className="h-4 w-4" />
+              <RotateCcw className="h-3.5 w-3.5" /> Return
             </button>
           </div>
         </div>
@@ -1320,7 +1701,7 @@ export function PosCheckout() {
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="grid h-10 w-10 shrink-0 overflow-hidden place-items-center rounded-md bg-canvas ring-1 ring-black/5">
                     {(() => {
-                      const img = productImage[l.sku];
+                      const img = l.imageUrl || productImage[l.sku];
                       if (img) return <img src={img} alt={l.name} loading="lazy" className="h-full w-full object-contain p-0.5" />;
                       const Icon = productIcon[l.sku] ?? Package;
                       return <Icon className="h-4 w-4 text-brand" />;
@@ -1333,10 +1714,33 @@ export function PosCheckout() {
                         <CheckCircle2 className="pos-pop ml-1 inline h-3.5 w-3.5 text-success" />
                       )}
                     </p>
-                    <p className="font-mono text-[10px] text-muted-foreground">{l.sku} · {l.uom}</p>
+                    <p className="font-mono text-[10px] text-muted-foreground">
+                      {l.sku} · {l.uom}
+                      {l.weight > 0 && ` · ${(l.weight * toStockQty(l.qty, l.factorToStock)).toFixed(1)} kg`}
+                    </p>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-0.5">
+                  <button
+                    onClick={() => setNotesEditingSku((cur) => (cur === l.sku ? null : l.sku))}
+                    title="Add a note to this item"
+                    aria-pressed={notesEditingSku === l.sku}
+                    className={`grid h-7 w-7 place-items-center rounded-md transition ${
+                      l.notes ? "bg-brand/10 text-brand" : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
+                    }`}
+                  >
+                    <StickyNote className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setPriceEditingSku((cur) => (cur === l.sku ? null : l.sku))}
+                    title="Override this item's price"
+                    aria-pressed={priceEditingSku === l.sku}
+                    className={`grid h-7 w-7 place-items-center rounded-md transition ${
+                      l.manualUnitPrice != null ? "bg-brand/10 text-brand" : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
+                    }`}
+                  >
+                    <PenLine className="h-3.5 w-3.5" />
+                  </button>
                   <button
                     onClick={() => toggleDelivery(l.sku)}
                     title="Deliver this line instead of counter pickup"
@@ -1358,9 +1762,37 @@ export function PosCheckout() {
               {l.requiresDelivery && (
                 <p className="mt-1 flex items-center gap-1 text-[10px] font-medium text-brand"><Truck className="h-3 w-3" /> Delivery</p>
               )}
+              {/* BRD §2.3: per-line note — expanded via the note icon above, or whenever a note
+                  already exists so it's never hidden after the icon is toggled closed. */}
+              {(notesEditingSku === l.sku || l.notes) && (
+                <input
+                  type="text" value={l.notes ?? ""} placeholder="Note for this item…" aria-label={`${l.sku} note`}
+                  onChange={(e) => setLineNotes(l.sku, e.target.value)}
+                  onBlur={() => { if (!l.notes) setNotesEditingSku(null); }}
+                  className="mt-1.5 w-full rounded-md border border-black/10 bg-white px-2 py-1 text-xs outline-none focus:border-brand"
+                />
+              )}
+              {/* BRD §7 (CR-039): per-line price override — an absolute price, not a discount,
+                  gated by posCeilings.canOverrideItemPrice / a PriceOverride approval. */}
+              {(priceEditingSku === l.sku || l.manualUnitPrice != null) && (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <input
+                    type="number" min="0" step="0.01" value={l.manualUnitPrice ?? ""}
+                    placeholder={`Override price (list ${money(l.price)})`} aria-label={`${l.sku} price override`}
+                    onChange={(e) => setLineManualPrice(l.sku, e.target.value)}
+                    onBlur={() => { if (l.manualUnitPrice == null) setPriceEditingSku(null); }}
+                    className="w-full rounded-md border border-black/10 bg-white px-2 py-1 text-xs outline-none focus:border-brand"
+                  />
+                  {!canOverrideItemPrice && l.manualUnitPrice != null && (
+                    <span className="shrink-0 text-[10px] font-medium text-warning">needs approval</span>
+                  )}
+                </div>
+              )}
               {l.isCutToSize ? (
-                // BRD §2.3 items 5-6: cut-to-size lines take length × width instead of a plain qty —
-                // the computed area (m²) becomes the billed quantity at the per-m² price.
+                // BRD §2.3 items 5-6: cut-to-size lines take dimension entry instead of a plain qty —
+                // the computed length/area/volume (per the product's cut-to-size unit) becomes the
+                // billed quantity at the per-stock-UOM price. Length needs just one input, Area two,
+                // Volume three.
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1 text-xs">
                     <input
@@ -1368,17 +1800,51 @@ export function PosCheckout() {
                       onChange={(e) => changeDimension(l.sku, "lengthM", e.target.value)}
                       className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
                     />
-                    <span className="text-muted-foreground">×</span>
-                    <input
-                      type="number" min="0.01" step="0.01" value={l.widthM ?? ""} aria-label={`${l.sku} width (m)`}
-                      onChange={(e) => changeDimension(l.sku, "widthM", e.target.value)}
-                      className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
-                    />
+                    {l.cutToSizeUnit !== "Length" && (
+                      <>
+                        <span className="text-muted-foreground">×</span>
+                        <input
+                          type="number" min="0.01" step="0.01" value={l.widthM ?? ""} aria-label={`${l.sku} width (m)`}
+                          onChange={(e) => changeDimension(l.sku, "widthM", e.target.value)}
+                          className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
+                        />
+                      </>
+                    )}
+                    {l.cutToSizeUnit === "Volume" && (
+                      <>
+                        <span className="text-muted-foreground">×</span>
+                        <input
+                          type="number" min="0.01" step="0.01" value={l.heightM ?? ""} aria-label={`${l.sku} height (m)`}
+                          onChange={(e) => changeDimension(l.sku, "heightM", e.target.value)}
+                          className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
+                        />
+                      </>
+                    )}
                     <span className="ml-1 font-medium text-muted-foreground">m = {l.qty} {l.stockUom}</span>
                   </div>
-                  <p className="font-mono text-sm font-semibold text-foreground">
-                    {money(l.price * l.qty)}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    {/* BRD §2.3/§6.2: cashier-entered per-line discount %, gated by the same
+                        authorization ceiling as the order-level manual discount. */}
+                    <input
+                      type="number" min="0" max="100" step="0.5" value={l.manualDiscountPct ?? ""} placeholder="0%"
+                      aria-label={`${l.sku} discount percent`} title="Per-line discount %"
+                      onChange={(e) => setLineDiscountPct(l.sku, e.target.value)}
+                      className="h-7 w-12 rounded-md border border-black/10 bg-white px-1 text-center text-xs outline-none focus:border-brand"
+                    />
+                    {l.manualUnitPrice != null ? (
+                      <div className="text-right">
+                        <p className="font-mono text-[10px] text-muted-foreground line-through">{money(l.price * l.qty)}</p>
+                        <p className="font-mono text-sm font-semibold text-brand">{money(l.manualUnitPrice * l.qty)}</p>
+                      </div>
+                    ) : lineDiscountPct(l) > 0 ? (
+                      <div className="text-right">
+                        <p className="font-mono text-[10px] text-muted-foreground line-through">{money(l.price * l.qty)}</p>
+                        <p className="font-mono text-sm font-semibold text-foreground">{money(l.price * l.qty * (1 - lineDiscountPct(l) / 100))}</p>
+                      </div>
+                    ) : (
+                      <p className="font-mono text-sm font-semibold text-foreground">{money(l.price * l.qty)}</p>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="mt-2 flex items-center justify-between">
@@ -1390,7 +1856,11 @@ export function PosCheckout() {
                       >
                         <Minus className="h-3.5 w-3.5" />
                       </button>
-                      <span className="w-10 text-center text-sm font-semibold">{l.qty}</span>
+                      <input
+                        type="number" min="1" step="1" value={l.qty} aria-label={`${l.sku} quantity`}
+                        onChange={(e) => setQtyDirect(l.sku, e.target.value)}
+                        className="w-10 border-0 bg-transparent text-center text-sm font-semibold outline-none focus:bg-brand/5"
+                      />
                       <button
                         onClick={() => updateQty(l.sku, +1)}
                         className="grid h-7 w-7 place-items-center text-muted-foreground transition hover:bg-brand/10 hover:text-brand active:scale-90"
@@ -1411,10 +1881,28 @@ export function PosCheckout() {
                         ))}
                       </select>
                     )}
+                    {/* BRD §2.3/§6.2: cashier-entered per-line discount %, gated by the same
+                        authorization ceiling as the order-level manual discount. */}
+                    <input
+                      type="number" min="0" max="100" step="0.5" value={l.manualDiscountPct ?? ""} placeholder="0%"
+                      aria-label={`${l.sku} discount percent`} title="Per-line discount %"
+                      onChange={(e) => setLineDiscountPct(l.sku, e.target.value)}
+                      className="h-7 w-12 rounded-md border border-black/10 bg-white px-1 text-center text-xs outline-none focus:border-brand"
+                    />
                   </div>
-                  <p className="font-mono text-sm font-semibold text-foreground">
-                    {money(l.price * l.qty)}
-                  </p>
+                  {l.manualUnitPrice != null ? (
+                    <div className="text-right">
+                      <p className="font-mono text-[10px] text-muted-foreground line-through">{money(l.price * l.qty)}</p>
+                      <p className="font-mono text-sm font-semibold text-brand">{money(l.manualUnitPrice * l.qty)}</p>
+                    </div>
+                  ) : lineDiscountPct(l) > 0 ? (
+                    <div className="text-right">
+                      <p className="font-mono text-[10px] text-muted-foreground line-through">{money(l.price * l.qty)}</p>
+                      <p className="font-mono text-sm font-semibold text-foreground">{money(l.price * l.qty * (1 - lineDiscountPct(l) / 100))}</p>
+                    </div>
+                  ) : (
+                    <p className="font-mono text-sm font-semibold text-foreground">{money(l.price * l.qty)}</p>
+                  )}
                 </div>
               )}
             </div>
@@ -1446,6 +1934,50 @@ export function PosCheckout() {
                 <option value="Urgent">Urgent priority</option>
                 <option value="Low">Low priority</option>
               </select>
+              {deliveryAddressType === "Customer Address" && (
+                <div className="relative col-span-2">
+                  {customer ? (
+                    <div className="flex h-8 items-center justify-between gap-1.5 rounded-md border border-black/10 bg-white px-2">
+                      <span className="truncate text-[11px] font-medium text-foreground">
+                        {customer.nameEn}{customer.phone ? ` · ${customer.phone}` : ""}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => { setCustomer(null); setDeliveryCustomerSearch(""); }}
+                        className="flex-none text-[10px] font-medium text-brand hover:underline"
+                      >
+                        Change
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        value={deliveryCustomerSearch}
+                        onChange={(e) => setDeliveryCustomerSearch(e.target.value)}
+                        placeholder="Search saved customer by name or phone…"
+                        className="h-8 w-full rounded-md border border-black/10 bg-white px-2 outline-none focus:border-brand"
+                      />
+                      {deliveryCustomerSuggestions.length > 0 && (
+                        <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-black/10 bg-white shadow-sm">
+                          {deliveryCustomerSuggestions.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => { setCustomer(c); setDeliveryCustomerSearch(""); }}
+                              className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[11px] hover:bg-brand/5"
+                            >
+                              <span className="truncate font-medium text-foreground">{c.nameEn}</span>
+                              <span className="ml-2 flex-none text-[10px] text-muted-foreground">
+                                {c.type}{c.phone ? ` · ${c.phone}` : ""}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               <input
                 value={deliveryContactName} onChange={(e) => setDeliveryContactName(e.target.value)} placeholder="Contact name *"
                 className="h-8 rounded-md border border-black/10 bg-white px-2 outline-none focus:border-brand"
@@ -1572,13 +2104,31 @@ export function PosCheckout() {
               <span>
                 {discountApprovalRequested
                   ? `Approval requested (#${discountApprovalId}) — ask a supervisor, then Charge again.`
-                  : discountType === "Fixed"
+                  : orderDiscountNeedsApproval && discountType === "Fixed"
                     ? "Fixed-amount discounts need supervisor approval."
-                    : `Above your ${discountCeiling}% limit — needs supervisor approval.`}
+                    : `Above your ${discountCeiling}% limit — needs supervisor approval${lineDiscountNeedsApproval ? " (an item discount)" : ""}.`}
               </span>
               {!discountApprovalRequested && (
                 <button
                   onClick={() => setApprovalDialogOpen(true)}
+                  className="shrink-0 rounded-md border border-current px-2 py-0.5 text-[11px] font-medium hover:opacity-80"
+                >
+                  Request Approval
+                </button>
+              )}
+            </div>
+          )}
+
+          {priceOverrideNeedsApproval && (
+            <div className="flex items-center justify-between gap-2 rounded-md bg-warning/10 px-2.5 py-1.5 text-warning">
+              <span>
+                {priceOverrideApprovalRequested
+                  ? `Approval requested (#${priceOverrideApprovalId}) — ask a supervisor, then Charge again.`
+                  : "Overriding an item's price needs supervisor approval."}
+              </span>
+              {!priceOverrideApprovalRequested && (
+                <button
+                  onClick={() => setPriceOverrideApprovalDialogOpen(true)}
                   className="shrink-0 rounded-md border border-current px-2 py-0.5 text-[11px] font-medium hover:opacity-80"
                 >
                   Request Approval
@@ -1621,10 +2171,19 @@ export function PosCheckout() {
             <span>Subtotal ({cart.length} lines)</span>
             <span>{money(subtotal)}</span>
           </div>
-          {contractorDiscountPct > 0 && (
+          {totalCartWeight > 0 && (
+            <div className="flex justify-between text-muted-foreground">
+              <span>Total Weight</span>
+              <span>{totalCartWeight.toFixed(1)} kg</span>
+            </div>
+          )}
+          {contractorDiscount > 0 && (
             <div className="flex justify-between text-muted-foreground">
               <span className="flex items-center gap-1">
-                <Percent className="h-3.5 w-3.5" /> Contractor discount {contractorDiscountPct}%
+                <Percent className="h-3.5 w-3.5" />
+                {contractorDiscountPct > 0 && !hasQuantityRuleDiscount
+                  ? `Contractor discount ${contractorDiscountPct}%`
+                  : "Pricing rule discount"}
               </span>
               <span>-{money(contractorDiscount)}</span>
             </div>
@@ -1685,9 +2244,9 @@ export function PosCheckout() {
         defaultType="Discount"
         defaultAmount={manualAmount ? manualAmount.toFixed(2) : ""}
         defaultReason={
-          discountType === "Fixed"
+          orderDiscountNeedsApproval && discountType === "Fixed"
             ? `Fixed SAR ${manualValue.toFixed(2)} discount on this sale`
-            : `${manualValue}% discount requested — above my ${discountCeiling}% limit`
+            : `${Math.max(manualValue, maxLineManualPct)}% discount requested — above my ${discountCeiling}% limit`
         }
         onCreated={(approval) => setDiscountApprovalId(approval.id)}
       />
@@ -1699,6 +2258,15 @@ export function PosCheckout() {
         defaultAmount={total ? total.toFixed(2) : ""}
         defaultReason={customer ? `${customer.nameEn}'s order would exceed their ${money(customer.creditLimit)} credit limit` : ""}
         onCreated={(approval) => setCreditApprovalId(approval.id)}
+      />
+      <RequestApprovalDialog
+        open={priceOverrideApprovalDialogOpen}
+        onOpenChange={setPriceOverrideApprovalDialogOpen}
+        branchId={effectiveBranchId ?? null}
+        defaultType="PriceOverride"
+        defaultAmount={cart.filter((l) => l.manualUnitPrice != null).reduce((s, l) => s + (l.manualUnitPrice ?? 0) * l.qty, 0).toFixed(2)}
+        defaultReason={`Price override on ${cart.filter((l) => l.manualUnitPrice != null).map((l) => l.sku).join(", ")}`}
+        onCreated={(approval) => setPriceOverrideApprovalId(approval.id)}
       />
 
       {/* Module 15 (BRD §10.2): idle auto-lock overlay — the register stays exactly as it was; the

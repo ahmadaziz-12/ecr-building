@@ -12,8 +12,10 @@ export function CashMovementDialog({ shift, onClose }: { shift: (CashierShiftDto
   const [reason, setReason] = useState("");
   const cashMovement = useCashMovement();
 
+  const amountValid = Number.isFinite(Number(amount)) && Number(amount) > 0;
+
   async function submit() {
-    if (!shift || !amount || !reason.trim()) return;
+    if (!shift || !amountValid || !reason.trim()) return;
     try {
       await cashMovement.mutateAsync({ id: shift.id, direction: shift.direction, amount: Number(amount), reason: reason.trim() });
       toast.success(`Cash ${shift.direction === "in" ? "in" : "out"} recorded`);
@@ -39,7 +41,7 @@ export function CashMovementDialog({ shift, onClose }: { shift: (CashierShiftDto
         </div>
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" disabled={!amount || !reason.trim() || cashMovement.isPending} onClick={submit} className="bg-brand text-brand-foreground hover:bg-brand/90">
+          <Button size="sm" disabled={!amountValid || !reason.trim() || cashMovement.isPending} onClick={submit} className="bg-brand text-brand-foreground hover:bg-brand/90">
             {cashMovement.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Record"}
           </Button>
         </DialogFooter>

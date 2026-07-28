@@ -13,7 +13,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/hr/departments")]
 [Authorize]
-[RequireModule(ModuleArea.Hr, AccessLevel.View)]
+[RequireModule("/hrms/departments", PermissionAction.View)]
 public class DepartmentsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -25,7 +25,7 @@ public class DepartmentsController(AppDbContext db, IAuditService audit) : Contr
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/departments", PermissionAction.Create)]
     public async Task<ActionResult<DepartmentDto>> Create(UpsertDepartmentRequest request, CancellationToken ct)
     {
         var dept = new Department
@@ -49,7 +49,7 @@ public class DepartmentsController(AppDbContext db, IAuditService audit) : Contr
 [ApiController]
 [Route("api/hr/shifts")]
 [Authorize]
-[RequireModule(ModuleArea.Hr, AccessLevel.View)]
+[RequireModule("/hrms/attendance", PermissionAction.View)]
 public class WorkShiftsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -60,7 +60,7 @@ public class WorkShiftsController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/attendance", PermissionAction.Create)]
     public async Task<ActionResult<ShiftDto>> Create(UpsertShiftRequest request, CancellationToken ct)
     {
         var shift = new WorkShift
@@ -80,7 +80,7 @@ public class WorkShiftsController(AppDbContext db, IAuditService audit) : Contro
 [ApiController]
 [Route("api/hr/employees")]
 [Authorize]
-[RequireModule(ModuleArea.Hr, AccessLevel.View)]
+[RequireModule("/hrms/employees", PermissionAction.View)]
 public class EmployeesController(AppDbContext db, IAuditService audit, IPasswordHasher hasher) : ControllerBase
 {
     [HttpGet]
@@ -91,7 +91,7 @@ public class EmployeesController(AppDbContext db, IAuditService audit, IPassword
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/employees", PermissionAction.Create)]
     public async Task<ActionResult<EmployeeDto>> Create(UpsertEmployeeRequest request, CancellationToken ct)
     {
         var employee = new Employee
@@ -130,7 +130,7 @@ public class EmployeesController(AppDbContext db, IAuditService audit, IPassword
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/employees", PermissionAction.Edit)]
     public async Task<ActionResult<EmployeeDto>> Update(int id, UpsertEmployeeRequest request, CancellationToken ct)
     {
         var employee = await db.Employees.FindAsync([id], ct);
@@ -150,7 +150,7 @@ public class EmployeesController(AppDbContext db, IAuditService audit, IPassword
     }
 
     [HttpPut("{id:int}/deactivate")]
-    [RequireModule(ModuleArea.Hr, AccessLevel.Edit)]
+    [RequireModule("/hrms/employees", PermissionAction.Delete)]
     public async Task<ActionResult<EmployeeDto>> Deactivate(int id, CancellationToken ct)
     {
         var employee = await db.Employees.FindAsync([id], ct);

@@ -190,12 +190,16 @@ public class Module6ReturnWorkflowTests : IAsyncLifetime
             new { branchId = ctx.Branch.Id, refundMethod = "StoreCredit" });
         Assert.Equal(HttpStatusCode.OK, approve.StatusCode);
 
-        // Sellable stock untouched; the goods sit in a quarantined batch under the DGRN number.
+        // Sellable stock untouched; the goods sit in a quarantined BRANCH batch under the DGRN number
+        // (not a warehouse-level StockBatch — the item is physically at the branch that took the
+        // return, and a branch with no warehouse of its own must never quarantine into some other
+        // branch's warehouse by arbitrary fallback).
         var stockAfter = (await db.BranchStockLevels.AsNoTracking().FirstAsync(s => s.ProductId == ctx.Product.Id)).OnHand;
         Assert.Equal(stockBefore, stockAfter);
-        var batch = await db.StockBatches.AsNoTracking().FirstOrDefaultAsync(b => b.BatchNo == created.GetProperty("dgrnNo").GetString());
+        var batch = await db.BranchStockBatches.AsNoTracking().FirstOrDefaultAsync(b => b.BatchNo == created.GetProperty("dgrnNo").GetString());
         Assert.NotNull(batch);
-        Assert.Equal(StockBatchStatus.Quarantine, batch!.ManualStatus);
+        Assert.Equal(ctx.Branch.Id, batch!.BranchId);
+        Assert.Equal(StockBatchStatus.Quarantine, batch.ManualStatus);
         Assert.Equal(5m, batch.Qty);
     }
 
@@ -397,5 +401,161 @@ public class Module6ReturnWorkflowTests : IAsyncLifetime
         Assert.True(line.GetProperty("returnable").GetBoolean());
         Assert.Equal(100m, line.GetProperty("unitPricePaid").GetDecimal());
         Assert.Equal(0m, body.GetProperty("netCashback").GetDecimal());
+    }
+
+    // BRD §3.2.1 exchange workflow: a real replacement-item picker + net settlement, not just a
+    // status label — the returned item restocks, the replacement item's stock is deducted, and only
+    // the ACTUAL difference moves via a real payment/refund call.
+    [Fact]
+    public async Task Exchange_for_a_cheaper_replacement_refunds_the_net_difference_and_deducts_replacement_stock()
+    {
+        var ctx = SeedReturnContext();
+        using var db = ctx.Db;
+        var order = SeedCompletedOrder(ctx, qty: 1m); // 100 + 15% VAT = 115 return credit
+        var lineId = order.Lines.First().Id;
+        var replacement = TestDataSeeder.AddProduct(db, ctx.Category, sku: "REPL-CHEAP", sellingPrice: 50m, vatRate: 15m);
+        TestDataSeeder.AddBranchStock(db, replacement, ctx.Branch, 20m);
+
+        var create = await ctx.SupervisorClient.PostAsJsonAsync("/api/finance/returns", new
+        {
+            orderId = order.Id, type = "Exchange", reason = "wrong color, swapping for cheaper item",
+            lines = new[] { new { orderLineId = lineId, qty = 1m } },
+            exchangeLines = new[] { new { productId = replacement.Id, qty = 1m } },
+        });
+        var createBody = await create.Content.ReadAsStringAsync();
+        Assert.True(create.StatusCode == HttpStatusCode.OK, $"Expected OK, got {create.StatusCode}: {createBody}");
+        var created = await create.Content.ReadFromJsonAsync<JsonElement>();
+        // 115 credit − 57.5 replacement = 57.5 owed back to the customer.
+        Assert.Equal(-57.5m, created.GetProperty("exchangeNetPayable").GetDecimal());
+
+        var replacementStockBefore = (await db.BranchStockLevels.AsNoTracking().FirstAsync(s => s.ProductId == replacement.Id)).OnHand;
+        var approve = await ctx.SupervisorClient.PutAsJsonAsync($"/api/finance/returns/{created.GetProperty("id").GetInt32()}/approve",
+            new { branchId = ctx.Branch.Id, refundMethod = "Cash" });
+        var approveBody = await approve.Content.ReadAsStringAsync();
+        Assert.True(approve.StatusCode == HttpStatusCode.OK, $"Expected OK, got {approve.StatusCode}: {approveBody}");
+        var approved = await approve.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.NotNull(approved.GetProperty("exchangeOrderId").GetInt32());
+
+        var replacementStockAfter = (await db.BranchStockLevels.AsNoTracking().FirstAsync(s => s.ProductId == replacement.Id)).OnHand;
+        Assert.Equal(replacementStockBefore - 1m, replacementStockAfter);
+        var originalStock = await db.BranchStockLevels.AsNoTracking().FirstAsync(s => s.ProductId == ctx.Product.Id);
+        Assert.Equal(1000m + 1m, originalStock.OnHand); // seeded at 1,000, +1 restocked from the return
+    }
+
+    [Fact]
+    public async Task Exchange_for_a_pricier_replacement_requires_the_customer_to_pay_the_difference()
+    {
+        var ctx = SeedReturnContext();
+        using var db = ctx.Db;
+        var order = SeedCompletedOrder(ctx, qty: 1m); // 115 return credit
+        var lineId = order.Lines.First().Id;
+        var replacement = TestDataSeeder.AddProduct(db, ctx.Category, sku: "REPL-PRICIER", sellingPrice: 200m, vatRate: 15m);
+        TestDataSeeder.AddBranchStock(db, replacement, ctx.Branch, 20m);
+
+        var create = await ctx.SupervisorClient.PostAsJsonAsync("/api/finance/returns", new
+        {
+            orderId = order.Id, type = "Exchange", reason = "upgrading to the pricier model",
+            lines = new[] { new { orderLineId = lineId, qty = 1m } },
+            exchangeLines = new[] { new { productId = replacement.Id, qty = 1m } },
+        });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+        var created = await create.Content.ReadFromJsonAsync<JsonElement>();
+        // 230 replacement − 115 credit = 115 owed BY the customer.
+        Assert.Equal(115m, created.GetProperty("exchangeNetPayable").GetDecimal());
+        var id = created.GetProperty("id").GetInt32();
+
+        // No payment provided — must be rejected with a clear amount, not silently completed.
+        var approveNoPayment = await ctx.SupervisorClient.PutAsJsonAsync($"/api/finance/returns/{id}/approve", new { branchId = ctx.Branch.Id });
+        Assert.Equal(HttpStatusCode.BadRequest, approveNoPayment.StatusCode);
+        Assert.Contains("requires an additional payment of 115.00", await approveNoPayment.Content.ReadAsStringAsync());
+
+        var approveWithPayment = await ctx.SupervisorClient.PutAsJsonAsync($"/api/finance/returns/{id}/approve",
+            new { branchId = ctx.Branch.Id, payments = new[] { new { method = "Mada", amount = 115m } } });
+        var body = await approveWithPayment.Content.ReadAsStringAsync();
+        Assert.True(approveWithPayment.StatusCode == HttpStatusCode.OK, $"Expected OK, got {approveWithPayment.StatusCode}: {body}");
+    }
+
+    // BRD §3.2.2 no-receipt returns.
+    [Fact]
+    public async Task NoReceipt_return_is_blocked_without_the_waive_receipt_permission()
+    {
+        var ctx = SeedReturnContext();
+        using var db = ctx.Db;
+        var cashierRole = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders, ModuleArea.Finance]);
+        cashierRole.CanAuthorizeStandardReturnWithoutReceipt = false;
+        db.SaveChanges();
+        var cashier = TestDataSeeder.AddUser(db, cashierRole, "no-receipt-blocked@test.local", branchId: ctx.Branch.Id);
+        var client = _factory.CreateAuthenticatedClient(cashier);
+        var customer = TestDataSeeder.AddCustomer(db, type: CustomerType.Retail);
+
+        var response = await client.PostAsJsonAsync("/api/finance/returns", new
+        {
+            orderId = (int?)null, type = "Standard", reason = "lost the receipt",
+            lines = Array.Empty<object>(), customerId = customer.Id,
+            noReceiptLines = new[] { new { productId = ctx.Product.Id, qty = 1m } },
+        });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Contains("Supervisor", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task NoReceipt_return_succeeds_for_an_authorized_user_priced_at_current_selling_price()
+    {
+        var ctx = SeedReturnContext();
+        using var db = ctx.Db;
+        var supervisorRole = TestDataSeeder.AddRole(db, "Store Manager", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders, ModuleArea.Finance]);
+        supervisorRole.CanAuthorizeStandardReturnWithoutReceipt = true;
+        supervisorRole.SurplusReturnCeilingAmount = null;
+        db.SaveChanges();
+        var manager = TestDataSeeder.AddUser(db, supervisorRole, "no-receipt-allowed@test.local", branchId: ctx.Branch.Id);
+        var client = _factory.CreateAuthenticatedClient(manager);
+        var customer = TestDataSeeder.AddCustomer(db, type: CustomerType.Retail);
+
+        var create = await client.PostAsJsonAsync("/api/finance/returns", new
+        {
+            orderId = (int?)null, type = "Standard", reason = "lost the receipt, box unopened",
+            lines = Array.Empty<object>(), customerId = customer.Id,
+            noReceiptLines = new[] { new { productId = ctx.Product.Id, qty = 2m } },
+        });
+        var createBody = await create.Content.ReadAsStringAsync();
+        Assert.True(create.StatusCode == HttpStatusCode.OK, $"Expected OK, got {create.StatusCode}: {createBody}");
+        var created = await create.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(created.GetProperty("isNoReceipt").GetBoolean());
+        Assert.Equal("StoreCredit", created.GetProperty("refundMethod").GetString());
+        // 2 units × 100 selling price × 1.15 VAT = 230.
+        Assert.Equal(230m, created.GetProperty("netCashback").GetDecimal());
+
+        var approve = await client.PutAsJsonAsync($"/api/finance/returns/{created.GetProperty("id").GetInt32()}/approve",
+            new { branchId = ctx.Branch.Id, refundMethod = "StoreCredit" });
+        var approveBody = await approve.Content.ReadAsStringAsync();
+        Assert.True(approve.StatusCode == HttpStatusCode.OK, $"Expected OK, got {approve.StatusCode}: {approveBody}");
+    }
+
+    // BRD §10.1: Role.CanConfigureReturnRulesAndFees now actually gates the return-policy endpoint.
+    // Two separate users/clients (not toggling one role after its client/JWT already exists) — JWT
+    // claims are minted at token issuance, so mutating a role after CreateAuthenticatedClient wouldn't
+    // be reflected on the same already-issued client.
+    [Fact]
+    public async Task Updating_return_policy_requires_the_configure_return_rules_permission()
+    {
+        var ctx = SeedReturnContext();
+        using var db = ctx.Db;
+        var blockedRole = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders, ModuleArea.Finance]);
+        blockedRole.CanConfigureReturnRulesAndFees = false;
+        var allowedRole = TestDataSeeder.AddRole(db, "Store Manager", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders, ModuleArea.Finance]);
+        allowedRole.CanConfigureReturnRulesAndFees = true;
+        db.SaveChanges();
+        var blockedClient = _factory.CreateAuthenticatedClient(TestDataSeeder.AddUser(db, blockedRole, "policy-blocked@test.local", branchId: ctx.Branch.Id));
+        var allowedClient = _factory.CreateAuthenticatedClient(TestDataSeeder.AddUser(db, allowedRole, "policy-allowed@test.local", branchId: ctx.Branch.Id));
+
+        var blocked = await blockedClient.PutAsJsonAsync("/api/finance/returns/policy-config",
+            new { dualAuthCashThreshold = 500m, standardWindowDays = 15, surplusWindowDays = 90 });
+        Assert.Equal(HttpStatusCode.Forbidden, blocked.StatusCode);
+
+        var allowed = await allowedClient.PutAsJsonAsync("/api/finance/returns/policy-config",
+            new { dualAuthCashThreshold = 500m, standardWindowDays = 15, surplusWindowDays = 90 });
+        var allowedBody = await allowed.Content.ReadAsStringAsync();
+        Assert.True(allowed.StatusCode == HttpStatusCode.OK, $"Expected OK, got {allowed.StatusCode}: {allowedBody}");
     }
 }

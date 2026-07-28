@@ -74,13 +74,25 @@ public static class EscPosBuilder
         {
             var itemName = line.Product?.NameEn ?? "Item";
             Text(itemName.Length > Width ? itemName[..Width] : itemName); Lf();
-            Row($"  {line.Qty:0.####} x SAR {line.UnitPrice:F2}", $"SAR {line.LineTotal:F2}");
+            var qtyPrice = $"  {line.Qty:0.####} x SAR {line.UnitPrice:F2}";
+            // Prints which discount (contractor/tier rate or a Quantity pricing rule threshold —
+            // whichever applied is already baked into DiscountPct) actually reduced this specific
+            // line, not just the order-wide total below.
+            if (line.DiscountPct > 0) qtyPrice += $" (-{line.DiscountPct:0.#}%)";
+            Row(qtyPrice, $"SAR {line.LineTotal:F2}");
+            // Total kg for this line (product's per-stock-unit weight × qty actually deducted) —
+            // matters for bundle/pallet items (rebar, cement) where the physical load size is what
+            // the yard crew and delivery truck actually care about, not just the SAR total.
+            var lineWeight = (line.Product?.Weight ?? 0) * (line.StockQty > 0 ? line.StockQty : line.Qty);
+            if (lineWeight > 0) { Text($"  {lineWeight:0.#} kg"); Lf(); }
         }
         Divider();
 
         // Totals
         Row("Subtotal", $"SAR {order.SubTotal:F2}");
         if (order.DiscountTotal > 0) Row("Discount", $"-SAR {order.DiscountTotal:F2}");
+        var totalWeight = order.Lines.Sum(l => (l.Product?.Weight ?? 0) * (l.StockQty > 0 ? l.StockQty : l.Qty));
+        if (totalWeight > 0) Row("Total Weight", $"{totalWeight:0.#} kg");
         foreach (var fee in order.Fees) Row(fee.Label, $"SAR {fee.Amount:F2}");
         Row("VAT", $"SAR {order.VatTotal:F2}");
 

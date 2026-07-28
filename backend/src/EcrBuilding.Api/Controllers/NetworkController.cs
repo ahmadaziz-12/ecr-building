@@ -15,7 +15,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/network/branches")]
 [Authorize]
-[RequireModule(ModuleArea.Network, AccessLevel.View)]
+[RequireModule("/network/branches", PermissionAction.View)]
 public class BranchesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -33,7 +33,7 @@ public class BranchesController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/branches", PermissionAction.Create)]
     public async Task<ActionResult<BranchDto>> Create(UpsertBranchRequest request, CancellationToken ct)
     {
         var branch = new Branch
@@ -49,7 +49,7 @@ public class BranchesController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/branches", PermissionAction.Edit)]
     public async Task<ActionResult<BranchDto>> Update(int id, UpdateBranchRequest request, CancellationToken ct)
     {
         var branch = await db.Branches.Include(b => b.Terminals).FirstOrDefaultAsync(b => b.Id == id, ct);
@@ -74,7 +74,7 @@ public class BranchesController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/branches", PermissionAction.Delete)]
     public async Task<ActionResult<BranchDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
     {
         var branch = await db.Branches.Include(b => b.Terminals).FirstOrDefaultAsync(b => b.Id == id, ct);
@@ -96,7 +96,7 @@ public class BranchesController(AppDbContext db, IAuditService audit) : Controll
 [ApiController]
 [Route("api/network/terminals")]
 [Authorize]
-[RequireModule(ModuleArea.Network, AccessLevel.View)]
+[RequireModule("/network/terminals", PermissionAction.View)]
 public class TerminalsController(AppDbContext db, IAuditService audit, IPasswordHasher passwordHasher) : ControllerBase
 {
     [HttpGet]
@@ -109,7 +109,7 @@ public class TerminalsController(AppDbContext db, IAuditService audit, IPassword
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/terminals", PermissionAction.Create)]
     public async Task<ActionResult<TerminalDto>> Create(UpsertTerminalRequest request, CancellationToken ct)
     {
         var terminal = new Terminal
@@ -127,7 +127,7 @@ public class TerminalsController(AppDbContext db, IAuditService audit, IPassword
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/terminals", PermissionAction.Edit)]
     public async Task<ActionResult<TerminalDto>> Update(int id, UpsertTerminalRequest request, CancellationToken ct)
     {
         var terminal = await db.Terminals.Include(t => t.Branch).Include(t => t.Devices).Include(t => t.Operator).FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -151,7 +151,7 @@ public class TerminalsController(AppDbContext db, IAuditService audit, IPassword
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/terminals", PermissionAction.Delete)]
     public async Task<ActionResult<TerminalDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
     {
         var terminal = await db.Terminals.Include(t => t.Branch).Include(t => t.Devices).Include(t => t.Operator).FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -165,7 +165,7 @@ public class TerminalsController(AppDbContext db, IAuditService audit, IPassword
     }
 
     [HttpPut("{id:int}/assign-cashier")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/terminals", PermissionAction.Edit)]
     public async Task<ActionResult<TerminalDto>> AssignCashier(int id, AssignCashierRequest request, CancellationToken ct)
     {
         var terminal = await db.Terminals.Include(t => t.Branch).Include(t => t.Devices).Include(t => t.Operator).FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -184,7 +184,7 @@ public class TerminalsController(AppDbContext db, IAuditService audit, IPassword
     }
 
     [HttpPost("{id:int}/force-sync")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/terminals", PermissionAction.Edit)]
     public async Task<ActionResult<TerminalDto>> ForceSync(int id, CancellationToken ct)
     {
         var terminal = await db.Terminals.Include(t => t.Branch).Include(t => t.Devices).Include(t => t.Operator).FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -199,7 +199,7 @@ public class TerminalsController(AppDbContext db, IAuditService audit, IPassword
     }
 
     [HttpPost("{id:int}/kiosk-pairing")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/terminals", PermissionAction.Edit)]
     public async Task<ActionResult<GenerateKioskPairingResponse>> GenerateKioskPairing(int id, CancellationToken ct)
     {
         var terminal = await db.Terminals.FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -216,7 +216,7 @@ public class TerminalsController(AppDbContext db, IAuditService audit, IPassword
     }
 
     [HttpPut("{id:int}/kiosk-lockdown-pin")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/terminals", PermissionAction.Edit)]
     public async Task<ActionResult<TerminalDto>> SetKioskLockdownPin(int id, SetKioskLockdownPinRequest request, CancellationToken ct)
     {
         var terminal = await db.Terminals.Include(t => t.Branch).Include(t => t.Devices).Include(t => t.Operator).FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -236,7 +236,7 @@ public class TerminalsController(AppDbContext db, IAuditService audit, IPassword
     }
 
     [HttpDelete("{id:int}/kiosk-lockdown-pin")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/terminals", PermissionAction.Delete)]
     public async Task<ActionResult<TerminalDto>> ClearKioskLockdownPin(int id, CancellationToken ct)
     {
         var terminal = await db.Terminals.Include(t => t.Branch).Include(t => t.Devices).Include(t => t.Operator).FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -260,7 +260,7 @@ public class TerminalsController(AppDbContext db, IAuditService audit, IPassword
 [ApiController]
 [Route("api/network/devices")]
 [Authorize]
-[RequireModule(ModuleArea.Network, AccessLevel.View)]
+[RequireModule("/network/devices", PermissionAction.View)]
 public class DevicesController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -273,7 +273,7 @@ public class DevicesController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPost("pair")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/devices", PermissionAction.Create)]
     public async Task<ActionResult<DeviceDto>> Pair(PairDeviceRequest request, CancellationToken ct)
     {
         var terminal = await db.Terminals.FindAsync([request.TerminalId], ct);
@@ -304,7 +304,7 @@ public class DevicesController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/devices", PermissionAction.Edit)]
     public async Task<ActionResult<DeviceDto>> Update(int id, UpdateDeviceRequest request, CancellationToken ct)
     {
         var device = await db.Devices.Include(d => d.Terminal).Include(d => d.Branch).FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -332,7 +332,7 @@ public class DevicesController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/devices", PermissionAction.Delete)]
     public async Task<ActionResult<DeviceDto>> SetStatus(int id, DeviceSetStatusRequest request, CancellationToken ct)
     {
         var device = await db.Devices.Include(d => d.Terminal).Include(d => d.Branch).FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -354,7 +354,7 @@ public class DevicesController(AppDbContext db, IAuditService audit) : Controlle
     // rides the cash payment) from a NO-SALE open ("NoSale" — needs supervisor authorization and its
     // own distinct audit event so Z-report reconciliation can count them separately).
     [HttpPost("{id:int}/open-drawer")]
-    [RequireModule(ModuleArea.Network, AccessLevel.View)]
+    [RequireModule("/network/devices", PermissionAction.View)]
     public async Task<ActionResult> OpenDrawer(int id, [FromQuery] string context = "NoSale", CancellationToken ct = default)
     {
         var device = await db.Devices.FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -387,7 +387,7 @@ public class DevicesController(AppDbContext db, IAuditService audit) : Controlle
     }
 
     [HttpPut("{id:int}/qz-mapping")]
-    [RequireModule(ModuleArea.Network, AccessLevel.Edit)]
+    [RequireModule("/network/devices", PermissionAction.Edit)]
     public async Task<ActionResult<DeviceDto>> UpdateQzMapping(int id, UpdateDeviceQzMappingRequest request, CancellationToken ct)
     {
         var device = await db.Devices.Include(d => d.Terminal).Include(d => d.Branch).FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -406,7 +406,7 @@ public class DevicesController(AppDbContext db, IAuditService audit) : Controlle
 [ApiController]
 [Route("api/network/session-logs")]
 [Authorize]
-[RequireModule(ModuleArea.Network, AccessLevel.View)]
+[RequireModule("/network/terminals", PermissionAction.View)]
 public class SessionLogsController(AppDbContext db) : ControllerBase
 {
     [HttpGet]

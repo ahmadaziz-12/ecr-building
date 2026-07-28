@@ -4,6 +4,7 @@ public record SupplierDto(int Id, string Code, string NameEn, string? NameAr, st
 public record UpsertSupplierRequest(string Code, string NameEn, string? NameAr, string Type, string? VatNo, string? Phone, string? Email, string[] Categories, string Terms, string Currency, int LeadTimeDays, string? Iban);
 
 public record SupplierLedgerLineDto(DateTime Date, string Reference, string Description, string AccountCode, string AccountName, decimal Debit, decimal Credit);
+public record RecordSupplierPaymentRequest(decimal Amount, string Method, string? ReferenceNo, string? Notes);
 
 // Uom: the purchasing unit Qty/UnitCost/ReceivedQty are expressed in ("" = the product's own StockUom).
 // StockUom is included so the UI can show "3 of 5 Pallet (150 Bag)" without a second product lookup.

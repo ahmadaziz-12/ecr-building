@@ -45,10 +45,12 @@ export function RequestApprovalDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  const amountValid = Number.isFinite(Number(amount)) && Number(amount) > 0;
+
   async function submit() {
-    if (!branchId || !reason.trim()) return;
+    if (!branchId || !reason.trim() || !amountValid) return;
     try {
-      const created = await createApproval.mutateAsync({ type, branchId, amount: Number(amount) || 0, reason: reason.trim() });
+      const created = await createApproval.mutateAsync({ type, branchId, amount: Number(amount), reason: reason.trim() });
       toast.success("Approval requested", { description: "A supervisor will review this shortly." });
       onCreated?.(created);
       reset();
@@ -72,7 +74,7 @@ export function RequestApprovalDialog({
           </Select>
         </div>
         <div>
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Amount (ر.س)</label>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Amount (ر.س) <span className="text-critical">*</span></label>
           <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
         </div>
         <div>
@@ -81,7 +83,7 @@ export function RequestApprovalDialog({
         </div>
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button size="sm" disabled={!reason.trim() || createApproval.isPending} onClick={submit} className="bg-brand text-brand-foreground hover:bg-brand/90">
+          <Button size="sm" disabled={!reason.trim() || !amountValid || createApproval.isPending} onClick={submit} className="bg-brand text-brand-foreground hover:bg-brand/90">
             {createApproval.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Submit Request"}
           </Button>
         </DialogFooter>

@@ -5,11 +5,13 @@ import { Pill, SectionCard } from "@/components/buildpos/sections";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   RowActionsMenu, statusTone, FilterBar, emptyFilterDraft, usePagination, PaginationBar, exportToCsv,
-  type FilterFieldDef,
+  type FilterFieldDef, type FilterDraftValue,
 } from "./shared";
+import { resolveDateRangeBounds, type DateRangeValue } from "@/components/buildpos/FilterControls";
 import { OpenShiftDialog } from "./OpenShiftDialog";
 import { CloseShiftDialog } from "./CloseShiftDialog";
 import { CashMovementDialog } from "./CashMovementDialog";
+import { CashMovementsDialog } from "./CashMovementsDialog";
 import { ShiftReportDialog } from "./ShiftReportDialog";
 import { useCashierShifts, type CashierShiftDto } from "@/lib/api/pos";
 import { useAuth } from "@/lib/api/auth";
@@ -26,11 +28,11 @@ function fmtTime(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 }
-function inDateRange(iso: string, from: string, to: string): boolean {
+function inDateRange(iso: string, range: DateRangeValue | undefined): boolean {
+  const bounds = resolveDateRangeBounds(range);
+  if (!bounds) return true;
   const d = new Date(iso).getTime();
-  if (from && d < new Date(from).getTime()) return false;
-  if (to && d > new Date(`${to}T23:59:59`).getTime()) return false;
-  return true;
+  return d >= bounds.from.getTime() && d <= bounds.to.getTime();
 }
 
 export function CashierShiftPage() {
@@ -44,29 +46,33 @@ export function CashierShiftPage() {
   const [closingShift, setClosingShift] = useState<CashierShiftDto | null>(null);
   const [movementShift, setMovementShift] = useState<(CashierShiftDto & { direction: "in" | "out" }) | null>(null);
   const [reportTarget, setReportTarget] = useState<{ shiftId: number; type: "X" | "Z" } | null>(null);
+  const [movementsShiftId, setMovementsShiftId] = useState<number | null>(null);
 
   const terminalBranch = useMemo(() => new Map((terminals ?? []).map((t) => [t.id, t.branchId])), [terminals]);
 
   const fields: FilterFieldDef[] = useMemo(() => [
-    { kind: "date", key: "dateFrom", placeholder: "From Date" },
-    { kind: "date", key: "dateTo", placeholder: "To Date" },
+    { kind: "daterange", key: "dateRange", placeholder: "Date Range" },
     { kind: "select", key: "branchId", placeholder: "Branch", options: (branches ?? []).map((b) => String(b.id)), labels: Object.fromEntries((branches ?? []).map((b) => [String(b.id), b.nameEn])) },
     { kind: "select", key: "terminalId", placeholder: "Terminal", options: (terminals ?? []).map((t) => String(t.id)), labels: Object.fromEntries((terminals ?? []).map((t) => [String(t.id), t.name])) },
     { kind: "select", key: "cashier", placeholder: "Cashier", options: Array.from(new Set((shifts ?? []).map((s) => s.cashierName))) },
     { kind: "select", key: "status", placeholder: "Status", options: SHIFT_STATUSES, labels: STATUS_LABELS },
   ], [branches, terminals, shifts]);
 
-  const [draft, setDraft] = useState<Record<string, string>>(() => emptyFilterDraft(fields));
-  const [applied, setApplied] = useState<Record<string, string>>(draft);
+  const [draft, setDraft] = useState<Record<string, FilterDraftValue>>(() => emptyFilterDraft(fields));
+  const [applied, setApplied] = useState<Record<string, FilterDraftValue>>(draft);
 
   const all = shifts ?? [];
   const filtered = useMemo(() => {
+    const status = (applied.status as string[]) ?? [];
+    const terminalId = (applied.terminalId as string[]) ?? [];
+    const cashier = (applied.cashier as string[]) ?? [];
+    const branchId = (applied.branchId as string[]) ?? [];
     return all.filter((s) => {
-      if (applied.status && s.status !== applied.status) return false;
-      if (applied.terminalId && String(s.terminalId) !== applied.terminalId) return false;
-      if (applied.cashier && s.cashierName !== applied.cashier) return false;
-      if (applied.branchId && String(terminalBranch.get(s.terminalId)) !== applied.branchId) return false;
-      if ((applied.dateFrom || applied.dateTo) && !inDateRange(s.openedAt, applied.dateFrom, applied.dateTo)) return false;
+      if (status.length && !status.includes(s.status)) return false;
+      if (terminalId.length && !terminalId.includes(String(s.terminalId))) return false;
+      if (cashier.length && !cashier.includes(s.cashierName)) return false;
+      if (branchId.length && !branchId.includes(String(terminalBranch.get(s.terminalId)))) return false;
+      if (!inDateRange(s.openedAt, applied.dateRange as DateRangeValue)) return false;
       return true;
     });
   }, [all, applied, terminalBranch]);
@@ -153,6 +159,7 @@ export function CashierShiftPage() {
                         { label: "Cash Out", onClick: () => setMovementShift({ ...s, direction: "out" }), disabled: s.status !== "Open" },
                         { label: "Close Shift", onClick: () => setClosingShift(s), disabled: s.status !== "Open" },
                         "separator",
+                        { label: "View Cash Movements", onClick: () => setMovementsShiftId(s.id) },
                         { label: "Print X-Report", onClick: () => setReportTarget({ shiftId: s.id, type: "X" }) },
                         { label: "Print Z-Report", onClick: () => setReportTarget({ shiftId: s.id, type: "Z" }), disabled: s.status === "Open" },
                       ]}
@@ -174,6 +181,7 @@ export function CashierShiftPage() {
       <OpenShiftDialog open={opening} onOpenChange={setOpening} branchId={effectiveBranchId} />
       <CloseShiftDialog shift={closingShift} onClose={() => setClosingShift(null)} />
       <CashMovementDialog shift={movementShift} onClose={() => setMovementShift(null)} />
+      <CashMovementsDialog shiftId={movementsShiftId} onClose={() => setMovementsShiftId(null)} />
       <ShiftReportDialog target={reportTarget} onClose={() => setReportTarget(null)} />
     </div>
   );

@@ -11,11 +11,25 @@ public enum CustomerType
     B2B = 3
 }
 
+// BRD §7 (CR-038): which of Product's list prices this customer is charged — independent of
+// CustomerType above, which governs credit/account behavior (AccountCredit eligibility etc.), not
+// pricing. A Contractor-type customer isn't automatically on the Contractor price list; a manager
+// assigns it explicitly (e.g. a B2B account doing bulk buying might be assigned Wholesale instead).
+public enum PriceListType
+{
+    Retail = 0,
+    Contractor = 1,
+    Wholesale = 2,
+    Project = 3
+}
+
 public class Customer : BaseEntity
 {
     public string NameEn { get; set; } = string.Empty;
     public string? NameAr { get; set; }
     public CustomerType Type { get; set; } = CustomerType.Retail;
+    // BRD §7 (CR-038): which Product price list applies to this customer at checkout.
+    public PriceListType PriceListType { get; set; } = PriceListType.Retail;
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public string? VatNo { get; set; }

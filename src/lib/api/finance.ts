@@ -69,11 +69,19 @@ export type ReturnDto = {
   refundSplitJson: string | null;
   exchangeOrderId: number | null;
   exchangeOrderNo: string | null;
+  // Replacement sale total − this return's cashback: positive = customer owes more, negative =
+  // customer is owed the difference back, zero = an even swap.
   exchangeNetPayable: number | null;
   // Inherited from the original sale via Order — null only if that order was later deleted.
   branchId: number | null;
   branchName: string | null;
   cashierName: string | null;
+  exchangeLines: ExchangeLineDto[];
+  isNoReceipt: boolean;
+};
+export type ExchangeLineDto = {
+  productId: number; sku: string; productName: string; qty: number; uom: string;
+  unitPrice: number; vatRate: number; lineTotal: number;
 };
 
 // The Return Value Calculation shown to the cashier BEFORE confirming (BRD §3.2.3/§3.2.4).
@@ -85,6 +93,7 @@ export type ReturnPreviewLineDto = {
 export type ReturnPreviewDto = {
   grossRefund: number; vatReversal: number; restockingFeePct: number; restockingFeeAmount: number;
   netCashback: number; requiresWindowOverride: boolean; windowDays: number; lines: ReturnPreviewLineDto[];
+  exchangeLines?: ExchangeLineDto[]; exchangeLinesTotal: number; exchangeNetPayable: number | null;
 };
 export type AccountDto = { id: number; code: string; name: string; type: string; balance: number };
 export type JournalLineDto = {
@@ -193,8 +202,13 @@ export function useSetTaxCodeStatus() {
 // Module 6: the cashier picks specific ORIGINAL ORDER LINES and quantities — refund amounts are
 // computed server-side from the original sale, never sent from the client.
 export type CreateReturnLineInput = { orderLineId: number; qty: number };
+// BRD §3.2.1 exchange workflow: the replacement item(s), keyed by product (not an order line).
+export type ExchangeLineInput = { productId: number; qty: number; uom?: string };
+// BRD §3.2.2 (no-receipt returns): entered directly by product/qty with no original order.
+export type NoReceiptLineInput = { productId: number; qty: number };
 export type CreateReturnRequest = {
-  orderId: number;
+  // Null = a no-receipt return (Standard only) — see customerId/noReceiptLines below.
+  orderId: number | null;
   type: string;
   reason: string;
   lines: CreateReturnLineInput[];
@@ -202,6 +216,9 @@ export type CreateReturnRequest = {
   photoReference?: string;
   windowOverrideApprovalRequestId?: number | null;
   exchangeOrderId?: number | null;
+  exchangeLines?: ExchangeLineInput[];
+  customerId?: number | null;
+  noReceiptLines?: NoReceiptLineInput[];
 };
 export function useCreateReturn() {
   const queryClient = useQueryClient();
@@ -214,7 +231,7 @@ export function useCreateReturn() {
 
 export function useReturnPreview() {
   return useMutation({
-    mutationFn: (request: { orderId: number; type: string; lines: CreateReturnLineInput[] }) =>
+    mutationFn: (request: { orderId: number; type: string; lines: CreateReturnLineInput[]; exchangeLines?: ExchangeLineInput[] }) =>
       apiPost<ReturnPreviewDto>("/api/finance/returns/preview", request),
   });
 }
@@ -234,13 +251,16 @@ export function useQuarantineReturn() {
   });
 }
 
+// BRD §3.2.1 Exchange: required when the replacement item(s) cost more than the return's own
+// cashback — the payment method(s)/amount(s) covering the shortfall, same shape as POS checkout.
+export type ExchangePaymentInput = { method: string; amount: number };
 export function useApproveReturn() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, branchId, refundMethod, secondAuthEmail, secondAuthPin }: {
-      id: number; branchId: number; refundMethod?: string; secondAuthEmail?: string; secondAuthPin?: string;
+    mutationFn: ({ id, branchId, refundMethod, secondAuthEmail, secondAuthPin, payments }: {
+      id: number; branchId: number; refundMethod?: string; secondAuthEmail?: string; secondAuthPin?: string; payments?: ExchangePaymentInput[];
     }) =>
-      apiPut<ReturnDto>(`/api/finance/returns/${id}/approve`, { branchId, refundMethod, secondAuthEmail, secondAuthPin }),
+      apiPut<ReturnDto>(`/api/finance/returns/${id}/approve`, { branchId, refundMethod, secondAuthEmail, secondAuthPin, payments }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["finance", "returns"] });
       queryClient.invalidateQueries({ queryKey: ["inventory", "branch-stock-levels"] });
@@ -366,12 +386,15 @@ export function mapReturns(rows: ReturnDto[]): LiveTable {
       // Standard/Damaged/Surplus/Exchange tabs and status-pill rendering already key on.
       "Branch",
       "Cashier",
+      // Ditto — but without it the page's Date range filter has no column to resolve to and
+      // silently does nothing.
+      "Date",
     ],
     statusCol: 8,
     ids: rows.map((r) => r.id),
     rows: rows.map((r) => [
       r.returnNo,
-      r.orderNo ?? "—",
+      r.orderNo ?? (r.isNoReceipt ? "No receipt" : "—"),
       r.customerName,
       r.type,
       r.lines.map((l) => l.productName).join(", ") || "—",
@@ -381,6 +404,7 @@ export function mapReturns(rows: ReturnDto[]): LiveTable {
       r.status,
       r.branchName ?? "—",
       r.cashierName ?? "—",
+      fmtDate(r.createdAt),
     ]),
   };
 }

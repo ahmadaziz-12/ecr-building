@@ -1,14 +1,18 @@
 import { useMemo, useState } from "react";
 import { PageHeader, KpiGrid } from "@/components/buildpos/PageHeader";
 import { Pill, SectionCard } from "@/components/buildpos/sections";
+import { MultiSelectFilter } from "@/components/buildpos/FilterControls";
 import { useAuditStore } from "@/lib/store/audit";
+
+const SEVERITIES = ["info", "warning", "critical"];
+const SEVERITY_LABELS: Record<string, string> = { info: "Info", warning: "Warning", critical: "Critical" };
 
 export function HrActivityLogsPage() {
   const events = useAuditStore((s) => s.events).filter((e) => e.module === "hr");
   const [q, setQ] = useState("");
-  const [sev, setSev] = useState<"all" | "info" | "warning" | "critical">("all");
+  const [sev, setSev] = useState<string[]>([]);
 
-  const rows = useMemo(() => events.filter((e) => (sev === "all" || e.severity === sev) && (!q || e.event.toLowerCase().includes(q.toLowerCase()) || (e.employee ?? "").toLowerCase().includes(q.toLowerCase()))), [events, sev, q]);
+  const rows = useMemo(() => events.filter((e) => (sev.length === 0 || sev.includes(e.severity)) && (!q || e.event.toLowerCase().includes(q.toLowerCase()) || (e.employee ?? "").toLowerCase().includes(q.toLowerCase()))), [events, sev, q]);
 
   const kpi = {
     total: events.length,
@@ -37,9 +41,7 @@ export function HrActivityLogsPage() {
       ]} />
       <div className="flex items-center gap-2 rounded-xl border border-black/5 bg-white p-2">
         <input placeholder="Search event or employee…" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 w-72 rounded-lg border border-black/10 bg-canvas px-3 text-sm" />
-        <select value={sev} onChange={(e) => setSev(e.target.value as never)} className="h-9 rounded-lg border border-black/10 bg-canvas px-2 text-sm">
-          <option value="all">All severity</option><option value="info">Info</option><option value="warning">Warning</option><option value="critical">Critical</option>
-        </select>
+        <MultiSelectFilter label="Severity" allLabel="All Severity" options={SEVERITIES} labels={SEVERITY_LABELS} selected={sev} onChange={setSev} />
       </div>
       <SectionCard title="Activity" desc={`${rows.length} events`}>
         <div className="overflow-x-auto">

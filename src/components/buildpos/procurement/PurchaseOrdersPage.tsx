@@ -5,8 +5,9 @@ import { Pill, SectionCard } from "@/components/buildpos/sections";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   RowActionsMenu, statusTone, FilterBar, emptyFilterDraft, usePagination, PaginationBar, exportToCsv,
-  type FilterFieldDef, type RowAction,
+  type FilterFieldDef, type FilterDraftValue, type RowAction,
 } from "@/components/buildpos/pos/shared";
+import { resolveDateRangeBounds, type DateRangeValue } from "@/components/buildpos/FilterControls";
 import { FlowDialog } from "@/components/buildpos/FlowDialog";
 import { getFlow } from "@/lib/buildpos/flows";
 import { useFlowSubmitHandlers } from "@/lib/api/flow-submit-handlers";
@@ -61,11 +62,11 @@ function fmtSar(n: number): string {
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
-function inDateRange(iso: string, from: string, to: string): boolean {
+function inDateRange(iso: string, range: DateRangeValue | undefined): boolean {
+  const bounds = resolveDateRangeBounds(range);
+  if (!bounds) return true;
   const d = new Date(iso).getTime();
-  if (from && d < new Date(from).getTime()) return false;
-  if (to && d > new Date(`${to}T23:59:59`).getTime()) return false;
-  return true;
+  return d >= bounds.from.getTime() && d <= bounds.to.getTime();
 }
 function receivedValue(po: PurchaseOrderDto): number {
   return po.lines.reduce((s, l) => s + l.receivedQty * l.unitCost, 0);
@@ -110,24 +111,26 @@ export function PurchaseOrdersPage() {
   const receiveTarget = allPos.find((p) => p.id === receiveId) ?? null;
 
   const fields: FilterFieldDef[] = useMemo(() => [
-    { kind: "date", key: "dateFrom", placeholder: "ETA From" },
-    { kind: "date", key: "dateTo", placeholder: "ETA To" },
+    { kind: "daterange", key: "dateRange", placeholder: "ETA" },
     { kind: "select", key: "supplier", placeholder: "Supplier", options: Array.from(new Set(allPos.map((p) => p.supplierName))).sort() },
     { kind: "select", key: "branch", placeholder: "Branch", options: (branches ?? []).map((b) => b.nameEn) },
     { kind: "search", key: "search", placeholder: "Search PO #, supplier…" },
   ], [allPos, branches]);
 
-  const [draft, setDraft] = useState<Record<string, string>>(() => emptyFilterDraft(fields));
-  const [applied, setApplied] = useState<Record<string, string>>(draft);
+  const [draft, setDraft] = useState<Record<string, FilterDraftValue>>(() => emptyFilterDraft(fields));
+  const [applied, setApplied] = useState<Record<string, FilterDraftValue>>(draft);
 
   const filtered = useMemo(() => {
+    const supplier = (applied.supplier as string[]) ?? [];
+    const branch = (applied.branch as string[]) ?? [];
+    const search = (applied.search as string) ?? "";
     return allPos.filter((p) => {
       if (tab !== "All" && p.status !== TAB_TO_STATUS[tab]) return false;
-      if (applied.supplier && p.supplierName !== applied.supplier) return false;
-      if (applied.branch && !p.branches.includes(applied.branch)) return false;
-      if ((applied.dateFrom || applied.dateTo) && !inDateRange(p.expectedDate, applied.dateFrom, applied.dateTo)) return false;
-      if (applied.search) {
-        const t = applied.search.trim().toLowerCase();
+      if (supplier.length && !supplier.includes(p.supplierName)) return false;
+      if (branch.length && !branch.some((b) => p.branches.includes(b))) return false;
+      if (!inDateRange(p.expectedDate, applied.dateRange as DateRangeValue)) return false;
+      if (search) {
+        const t = search.trim().toLowerCase();
         if (t && !p.poNo.toLowerCase().includes(t) && !p.supplierName.toLowerCase().includes(t)) return false;
       }
       return true;

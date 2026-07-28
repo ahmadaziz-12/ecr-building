@@ -224,9 +224,16 @@ public class Module1DiscountAuthorizationTests : IAsyncLifetime
         db.SaveChanges();
         var cashier = TestDataSeeder.AddUser(db, cashierRole, "cashier5@test.local", branchId: branch.Id);
         var contractor = TestDataSeeder.AddCustomer(db, type: CustomerType.Contractor);
+        db.PricingRules.Add(new PricingRule
+        {
+            Name = "Contractor Trade Price", Type = "Trade Tier", Scope = "Contractor customers", Condition = "Any",
+            Action = "-5% list", Priority = 10, Status = PricingRuleStatus.Active,
+            DiscountType = RuleDiscountType.Percentage, Value = 5m,
+        });
+        db.SaveChanges();
         var client = _factory.CreateAuthenticatedClient(cashier);
 
-        // Contractor's automatic trade discount (5%, ContractorDiscountPct in OrdersController) applies
+        // Contractor's automatic trade discount, driven by an active Trade Tier PricingRule, applies
         // with no ManualDiscount at all — must never be blocked by the discount-tier check above,
         // regardless of the cashier's own ceiling.
         var request = new
@@ -240,5 +247,129 @@ public class Module1DiscountAuthorizationTests : IAsyncLifetime
         var response = await client.PostAsJsonAsync("/api/pos/orders", request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    // BRD §2.3: per-line note — persisted on OrderLine.Notes and echoed back on the checkout response,
+    // distinct from the order-wide Notes.
+    [Fact]
+    public async Task Line_note_is_persisted_and_returned_on_the_completed_order()
+    {
+        using var db = _factory.CreateDbContext();
+        var (branch, product) = SeedBranchAndProduct(db);
+        var cashierRole = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders]);
+        cashierRole.DiscountCeilingPercent = 5m;
+        db.SaveChanges();
+        var cashier = TestDataSeeder.AddUser(db, cashierRole, "cashier-notes@test.local", branchId: branch.Id);
+        var client = _factory.CreateAuthenticatedClient(cashier);
+
+        var request = new
+        {
+            branchId = branch.Id, terminalId = (int?)null, customerId = (int?)null, type = "Retail",
+            lines = new[] { new { productId = product.Id, qty = 1m, notes = "Leave at loading dock" } },
+            payments = new[] { new { method = "Cash", amount = 100m } },
+            couponCode = (string?)null, manualDiscount = (object?)null, customFees = (object?)null, notes = (string?)null,
+        };
+
+        var response = await client.PostAsJsonAsync("/api/pos/orders", request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var order = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Leave at loading dock", order.GetProperty("lines")[0].GetProperty("notes").GetString());
+    }
+
+    // BRD §2.3/§6.2: a cashier-entered per-line discount is gated by the same authorization ceiling
+    // as the order-level ManualDiscount — mirrors Cashier_can_apply_a_discount_within_their_5_percent_ceiling
+    // through Cashier_with_an_approved_discount_request_can_complete_the_over_ceiling_sale above, but for
+    // CartLineInput.ManualDiscountPct instead of the order-wide ManualDiscount.
+    [Fact]
+    public async Task Cashier_can_apply_a_per_line_discount_within_their_ceiling()
+    {
+        using var db = _factory.CreateDbContext();
+        var (branch, product) = SeedBranchAndProduct(db);
+        var cashierRole = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders]);
+        cashierRole.DiscountCeilingPercent = 5m;
+        db.SaveChanges();
+        var cashier = TestDataSeeder.AddUser(db, cashierRole, "cashier-line1@test.local", branchId: branch.Id);
+        var client = _factory.CreateAuthenticatedClient(cashier);
+
+        var request = new
+        {
+            branchId = branch.Id, terminalId = (int?)null, customerId = (int?)null, type = "Retail",
+            lines = new[] { new { productId = product.Id, qty = 1m, manualDiscountPct = 3m } },
+            payments = new[] { new { method = "Cash", amount = 97m } },
+            couponCode = (string?)null, manualDiscount = (object?)null, customFees = (object?)null, notes = (string?)null,
+        };
+
+        var response = await client.PostAsJsonAsync("/api/pos/orders", request);
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"Expected OK, got {response.StatusCode}: {body}");
+    }
+
+    [Fact]
+    public async Task Cashier_is_blocked_from_an_8_percent_per_line_discount_without_approval()
+    {
+        using var db = _factory.CreateDbContext();
+        var (branch, product) = SeedBranchAndProduct(db);
+        var cashierRole = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders]);
+        cashierRole.DiscountCeilingPercent = 5m;
+        db.SaveChanges();
+        var cashier = TestDataSeeder.AddUser(db, cashierRole, "cashier-line2@test.local", branchId: branch.Id);
+        var client = _factory.CreateAuthenticatedClient(cashier);
+
+        var request = new
+        {
+            branchId = branch.Id, terminalId = (int?)null, customerId = (int?)null, type = "Retail",
+            lines = new[] { new { productId = product.Id, qty = 1m, manualDiscountPct = 8m } },
+            payments = new[] { new { method = "Cash", amount = 92m } },
+            couponCode = (string?)null, manualDiscount = (object?)null, customFees = (object?)null, notes = (string?)null,
+        };
+
+        var response = await client.PostAsJsonAsync("/api/pos/orders", request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("exceeds your authorization limit", body);
+    }
+
+    [Fact]
+    public async Task Cashier_with_an_approved_discount_request_can_complete_an_over_ceiling_per_line_discount_sale()
+    {
+        using var db = _factory.CreateDbContext();
+        var (branch, product) = SeedBranchAndProduct(db);
+        var cashierRole = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders]);
+        cashierRole.DiscountCeilingPercent = 5m;
+        var supervisorRole = TestDataSeeder.AddRole(db, "Supervisor", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders]);
+        supervisorRole.DiscountCeilingPercent = 15m;
+        db.SaveChanges();
+        var cashier = TestDataSeeder.AddUser(db, cashierRole, "cashier-line3@test.local", branchId: branch.Id);
+        var supervisor = TestDataSeeder.AddUser(db, supervisorRole, "supervisor-line3@test.local", branchId: branch.Id);
+
+        var cashierClient = _factory.CreateAuthenticatedClient(cashier);
+        var createApproval = await cashierClient.PostAsJsonAsync("/api/pos/approvals", new
+        {
+            type = "Discount", branchId = branch.Id, amount = 8m, reason = "Item-level goodwill discount", relatedOrderId = (int?)null,
+        });
+        Assert.Equal(HttpStatusCode.OK, createApproval.StatusCode);
+        var approval = await createApproval.Content.ReadFromJsonAsync<JsonElement>();
+        var approvalId = approval.GetProperty("id").GetInt32();
+
+        var supervisorClient = _factory.CreateAuthenticatedClient(supervisor);
+        var approveResponse = await supervisorClient.PutAsync($"/api/pos/approvals/{approvalId}/approve", null);
+        Assert.Equal(HttpStatusCode.OK, approveResponse.StatusCode);
+
+        var request = new
+        {
+            branchId = branch.Id, terminalId = (int?)null, customerId = (int?)null, type = "Retail",
+            lines = new[] { new { productId = product.Id, qty = 1m, manualDiscountPct = 8m } },
+            payments = new[] { new { method = "Cash", amount = 92m } },
+            couponCode = (string?)null, manualDiscount = (object?)null, customFees = (object?)null, notes = (string?)null,
+            discountApprovalRequestId = approvalId,
+        };
+
+        var checkout = await cashierClient.PostAsJsonAsync("/api/pos/orders", request);
+
+        var checkoutBody = await checkout.Content.ReadAsStringAsync();
+        Assert.True(checkout.StatusCode == HttpStatusCode.OK, $"Expected OK, got {checkout.StatusCode}: {checkoutBody}");
     }
 }

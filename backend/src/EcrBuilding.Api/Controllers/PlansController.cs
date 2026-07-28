@@ -12,7 +12,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/admin/plans")]
 [Authorize]
-[RequireModule(ModuleArea.Admin, AccessLevel.View)]
+[RequireModule("/admin/plans", PermissionAction.View)]
 public class PlansController(AppDbContext db) : ControllerBase
 {
     [HttpGet]

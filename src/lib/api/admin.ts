@@ -7,7 +7,23 @@ export type UserDto = {
   branchId: number | null; branchName: string | null; status: string; preferredLocale: string; lastLoginAt: string | null;
   hasPin: boolean; biometricEnabled: boolean;
 };
-export type ModulePermissionEntry = { module: string; level: string };
+// module is a page route key (e.g. "/stock/warehouses") — matches AppLayout.tsx's nav `to` values
+// and the backend's PermissionCatalog.cs. Each action is independently grantable — a role can have
+// canView+canExport without canEdit.
+export type ModulePermissionEntry = {
+  module: string; canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean; canApprove: boolean; canExport: boolean;
+};
+// A user's "Customize Permissions" override row. A null action means "no override, inherit the
+// role's value for that action"; true/false is an explicit override.
+export type UserPermissionOverrideEntry = {
+  module: string;
+  canView: boolean | null; canCreate: boolean | null; canEdit: boolean | null;
+  canDelete: boolean | null; canApprove: boolean | null; canExport: boolean | null;
+};
+// The user's effective grid (role default with overrides merged in) plus which pages carry at
+// least one explicit override — what the Custom Permissions dialog renders and highlights.
+export type EffectivePermissionEntry = ModulePermissionEntry & { isOverridden: boolean };
+export type RoleMemberDto = { id: number; name: string; email: string; status: string };
 
 // Mirrors BRD §10.1's Cashier→Senior Cashier→Supervisor→Store Manager→System Admin ladder — see
 // backend Role.cs / PosTier presets in DbSeeder.cs. A null ceiling means "no cap".
@@ -128,7 +144,7 @@ export type SubscriptionDto = {
 
 export type CreateUserRequest = { name: string; email: string; password: string; roleId: number; branchId: number | null };
 export type UpdateUserRequest = { name: string; roleId: number; branchId: number | null; status: string };
-export type UpsertRoleRequest = { name: string; description: string | null; approvalCap: number; permissions: Record<string, string>; posCeilings: PosCeilingsDto };
+export type UpsertRoleRequest = { description: string | null; approvalCap: number; permissions: ModulePermissionEntry[]; posCeilings: PosCeilingsDto };
 export type UpsertBranchRequest = {
   code: string; nameEn: string; nameAr: string | null; city: string; address: string | null; businessHours: string | null;
   vatRegistrationNumber: string | null; managerName: string | null; warehouse: string | null;
@@ -176,6 +192,29 @@ export function rulePriorityLabel(priority: number): string {
 
 export const useUsers = (enabled = true) => useQuery({ queryKey: ["admin", "users"], queryFn: () => apiGet<UserDto[]>("/api/admin/users"), enabled });
 export const useRoles = (enabled = true) => useQuery({ queryKey: ["admin", "roles"], queryFn: () => apiGet<RoleDto[]>("/api/admin/roles"), enabled });
+export const useRoleUsers = (roleId: number | null, enabled = true) =>
+  useQuery({
+    queryKey: ["admin", "roles", roleId, "users"],
+    queryFn: () => apiGet<RoleMemberDto[]>(`/api/admin/roles/${roleId}/users`),
+    enabled: enabled && roleId !== null,
+  });
+export const useUserPermissionOverrides = (userId: number | null, enabled = true) =>
+  useQuery({
+    queryKey: ["admin", "users", userId, "permission-overrides"],
+    queryFn: () => apiGet<EffectivePermissionEntry[]>(`/api/admin/users/${userId}/permission-overrides`),
+    enabled: enabled && userId !== null,
+  });
+export function useSaveUserPermissionOverrides() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, entries }: { userId: number; entries: UserPermissionOverrideEntry[] }) =>
+      apiPut<EffectivePermissionEntry[]>(`/api/admin/users/${userId}/permission-overrides`, entries),
+    onSuccess: (_data, { userId }) => {
+      qc.invalidateQueries({ queryKey: ["admin", "users", userId, "permission-overrides"] });
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
+    },
+  });
+}
 export const useBranches = (enabled = true) => useQuery({ queryKey: ["network", "branches"], queryFn: () => apiGet<BranchDto[]>("/api/network/branches"), enabled });
 export const useTerminals = (enabled = true) => useQuery({ queryKey: ["network", "terminals"], queryFn: () => apiGet<TerminalDto[]>("/api/network/terminals"), enabled });
 export const useDevices = (enabled = true) => useQuery({ queryKey: ["network", "devices"], queryFn: () => apiGet<DeviceDto[]>("/api/network/devices"), enabled });
@@ -268,13 +307,6 @@ export function useUpdateUser() {
   return useMutation({
     mutationFn: ({ id, request }: { id: number; request: UpdateUserRequest }) => apiPut<UserDto>(`/api/admin/users/${id}`, request),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "users"] }),
-  });
-}
-export function useCreateRole() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (request: UpsertRoleRequest) => apiPost<RoleDto>("/api/admin/roles", request),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "roles"] }),
   });
 }
 export function useUpdateRole() {
@@ -456,10 +488,6 @@ function ageFrom(iso: string): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-function permLevel(role: RoleDto, module: string): string {
-  return role.permissions.find((p) => p.module === module)?.level ?? "None";
-}
-
 export type LiveKpi = { label: string; value: string; sub: string; tone: "critical" | "warning" | "success" | "info" | "muted" };
 export type LiveProgressStat = { label: string; pct: number; tone: "critical" | "warning" | "success" | "info" | "muted" };
 // ids[i] is the DB id of rows[i] — lets ModulePage's row menu act on the exact record without
@@ -489,22 +517,6 @@ export function mapUsers(users: UserDto[]): LiveTable {
     rows: users.map((u) => [
       `USR-${String(u.id).padStart(3, "0")}`, u.name, u.roleName, u.branchName ?? "All Branches", u.email,
       u.hasPin ? "Set" : "Not Set", u.biometricEnabled ? "Yes" : "No", u.lastLoginAt ? fmtDate(u.lastLoginAt) : "Never", u.status,
-    ]),
-  };
-}
-
-export function mapRoles(roles: RoleDto[]): LiveTable {
-  return {
-    columns: ["Role", "Users", "POS Tier", "Discount Ceiling", "Surplus Ceiling", "POS", "Orders", "Inventory", "Finance", "Admin", "Approval Cap (ر.س)", "Status"],
-    statusCol: 11,
-    ids: roles.map((r) => r.id),
-    rows: roles.map((r) => [
-      r.name, r.userCount, posTierFromCeilings(r.posCeilings),
-      r.posCeilings.discountCeilingPercent === null ? "Unlimited" : `${r.posCeilings.discountCeilingPercent}%`,
-      r.posCeilings.surplusReturnCeilingAmount === null ? "Any value" : r.posCeilings.surplusReturnCeilingAmount.toLocaleString("en-US"),
-      permLevel(r, "Pos"), permLevel(r, "Orders"), permLevel(r, "Inventory"),
-      permLevel(r, "Finance"), permLevel(r, "Admin"),
-      r.approvalCap >= 999_999 ? "Unlimited" : r.approvalCap.toLocaleString("en-US"), r.status,
     ]),
   };
 }
@@ -629,12 +641,15 @@ export function mapMaintenance(rows: MaintenanceDto[]): LiveTable {
 
 export function mapAuditLogs(rows: AuditLogDto[]): LiveTable {
   return {
-    columns: ["Event #", "Time", "Module", "Action", "Record", "User", "Branch", "Severity"],
-    statusCol: 7,
+    // "Date" alongside "Time" so the page's date-range filter has a column to resolve to — Time
+    // carries the clock component and reads as an event timestamp, Date is the filterable day.
+    columns: ["Event #", "Time", "Date", "Module", "Action", "Record", "User", "Branch", "Severity"],
+    statusCol: 8,
     ids: rows.map((a) => a.id),
     rows: rows.map((a) => [
       `EV-${String(a.id).padStart(5, "0")}`,
       new Date(a.createdAt).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }),
+      fmtDate(a.createdAt),
       a.module, a.event, a.recordId ?? "—", a.userName ?? "system", a.branchId ?? "—", a.severity,
     ]),
   };

@@ -14,7 +14,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/admin/settings")]
 [Authorize]
-[RequireModule(ModuleArea.Admin, AccessLevel.View)]
+[RequireModule("/admin/settings", PermissionAction.View)]
 public class SettingsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -27,7 +27,7 @@ public class SettingsController(AppDbContext db, IAuditService audit) : Controll
     }
 
     [HttpPut]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/settings", PermissionAction.Edit)]
     public async Task<ActionResult<SettingDto>> Upsert(UpsertSettingRequest request, CancellationToken ct)
     {
         var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);

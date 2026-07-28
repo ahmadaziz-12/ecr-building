@@ -2,7 +2,7 @@ using EcrBuilding.Domain.Common;
 
 namespace EcrBuilding.Domain.Entities;
 
-public enum QuotationStatus { Draft = 0, Sent = 1, Accepted = 2, Rejected = 3, Expired = 4, Converted = 5 }
+public enum QuotationStatus { Draft = 0, Sent = 1, Accepted = 2, Rejected = 3, Expired = 4, Converted = 5, Cancelled = 6 }
 
 public class Quotation : BaseEntity
 {
@@ -21,6 +21,10 @@ public class Quotation : BaseEntity
     public string CustomerReference { get; set; } = string.Empty;
     public decimal SubTotal { get; set; }
     public decimal DiscountTotal { get; set; }
+    // Quotation-level discount % applied uniformly to every line (manual override entered by the
+    // user, defaulting to the BRD §3.4 contractor auto-discount) — kept separate from DiscountTotal
+    // (the resulting SAR amount) so the form can re-show/re-edit the rate itself, not just the total.
+    public decimal DiscountPct { get; set; }
     public decimal VatTotal { get; set; }
     public decimal GrandTotal { get; set; }
     public string? Notes { get; set; }

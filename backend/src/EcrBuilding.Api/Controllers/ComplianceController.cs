@@ -14,7 +14,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/admin/compliance")]
 [Authorize]
-[RequireModule(ModuleArea.Admin, AccessLevel.View)]
+[RequireModule("/admin/compliance", PermissionAction.View)]
 public class ComplianceController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -25,7 +25,7 @@ public class ComplianceController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/compliance", PermissionAction.Create)]
     public async Task<ActionResult<ComplianceDto>> Create(UpsertComplianceRequest request, CancellationToken ct)
     {
         var row = new ComplianceControl
@@ -41,7 +41,7 @@ public class ComplianceController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}")]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/compliance", PermissionAction.Edit)]
     public async Task<ActionResult<ComplianceDto>> Update(int id, UpsertComplianceRequest request, CancellationToken ct)
     {
         var row = await db.ComplianceControls.FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -61,7 +61,7 @@ public class ComplianceController(AppDbContext db, IAuditService audit) : Contro
     }
 
     [HttpPut("{id:int}/sign-off")]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/compliance", PermissionAction.Approve)]
     public async Task<ActionResult<ComplianceDto>> SignOff(int id, SignOffComplianceRequest request, CancellationToken ct)
     {
         var row = await db.ComplianceControls.FirstOrDefaultAsync(c => c.Id == id, ct);

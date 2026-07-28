@@ -1,6 +1,13 @@
 import { useCategories, useProducts } from "./catalog";
 import { useBundles } from "./bundles";
-import { fmtDate, useStockBatches, useStockLevels, useStockTransfers, useWarehouses } from "./inventory";
+import {
+  fmtDate,
+  useBranchStockBatches,
+  useStockBatches,
+  useStockLevels,
+  useStockTransfers,
+  useWarehouses,
+} from "./inventory";
 import {
   usePurchaseOrderHistory,
   usePurchaseOrders,
@@ -39,15 +46,23 @@ export function useRowDetails(
   pathname: string,
   selectedId?: number,
 ): (id: number | undefined, row: (string | number)[]) => RowDetail | null {
-  const detailPaths = ["/stock/inventory", "/stock/stocks", "/admin/categories"];
+  const detailPaths = [
+    "/stock/inventory",
+    "/stock/stocks",
+    "/admin/categories",
+    "/finance/pricing",
+  ];
   const { data: products } = useProducts(detailPaths.includes(pathname));
   const { data: categories } = useCategories(
     pathname === "/admin/categories" || pathname === "/stock/inventory",
   );
   const { data: stockLevels } = useStockLevels(
-    pathname === "/stock/stocks" || pathname === "/stock/inventory" || pathname === "/stock/warehouses",
+    pathname === "/stock/stocks" ||
+      pathname === "/stock/inventory" ||
+      pathname === "/stock/warehouses",
   );
   const { data: batches } = useStockBatches(pathname === "/stock/expiry");
+  const { data: branchBatches } = useBranchStockBatches(pathname === "/stock/expiry");
   const { data: transfers } = useStockTransfers(pathname === "/stock/transfers");
   const { data: warehouses } = useWarehouses(pathname === "/stock/warehouses");
   const { data: bundles } = useBundles(pathname === "/stock/bundles");
@@ -102,6 +117,10 @@ export function useRowDetails(
                 { label: "Barcode", value: product.barcode ?? "—" },
                 { label: "Category", value: product.categoryName },
                 { label: "Brand", value: product.brand ?? "—" },
+                {
+                  label: "Attributes",
+                  value: product.attributes.length ? product.attributes.map((a) => `${a.name}: ${a.value}`).join(", ") : "—",
+                },
               ],
             },
             {
@@ -120,6 +139,10 @@ export function useRowDetails(
                   label: "Selling UOMs",
                   value: product.sellUoms.length ? product.sellUoms.join(", ") : product.stockUom,
                 },
+                {
+                  label: "Cut-to-size",
+                  value: product.isCutToSize ? `Yes — ${product.cutToSizeUnit}` : "No",
+                },
                 { label: "Weight", value: `${product.weight} kg` },
                 { label: "Returnable", value: product.returnable ? "Yes" : "No" },
                 { label: "Reorder Level", value: String(product.reorderLevel) },
@@ -137,7 +160,10 @@ export function useRowDetails(
                     l.onHand,
                     l.reserved,
                     l.available,
-                    l.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                    l.value.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    }),
                   ]),
                 },
               ]
@@ -229,7 +255,12 @@ export function useRowDetails(
       }
 
       case "/stock/expiry": {
-        const batch = batches?.find((b) => b.id === id);
+        // Merged list (see mapStockBatches): a negative id is a branch batch stored with its real
+        // id negated, since BranchStockBatch and StockBatch are separate tables with overlapping
+        // id sequences.
+        if (id === undefined) return null;
+        const batch =
+          id < 0 ? branchBatches?.find((b) => b.id === -id) : batches?.find((b) => b.id === id);
         if (!batch) return null;
         return {
           title: batch.productName,
@@ -243,7 +274,10 @@ export function useRowDetails(
                 { label: "Expires", value: fmtDate(batch.expiryDate) },
                 { label: "Days Left", value: String(batch.daysLeft) },
                 { label: "Quantity", value: String(batch.qty) },
-                { label: "Warehouse", value: batch.warehouseName },
+                {
+                  label: batch.scope === "Branch" ? "Branch" : "Warehouse",
+                  value: batch.warehouseName,
+                },
               ],
             },
           ],
@@ -275,7 +309,16 @@ export function useRowDetails(
           tables: [
             {
               heading: "Lines",
-              columns: ["SKU", "Product", "Qty", "Received", "Discrepancy", "Batch", "Unit Cost", "Line Total"],
+              columns: [
+                "SKU",
+                "Product",
+                "Qty",
+                "Received",
+                "Discrepancy",
+                "Batch",
+                "Unit Cost",
+                "Line Total",
+              ],
               rows: transfer.lines.map((l) => [
                 l.sku,
                 l.productName,
@@ -302,7 +345,10 @@ export function useRowDetails(
             {
               heading: "Operations",
               fields: [
-                { label: "Stock Value", value: `${warehouse.stockValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س` },
+                {
+                  label: "Stock Value",
+                  value: `${warehouse.stockValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`,
+                },
                 { label: "Distinct SKUs", value: String(warehouse.skuCount) },
                 { label: "Low Stock Lines", value: String(warehouse.lowStockCount) },
                 { label: "Active Batches", value: String(warehouse.activeBatchCount) },
@@ -315,10 +361,28 @@ export function useRowDetails(
           tables: [
             {
               heading: "Stock",
-              columns: ["SKU", "Product", "On Hand", "Reserved", "Available", "Reorder", "Value (ر.س)", "Status"],
+              columns: [
+                "SKU",
+                "Product",
+                "On Hand",
+                "Reserved",
+                "Available",
+                "Reorder",
+                "Value (ر.س)",
+                "Status",
+              ],
               rows: (stockLevels ?? [])
                 .filter((s) => s.warehouseId === warehouse.id)
-                .map((s) => [s.sku, s.productName, s.onHand, s.reserved, s.available, s.reorderLevel, s.value.toFixed(2), s.status]),
+                .map((s) => [
+                  s.sku,
+                  s.productName,
+                  s.onHand,
+                  s.reserved,
+                  s.available,
+                  s.reorderLevel,
+                  s.value.toFixed(2),
+                  s.status,
+                ]),
             },
             {
               heading: "Bins",
@@ -564,11 +628,31 @@ export function useRowDetails(
       case "/finance/pricing": {
         const rule = pricingRules?.find((r) => r.id === id);
         if (!rule) return null;
+        const discountValue =
+          rule.discountType === "Fixed" ? `${rule.value} ر.س` : `${rule.value}%`;
+        const skuProductName = rule.sku
+          ? products?.find((p) => p.sku.toUpperCase() === rule.sku?.toUpperCase())?.nameEn
+          : undefined;
+        // Plain-language restatement of what the rule actually does at checkout — same wording the
+        // create/edit dialog previews live, so a manager reviewing an approval doesn't have to decode
+        // the Scope/Condition/Action strings by hand.
+        const whatItDoes =
+          rule.type === "Trade Tier"
+            ? `Every Contractor customer automatically gets ${discountValue} off${rule.branchName ? ` at ${rule.branchName}` : ", at every branch"}.`
+            : rule.type === "Quantity"
+              ? `Once a cart line reaches ${rule.minQuantity ?? "—"}+ units of ${rule.sku ? `${rule.sku}${skuProductName ? ` (${skuProductName})` : ""}` : "any product"}, that line automatically gets ${discountValue} off.`
+              : rule.type === "Coupon"
+                ? `A customer who enters code "${rule.code ?? "—"}" at checkout gets ${discountValue} off their order.`
+                : `Recorded for staff reference only — this rule type isn't auto-applied at checkout or on quotations.`;
         return {
           title: rule.name,
           subtitle: `PR-${String(rule.id).padStart(3, "0")} · ${rule.type}`,
           statusText: rule.status,
           sections: [
+            {
+              heading: "What it does",
+              fields: [{ label: "Effect", value: whatItDoes }],
+            },
             {
               heading: "Rule",
               fields: [
@@ -580,22 +664,33 @@ export function useRowDetails(
                   label: "Valid Until",
                   value: rule.validUntil ? fmtDate(rule.validUntil) : "Ongoing",
                 },
+                { label: "Branch", value: rule.branchName ?? "All Branches" },
               ],
             },
-            ...(rule.type === "Coupon"
+            ...(rule.type === "Trade Tier" || rule.type === "Quantity" || rule.type === "Coupon"
               ? [
                   {
-                    heading: "Coupon",
+                    heading: "Discount",
                     fields: [
-                      { label: "Code", value: rule.code ?? "—" },
+                      ...(rule.type === "Coupon"
+                        ? [{ label: "Code", value: rule.code ?? "—" }]
+                        : []),
                       { label: "Discount Type", value: rule.discountType },
-                      {
-                        label: "Value",
-                        value:
-                          rule.discountType === "Percentage"
-                            ? `${rule.value}%`
-                            : `${rule.value} ر.س`,
-                      },
+                      { label: "Value", value: discountValue },
+                      ...(rule.type === "Quantity"
+                        ? [
+                            {
+                              label: "Minimum Quantity",
+                              value: rule.minQuantity != null ? String(rule.minQuantity) : "—",
+                            },
+                            {
+                              label: "Applies To",
+                              value: rule.sku
+                                ? `${rule.sku}${skuProductName ? ` — ${skuProductName}` : ""}`
+                                : "Any product",
+                            },
+                          ]
+                        : []),
                     ],
                   },
                 ]
@@ -699,11 +794,17 @@ export function useRowDetails(
         const shifts = sessionsForSelected ?? [];
         const openShift = shifts.find((s) => s.status === "Open");
         const syncLog = [
-          ...(terminal.lastSyncAt ? [{ label: "Last Sync", value: fmtDate(terminal.lastSyncAt) }] : []),
-          ...shifts.slice(0, 5).flatMap((s) => [
-            { label: "Shift Opened", value: `${fmtDate(s.openedAt)} · ${s.cashierName}` },
-            ...(s.closedAt ? [{ label: "Shift Closed", value: `${fmtDate(s.closedAt)} · ${s.cashierName}` }] : []),
-          ]),
+          ...(terminal.lastSyncAt
+            ? [{ label: "Last Sync", value: fmtDate(terminal.lastSyncAt) }]
+            : []),
+          ...shifts
+            .slice(0, 5)
+            .flatMap((s) => [
+              { label: "Shift Opened", value: `${fmtDate(s.openedAt)} · ${s.cashierName}` },
+              ...(s.closedAt
+                ? [{ label: "Shift Closed", value: `${fmtDate(s.closedAt)} · ${s.cashierName}` }]
+                : []),
+            ]),
         ];
         return {
           title: terminal.name,
@@ -720,10 +821,16 @@ export function useRowDetails(
                     { label: "Code", value: terminal.code },
                     { label: "Branch", value: terminal.branchName },
                     { label: "Type", value: terminal.type },
-                    { label: "Assigned Cashier", value: terminal.assignedCashierName ?? "Unassigned" },
+                    {
+                      label: "Assigned Cashier",
+                      value: terminal.assignedCashierName ?? "Unassigned",
+                    },
                     { label: "IP Address", value: terminal.ipAddress ?? "—" },
                     { label: "MAC Address", value: terminal.macAddress ?? "—" },
-                    { label: "Offline Mode", value: terminal.offlineModeEnabled ? "Enabled" : "Disabled" },
+                    {
+                      label: "Offline Mode",
+                      value: terminal.offlineModeEnabled ? "Enabled" : "Disabled",
+                    },
                     { label: "Devices", value: String(terminal.deviceCount) },
                   ],
                 },
@@ -738,16 +845,32 @@ export function useRowDetails(
                     ? [
                         { label: "Cashier", value: openShift.cashierName },
                         { label: "Opened At", value: fmtDate(openShift.openedAt) },
-                        { label: "Opening Float", value: `${openShift.openingFloat.toFixed(2)} ر.س` },
+                        {
+                          label: "Opening Float",
+                          value: `${openShift.openingFloat.toFixed(2)} ر.س`,
+                        },
                         { label: "Cash Sales", value: `${openShift.cashSales.toFixed(2)} ر.س` },
                       ]
-                    : [{ label: "Status", value: "No cashier is currently signed into this terminal." }],
+                    : [
+                        {
+                          label: "Status",
+                          value: "No cashier is currently signed into this terminal.",
+                        },
+                      ],
                 },
               ],
             },
             {
               label: "Sync Log",
-              sections: [{ heading: "Recent Activity", fields: syncLog.length > 0 ? syncLog : [{ label: "Activity", value: "No recent activity recorded." }] }],
+              sections: [
+                {
+                  heading: "Recent Activity",
+                  fields:
+                    syncLog.length > 0
+                      ? syncLog
+                      : [{ label: "Activity", value: "No recent activity recorded." }],
+                },
+              ],
             },
           ],
         };
@@ -793,7 +916,10 @@ export function useRowDetails(
                 { label: "Owner", value: kpi.owner },
                 { label: "Target", value: kpi.target.toFixed(1) },
                 { label: "Actual", value: kpi.actual.toFixed(1) },
-                { label: "Variance", value: `${kpi.variancePct > 0 ? "+" : ""}${kpi.variancePct}%` },
+                {
+                  label: "Variance",
+                  value: `${kpi.variancePct > 0 ? "+" : ""}${kpi.variancePct}%`,
+                },
                 { label: "Status", value: kpi.status },
               ],
             },

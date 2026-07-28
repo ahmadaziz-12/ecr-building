@@ -10,4 +10,7 @@ public record OverviewAreaDto(string Area, string Status, string Owner, string M
 public record AdminOverviewDto(int ActiveUsers, int PendingApprovals, int OpenMaintenanceTickets, int CriticalAuditEvents24h, int ComplianceOverdue, IReadOnlyList<OverviewAreaDto> Areas);
 
 public record SavedDashboardViewDto(int Id, string Name, string FiltersJson, DateTime CreatedAt);
-public record CreateSavedDashboardViewRequest(string Name, Dictionary<string, string> Filters);
+// FiltersJson is opaque to the server — the frontend owns its own filter-state shape (currently
+// {values: Record<string,string[]>, dateRange}) and this just round-trips it verbatim, so a future
+// frontend filter-shape change (already happened once) never needs a matching backend change.
+public record CreateSavedDashboardViewRequest(string Name, string FiltersJson);

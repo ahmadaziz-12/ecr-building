@@ -32,6 +32,8 @@ export type CustomerDto = {
   // Module 20 (BRD §4.3.4): birthday-bonus source + "points lapse next month" cashier alert.
   dateOfBirth?: string | null;
   pointsExpiringSoon?: boolean;
+  // BRD §7 (CR-038): which Product price list this customer is charged — independent of Type.
+  priceListType?: string;
 };
 export type OrderLineDto = {
   productId: number;
@@ -48,11 +50,16 @@ export type OrderLineDto = {
   stockQty: number;
   lengthM: number | null;
   widthM: number | null;
+  heightM: number | null;
   // The OrderLine's own id — Module 6 return creation references original lines by this.
   id: number;
   // BRD §5.2: set when the line was auto-populated from a bundle.
   bundleId: number | null;
   bundleName: string | null;
+  // Product weight (per stock UOM) × the line's actual stock qty — total kg for the line.
+  lineWeight: number;
+  // BRD §2.3: cashier's free-text note for this specific line.
+  notes?: string | null;
 };
 export type OrderPaymentDto = {
   method: string;
@@ -128,10 +135,12 @@ export type PricingRuleDto = {
   // null = applies company-wide, across every branch.
   branchId: number | null;
   branchName: string | null;
-  // Type="Quantity" only: the cart-line quantity threshold that auto-applies the discount, and the
-  // SKU it's scoped to (null = any product).
+  // Type="Quantity"/"Promotional": the cart-line quantity threshold (Quantity only) and the SKU
+  // it's scoped to (null = any product, both types).
   minQuantity: number | null;
   sku: string | null;
+  // Type="Promotional" only (BRD §7 CR-040): the rule's start date — null = active immediately.
+  validFrom: string | null;
 };
 
 export const useCustomers = (enabled = true, filters?: { type?: string; search?: string }) =>
@@ -208,6 +217,7 @@ export type UpsertPricingRuleRequest = {
   branchId: number | null;
   minQuantity?: number | null;
   sku?: string | null;
+  validFrom?: string | null;
 };
 export function useCreatePricingRule() {
   const queryClient = useQueryClient();
@@ -225,11 +235,35 @@ export function useUpdatePricingRuleStatus() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance", "pricing-rules"] }),
   });
 }
+export function useUpdatePricingRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, request }: { id: number; request: UpsertPricingRuleRequest }) =>
+      apiPut<PricingRuleDto>(`/api/finance/pricing-rules/${id}`, request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance", "pricing-rules"] }),
+  });
+}
+export function useDeletePricingRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiDelete<void>(`/api/finance/pricing-rules/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance", "pricing-rules"] }),
+  });
+}
 
-// uom: selling UOM (omitted = stock UOM). lengthM/widthM: cut-to-size dimensions — when both are set
-// on an IsCutToSize product the server computes qty = area itself and ignores the sent qty (BRD §2.3).
+// uom: selling UOM (omitted = stock UOM). lengthM/widthM/heightM: cut-to-size dimensions — when
+// lengthM is set on an IsCutToSize product the server computes qty (length/area/volume, per the
+// product's CutToSizeUnit) itself and ignores the sent qty (BRD §2.3).
 // requiresDelivery (BRD §3.5): cashier flags this line for delivery instead of counter pickup.
-export type CartLine = { productId: number; qty: number; uom?: string; lengthM?: number; widthM?: number; requiresDelivery?: boolean };
+// notes (BRD §2.3): cashier's free-text note for this line. manualDiscountPct (BRD §2.3/§6.2):
+// cashier-entered per-line discount %, gated by the same authorization ceiling as ManualDiscount below.
+// manualUnitPrice (BRD §7 CR-039): an absolute price override for this line — replaces the resolved
+// list price entirely (no discount stacks on top), gated by Role.CanOverrideItemPrice or a
+// PriceOverride approval (see CheckoutRequest.priceOverrideApprovalRequestId), distinct from a discount.
+export type CartLine = {
+  productId: number; qty: number; uom?: string; lengthM?: number; widthM?: number; heightM?: number; requiresDelivery?: boolean;
+  notes?: string | null; manualDiscountPct?: number | null; manualUnitPrice?: number | null;
+};
 export type PaymentInput = { method: string; amount: number };
 export type ManualDiscountInput = { type: "Percentage" | "Fixed"; value: number };
 export type CustomFeeInput = { label: string; amount: number };
@@ -268,6 +302,9 @@ export type CheckoutRequest = {
   creditOverrideApprovalRequestId?: number | null;
   // BRD §3.5: required when any `lines` entry has requiresDelivery=true.
   delivery?: DeliveryDetailsInput | null;
+  // Id of an Approved ApprovalRequest (Type=PriceOverride) — required when any line's manualUnitPrice
+  // needs authorization the cashier doesn't hold (BRD §7 CR-039).
+  priceOverrideApprovalRequestId?: number | null;
 };
 
 export function useCheckout() {
@@ -309,6 +346,8 @@ export type UpsertCustomerInput = {
   loyaltyEnrolled?: boolean;
   projectName?: string | null;
   creditTermDays?: number | null;
+  // BRD §7 (CR-038): which Product price list this customer is charged — independent of type.
+  priceListType?: string;
 };
 
 function toUpsertCustomerRequest(request: UpsertCustomerInput) {
@@ -326,6 +365,7 @@ function toUpsertCustomerRequest(request: UpsertCustomerInput) {
     loyaltyEnrolled: request.loyaltyEnrolled ?? false,
     projectName: request.projectName ?? null,
     creditTermDays: request.creditTermDays ?? null,
+    priceListType: request.priceListType ?? "Retail",
   };
 }
 
@@ -368,6 +408,31 @@ export const useCustomerStatement = (customerId: number | null) =>
     queryFn: () => apiGet<CustomerStatementDto>(`/api/pos/customers/${customerId}/statement`),
     enabled: customerId !== null,
   });
+
+// Reconstructed from GL postings to Accounts Receivable (1100) — every AccountCredit sale, B2B
+// return credit, or RecordPayment settlement shows up here, in the same reference-based way
+// SuppliersController.Ledger already works for suppliers (see useSupplierLedger).
+export type CustomerLedgerLineDto = { date: string; reference: string; description: string; debit: number; credit: number };
+export const useCustomerLedger = (id: number | undefined) =>
+  useQuery({
+    queryKey: ["pos", "customers", id, "ledger"],
+    queryFn: () => apiGet<CustomerLedgerLineDto[]>(`/api/pos/customers/${id}/ledger`),
+    enabled: id !== undefined,
+  });
+
+export type RecordCustomerPaymentInput = { amount: number; method: string; referenceNo?: string | null; notes?: string | null };
+export function useRecordCustomerPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ customerId, ...request }: RecordCustomerPaymentInput & { customerId: number }) =>
+      apiPost<CustomerDto>(`/api/pos/customers/${customerId}/payments`, request),
+    onSuccess: (_, { customerId }) => {
+      queryClient.invalidateQueries({ queryKey: ["pos", "customers"] });
+      queryClient.invalidateQueries({ queryKey: ["pos", "customers", customerId, "ledger"] });
+      queryClient.invalidateQueries({ queryKey: ["pos", "customers", customerId, "statement"] });
+    },
+  });
+}
 
 // Settles a Pending/Unpaid order (a converted quotation) — the register takes the payment here
 // instead of the order sitting "Awaiting payment" forever. Loyalty/AccountCredit are checkout-only
@@ -510,9 +575,22 @@ export function useCashMovement() {
         `/api/pos/cashier-shifts/${id}/cash-movement?direction=${direction}`,
         { amount, reason },
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "cashier-shifts"] }),
+    onSuccess: (_, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["pos", "cashier-shifts"] });
+      queryClient.invalidateQueries({ queryKey: ["pos", "cashier-shifts", id, "movements"] });
+    },
   });
 }
+
+// Itemized trail behind CashierShiftDto's aggregate cashIn/cashOut — lets a till reconciliation
+// drill into exactly which events made up that total instead of only seeing the sum.
+export type CashMovementDto = { id: number; direction: "In" | "Out"; amount: number; reason: string; createdAt: string; createdByName: string | null };
+export const useCashMovements = (shiftId: number | undefined) =>
+  useQuery({
+    queryKey: ["pos", "cashier-shifts", shiftId, "movements"],
+    queryFn: () => apiGet<CashMovementDto[]>(`/api/pos/cashier-shifts/${shiftId}/movements`),
+    enabled: shiftId !== undefined,
+  });
 
 export type ShiftPaymentBreakdownDto = { method: string; amount: number; count: number };
 export type CashierShiftReportDto = {
@@ -564,6 +642,12 @@ export type QuotationDto = {
   convertedOrderNo: string | null;
   createdAt: string;
   lines: QuotationLineDto[];
+  // BRD §3.4 (Module 16): both mandatory — the backend has always returned these, the frontend type
+  // just never declared them.
+  projectCode: string;
+  customerReference: string;
+  // Quotation-level discount rate the user picked (0 = none); every line is priced at this rate.
+  discountPct: number;
 };
 export type CreateQuotationRequest = {
   branchId: number;
@@ -571,9 +655,21 @@ export type CreateQuotationRequest = {
   lines: CartLine[];
   validUntil?: string | null;
   notes?: string;
-  // BRD §3.4 (Module 16): both mandatory — the server rejects quotations without them.
+  // BRD §3.4 (Module 16): mandatory — the server rejects quotations without a project code.
   projectCode: string;
-  customerReference: string;
+  // The customer's own PO/tracking number — optional, since it isn't always known up front.
+  customerReference?: string;
+  // Manual override; omit to fall back to the server's auto contractor-discount rule.
+  discountPct?: number | null;
+};
+export type UpdateQuotationRequest = {
+  customerId: number | null;
+  lines: CartLine[];
+  validUntil?: string | null;
+  notes?: string;
+  projectCode: string;
+  customerReference?: string;
+  discountPct?: number | null;
 };
 
 export const useQuotations = (enabled = true) =>
@@ -588,6 +684,25 @@ export function useCreateQuotation() {
   return useMutation({
     mutationFn: (request: CreateQuotationRequest) =>
       apiPost<QuotationDto>("/api/pos/quotations", request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "quotations"] }),
+  });
+}
+
+export function useUpdateQuotation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, request }: { id: number; request: UpdateQuotationRequest }) =>
+      apiPut<QuotationDto>(`/api/pos/quotations/${id}`, request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "quotations"] }),
+  });
+}
+
+// Soft-cancel (sets Status=Cancelled server-side) — quotations are never hard-deleted so the audit
+// trail and history stay intact, matching how Orders handle Void instead of a real DELETE.
+export function useCancelQuotation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiDelete<void>(`/api/pos/quotations/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "quotations"] }),
   });
 }

@@ -13,7 +13,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/admin/maintenance")]
 [Authorize]
-[RequireModule(ModuleArea.Admin, AccessLevel.View)]
+[RequireModule("/admin/maintenance", PermissionAction.View)]
 public class MaintenanceController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -24,7 +24,7 @@ public class MaintenanceController(AppDbContext db, IAuditService audit) : Contr
     }
 
     [HttpPost]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/maintenance", PermissionAction.Create)]
     public async Task<ActionResult<MaintenanceDto>> Create(CreateMaintenanceRequest request, CancellationToken ct)
     {
         var ticketNo = $"MNT-{DateTime.UtcNow:yyyy}-{await db.MaintenanceTickets.CountAsync(ct) + 1:D4}";
@@ -41,7 +41,7 @@ public class MaintenanceController(AppDbContext db, IAuditService audit) : Contr
     }
 
     [HttpPut("{id:int}/status")]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/maintenance", PermissionAction.Edit)]
     public async Task<ActionResult<MaintenanceDto>> UpdateStatus(int id, UpdateMaintenanceStatusRequest request, CancellationToken ct)
     {
         var ticket = await db.MaintenanceTickets.Include(t => t.Branch).FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -55,7 +55,7 @@ public class MaintenanceController(AppDbContext db, IAuditService audit) : Contr
     }
 
     [HttpPut("{id:int}/assign")]
-    [RequireModule(ModuleArea.Admin, AccessLevel.Edit)]
+    [RequireModule("/admin/maintenance", PermissionAction.Edit)]
     public async Task<ActionResult<MaintenanceDto>> Assign(int id, AssignMaintenanceRequest request, CancellationToken ct)
     {
         var ticket = await db.MaintenanceTickets.Include(t => t.Branch).FirstOrDefaultAsync(t => t.Id == id, ct);

@@ -5,7 +5,19 @@ public record CreateUserRequest(string Name, string Email, string Password, int 
 public record UpdateUserRequest(string Name, int RoleId, int? BranchId, string Status);
 public record ResetPinResponse(string Pin);
 
-public record ModulePermissionEntry(string Module, string Level);
+// Module is a page route key (e.g. "/stock/warehouses") — see PermissionCatalog.cs. Each action is
+// independently grantable; a role can have CanView+CanExport without CanEdit.
+public record ModulePermissionEntry(string Module, bool CanView, bool CanCreate, bool CanEdit, bool CanDelete, bool CanApprove, bool CanExport);
+
+// One row of a user's "Customize Permissions" override grid. A null action means "no override,
+// inherit the role's value for that action"; true/false is an explicit override.
+public record UserPermissionOverrideEntry(string Module, bool? CanView, bool? CanCreate, bool? CanEdit, bool? CanDelete, bool? CanApprove, bool? CanExport);
+
+// The user's effective grid (role default with overrides merged in) plus which pages carry at
+// least one explicit override — what the "Custom Permissions" dialog renders and highlights.
+public record EffectivePermissionEntry(string Module, bool CanView, bool CanCreate, bool CanEdit, bool CanDelete, bool CanApprove, bool CanExport, bool IsOverridden);
+
+public record RoleMemberDto(int Id, string Name, string Email, string Status);
 
 // PosCeilings mirrors BRD §10.1's Cashier→Senior Cashier→Supervisor→Store Manager→System Admin ladder.
 // Null on a decimal ceiling means "no cap" for that role (e.g. Store Manager's DiscountCeilingPercent).
@@ -23,7 +35,7 @@ public record PosCeilingsDto(
     bool CanManageSystemConfiguration);
 
 public record RoleDto(int Id, string Name, string? Description, decimal ApprovalCap, bool IsSystem, string Status, int UserCount, IReadOnlyList<ModulePermissionEntry> Permissions, PosCeilingsDto PosCeilings);
-public record UpsertRoleRequest(string Name, string? Description, decimal ApprovalCap, Dictionary<string, string> Permissions, PosCeilingsDto PosCeilings);
+public record UpsertRoleRequest(string? Description, decimal ApprovalCap, IReadOnlyList<ModulePermissionEntry> Permissions, PosCeilingsDto PosCeilings);
 
 public record BranchDto(int Id, string Code, string NameEn, string? NameAr, string City, string? Address, string? BusinessHours, string? VatRegistrationNumber, string? ManagerName, string? Warehouse, string Status, int TerminalCount, int OrdersCount);
 public record UpsertBranchRequest(string Code, string NameEn, string? NameAr, string City, string? Address, string? BusinessHours, string? VatRegistrationNumber, string? ManagerName, string? Warehouse);

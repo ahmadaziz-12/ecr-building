@@ -36,7 +36,7 @@ export function PrinterSetupDialog({ terminalId }: { terminalId: number | undefi
 
   const terminalDevices = (devices ?? []).filter((d) => d.terminalId === terminalId);
   const printers = terminalDevices.filter((d) => d.type === "ReceiptPrinter");
-  const canMap = hasAccess("Network", "Edit");
+  const canMap = hasAccess("/network/devices", "Edit");
 
   async function tryConnect() {
     setConnecting(true);

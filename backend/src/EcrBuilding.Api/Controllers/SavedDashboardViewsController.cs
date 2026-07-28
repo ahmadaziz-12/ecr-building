@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Text.Json;
 using EcrBuilding.Application.Insights;
 using EcrBuilding.Domain.Entities;
 using EcrBuilding.Infrastructure.Persistence;
@@ -10,7 +9,8 @@ using Microsoft.EntityFrameworkCore;
 namespace EcrBuilding.Api.Controllers;
 
 // No [RequireModule] gate — every role that can open the dashboard (including Cashier/Senior
-// Cashier, who have Insights = None) must still be able to save/load their own filter views.
+// Cashier, whose restricted dashboard subset per BRD §10.1 is gated client-side on
+// posCeilings.canViewXReport) must still be able to save/load their own filter views.
 [ApiController]
 [Route("api/insights/saved-views")]
 [Authorize]
@@ -31,12 +31,13 @@ public class SavedDashboardViewsController(AppDbContext db) : ControllerBase
     public async Task<ActionResult<SavedDashboardViewDto>> Create(CreateSavedDashboardViewRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Name)) return BadRequest(new { error = "Name is required." });
+        if (string.IsNullOrWhiteSpace(request.FiltersJson)) return BadRequest(new { error = "FiltersJson is required." });
 
         var view = new SavedDashboardView
         {
             UserId = CurrentUserId(),
             Name = request.Name.Trim(),
-            FiltersJson = JsonSerializer.Serialize(request.Filters),
+            FiltersJson = request.FiltersJson,
         };
         db.SavedDashboardViews.Add(view);
         await db.SaveChangesAsync(ct);
