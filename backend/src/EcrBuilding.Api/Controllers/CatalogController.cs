@@ -1,6 +1,8 @@
+using System.Security.Claims;
 using System.Text.Json;
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
+using EcrBuilding.Application.Auth;
 using EcrBuilding.Application.Catalog;
 using EcrBuilding.Domain.Common;
 using EcrBuilding.Domain.Entities;
@@ -267,7 +269,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
 [Route("api/catalog/bundles")]
 [Authorize]
 [RequireModule("/stock/bundles", PermissionAction.View)]
-public class BundlesController(AppDbContext db, IAuditService audit) : ControllerBase
+public class BundlesController(AppDbContext db, IAuditService audit, IPermissionResolver permissionResolver) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<BundleDto>>> List(CancellationToken ct)
@@ -292,6 +294,14 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
             Code = request.Code, NameEn = request.NameEn, NameAr = request.NameAr, BundlePrice = request.BundlePrice,
             Type = Enum.TryParse<BundleType>(request.Type, ignoreCase: true, out var parsedType) ? parsedType : BundleType.ProductSystem,
             Lines = request.Lines.Select(l => new BundleLine { ProductId = l.ProductId, Qty = l.Qty }).ToList(),
+            // Phase 4 (BRD §5.7): "Save: Draft or Publish" — Publish jumps straight into the same
+            // manager sign-off queue PricingRule uses; otherwise the bundle sits editable and
+            // invisible to POS/checkout until someone explicitly submits it.
+            Status = request.Publish ? BundleStatus.PendingApproval : BundleStatus.Draft,
+            CreatedByUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!),
+            StartDate = request.StartDate, EndDate = request.EndDate, StackableDiscount = request.StackableDiscount,
+            EligibleCustomerTypesJson = JsonSerializer.Serialize(request.EligibleCustomerTypes ?? []),
+            EligibleBranchIdsJson = JsonSerializer.Serialize(request.EligibleBranchIds ?? []),
         };
         db.ProductBundles.Add(bundle);
         await db.SaveChangesAsync(ct);
@@ -307,6 +317,7 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
     {
         var bundle = await db.ProductBundles.Include(b => b.Lines).FirstOrDefaultAsync(b => b.Id == id, ct);
         if (bundle is null) return NotFound();
+        if (bundle.Status == BundleStatus.Archived) return BadRequest(new { error = "An archived bundle can't be edited." });
         if (await db.ProductBundles.AnyAsync(b => b.Code == request.Code && b.Id != id, ct))
         {
             return Conflict(new { error = "A bundle with this code already exists." });
@@ -314,6 +325,13 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
 
         bundle.Code = request.Code; bundle.NameEn = request.NameEn; bundle.NameAr = request.NameAr; bundle.BundlePrice = request.BundlePrice;
         if (Enum.TryParse<BundleType>(request.Type, ignoreCase: true, out var parsedType)) bundle.Type = parsedType;
+        bundle.StartDate = request.StartDate; bundle.EndDate = request.EndDate; bundle.StackableDiscount = request.StackableDiscount;
+        bundle.EligibleCustomerTypesJson = JsonSerializer.Serialize(request.EligibleCustomerTypes ?? []);
+        bundle.EligibleBranchIdsJson = JsonSerializer.Serialize(request.EligibleBranchIds ?? []);
+        // Editing a live bundle's terms re-opens the same manager sign-off it needed to go live in
+        // the first place — same rule PricingRulesController.Update applies, for the same reason
+        // (otherwise "Edit" is a silent side door around the approval control below).
+        if (bundle.Status == BundleStatus.Active) bundle.Status = BundleStatus.PendingApproval;
         db.BundleLines.RemoveRange(bundle.Lines);
         bundle.Lines = request.Lines.Select(l => new BundleLine { BundleId = bundle.Id, ProductId = l.ProductId, Qty = l.Qty }).ToList();
         await db.SaveChangesAsync(ct);
@@ -323,53 +341,67 @@ public class BundlesController(AppDbContext db, IAuditService audit) : Controlle
         return Ok(Map(bundle));
     }
 
+    // Phase 4 (BRD §5.7) lifecycle transitions. Draft -> PendingApproval ("submit") and
+    // PendingApproval -> Draft ("send back") just need Edit; Inactive -> Active (re-enable) also
+    // just needs Edit since the bundle already passed approval once. Only the FIRST go-live
+    // (PendingApproval -> Active) requires the same cross-user-or-Approve-permission check
+    // PricingRulesController.UpdateStatus uses — a bundle's creator can't rubber-stamp their own
+    // discount into production. Archived is terminal from any state; nothing leaves it.
     [HttpPut("{id:int}/status")]
-    [RequireModule("/stock/bundles", PermissionAction.Delete)]
+    [RequireModule("/stock/bundles", PermissionAction.Edit)]
     public async Task<ActionResult<BundleDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
     {
         var bundle = await db.ProductBundles.Include(b => b.Lines).ThenInclude(l => l.Product).FirstOrDefaultAsync(b => b.Id == id, ct);
         if (bundle is null) return NotFound();
-        if (!Enum.TryParse<EntityStatus>(request.Status, out var status)) return BadRequest(new { error = $"Unknown status \"{request.Status}\"." });
+        if (!Enum.TryParse<BundleStatus>(request.Status, out var newStatus)) return BadRequest(new { error = $"Unknown status \"{request.Status}\"." });
+        if (bundle.Status == BundleStatus.Archived) return BadRequest(new { error = "An archived bundle can't change status." });
 
-        bundle.Status = status;
+        if (bundle.Status == BundleStatus.PendingApproval && newStatus == BundleStatus.Active && bundle.CreatedByUserId is not null)
+        {
+            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var canSelfApprove = await permissionResolver.HasAsync(userId, "/stock/bundles", PermissionAction.Approve, ct);
+            if (userId == bundle.CreatedByUserId && !canSelfApprove)
+            {
+                return BadRequest(new { error = "You cannot approve your own bundle — a different user must activate it." });
+            }
+        }
+
+        bundle.Status = newStatus;
         await db.SaveChangesAsync(ct);
-        await audit.LogAsync("inventory", "BUNDLE_STATUS_CHANGED", bundle.Id.ToString(), newValue: request, cancellationToken: ct);
+        await audit.LogAsync("inventory", $"BUNDLE_{bundle.Status.ToString().ToUpperInvariant()}", bundle.Id.ToString(), newValue: request, cancellationToken: ct);
         return Ok(Map(bundle));
     }
 
-    // BRD §5.4 Bundle Sales Report: units sold, revenue at bundle vs individual pricing, and the
-    // discount value given — derived from OrderLines tagged with a BundleId at checkout.
-    [HttpGet("sales-report")]
-    public async Task<ActionResult<List<BundleSalesReportRowDto>>> SalesReport(CancellationToken ct)
-    {
-        var bundles = await db.ProductBundles.Include(b => b.Lines).ThenInclude(l => l.Product).ToListAsync(ct);
-        var soldLines = await db.OrderLines.Where(l => l.BundleId != null)
-            .GroupBy(l => new { l.BundleId, l.ProductId })
-            .Select(g => new { g.Key.BundleId, g.Key.ProductId, Qty = g.Sum(x => x.Qty), Revenue = g.Sum(x => x.LineTotal) })
-            .ToListAsync(ct);
+    // Phase 5 (BRD §5.5 Bundle Suggestion Engine): fire-and-forget impression logging from POS —
+    // Shown when the nudge appears, Accepted/Rejected on the cashier's action. Feeds the Suggestion
+    // Report (BundleReportsController.BundleSuggestions). Gated on View (not Create/Edit) since any
+    // cashier who can see bundles at POS needs to be able to log an impression of one.
+    public record LogSuggestionEventRequest(string EventType, int? BranchId);
 
-        var rows = new List<BundleSalesReportRowDto>();
-        foreach (var bundle in bundles)
+    [HttpPost("{id:int}/suggestion-events")]
+    public async Task<IActionResult> LogSuggestionEvent(int id, LogSuggestionEventRequest request, CancellationToken ct)
+    {
+        if (!await db.ProductBundles.AnyAsync(b => b.Id == id, ct)) return NotFound();
+        if (!Enum.TryParse<BundleSuggestionEventType>(request.EventType, out var eventType))
         {
-            var sold = soldLines.Where(s => s.BundleId == bundle.Id).ToList();
-            if (sold.Count == 0) continue;
-            // Units = sold quantity of the first constituent ÷ its per-bundle quantity — every
-            // constituent scales together, so any of them recovers the bundle count.
-            var reference = bundle.Lines.FirstOrDefault(l => sold.Any(s => s.ProductId == l.ProductId));
-            var unitsSold = reference is null || reference.Qty == 0 ? 0
-                : Math.Round((sold.FirstOrDefault(s => s.ProductId == reference.ProductId)?.Qty ?? 0) / reference.Qty, 2);
-            var revenueAtBundle = sold.Sum(s => s.Revenue);
-            var individualPerUnit = bundle.Lines.Sum(l => l.Qty * (l.Product?.SellingPrice ?? 0));
-            var revenueAtIndividual = Math.Round(unitsSold * individualPerUnit, 2);
-            rows.Add(new BundleSalesReportRowDto(
-                bundle.Id, bundle.Code, bundle.NameEn, bundle.Type.ToString(), unitsSold,
-                Math.Round(revenueAtBundle, 2), revenueAtIndividual, Math.Round(revenueAtIndividual - revenueAtBundle, 2)));
+            return BadRequest(new { error = $"Unknown event type \"{request.EventType}\"." });
         }
-        return Ok(rows.OrderByDescending(r => r.RevenueAtBundlePrice).ToList());
+        db.BundleSuggestionEvents.Add(new BundleSuggestionEvent
+        {
+            BundleId = id,
+            EventType = eventType,
+            BranchId = request.BranchId,
+            UserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!),
+        });
+        await db.SaveChangesAsync(ct);
+        return NoContent();
     }
 
     private static BundleDto Map(ProductBundle b) => new(
         b.Id, b.Code, b.NameEn, b.NameAr, b.BundlePrice, b.Lines.Sum(l => l.Qty * (l.Product?.CostPrice ?? 0)), b.Status.ToString(),
-        b.Lines.Select(l => new BundleLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.Product?.CostPrice ?? 0, l.Product?.SellingPrice ?? 0, l.Product?.VatRate ?? 0)).ToList(),
-        b.Type.ToString(), b.Lines.Sum(l => l.Qty * (l.Product?.SellingPrice ?? 0)));
+        b.Lines.Select(l => new BundleLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.Product?.CostPrice ?? 0, l.Product?.SellingPrice ?? 0, l.Product?.VatRate ?? 0, l.Product?.Barcode)).ToList(),
+        b.Type.ToString(), b.Lines.Sum(l => l.Qty * (l.Product?.SellingPrice ?? 0)),
+        BundleLifecycle.ResolveEffectiveStatus(b.Status, b.StartDate, b.EndDate, DateTime.UtcNow), b.StartDate, b.EndDate,
+        JsonSerializer.Deserialize<string[]>(b.EligibleCustomerTypesJson) ?? [], JsonSerializer.Deserialize<int[]>(b.EligibleBranchIdsJson) ?? [],
+        b.StackableDiscount);
 }

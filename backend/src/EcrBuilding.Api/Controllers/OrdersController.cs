@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
+using EcrBuilding.Application.Auth;
 using EcrBuilding.Application.Pos;
 using EcrBuilding.Domain.Common;
 using EcrBuilding.Domain.Entities;
@@ -16,7 +17,7 @@ namespace EcrBuilding.Api.Controllers;
 [Route("api/pos/orders")]
 [Authorize]
 [RequireModule("/operate/orders", PermissionAction.View)]
-public class OrdersController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements, IPaymentGateway paymentGateway, IGlPostingService gl, IZatcaService zatca, ILogger<OrdersController> logger, IPasswordHasher passwordHasher) : ControllerBase
+public class OrdersController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements, IPaymentGateway paymentGateway, IGlPostingService gl, IZatcaService zatca, ILogger<OrdersController> logger, IPasswordHasher passwordHasher, IPermissionResolver permissionResolver) : ControllerBase
 {
     // BRD §3.6: voids are logged with a REASON CODE, not free text.
     private static readonly string[] VoidReasonCodes =
@@ -51,6 +52,34 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         if (authorizer.Role is not { CanVoidTransactions: true })
         {
             return ("The authorizing manager's role does not carry void authorization.", null);
+        }
+        return (null, authorizer.Id);
+    }
+
+    // Phase 4 (BRD §5.7 Business Controls) "Supervisor overrides": a bundle that's outside its
+    // schedule, restricted to other branches, or restricted to other customer groups can still be
+    // sold if a DIFFERENT user holding Approve permission on /stock/bundles re-authenticates inline
+    // — same synchronous re-auth shape as ValidateVoidAuthorizationAsync above, deliberately not the
+    // async ApprovalRequest queue (that would stall the sale waiting on a second login elsewhere).
+    private async Task<(string? Error, int? AuthorizerId)> ValidateBundleOverrideAuthorizationAsync(
+        string? supervisorEmail, string? supervisorPin, int currentUserId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(supervisorEmail) || string.IsNullOrWhiteSpace(supervisorPin))
+        {
+            return ("provide a supervisor's email and PIN to override.", null);
+        }
+        var authorizer = await db.Users.FirstOrDefaultAsync(u => u.Email == supervisorEmail, ct);
+        if (authorizer is null || authorizer.PinHash is null || !passwordHasher.Verify(supervisorPin, authorizer.PinHash))
+        {
+            return ("the supervisor's email or PIN is incorrect.", null);
+        }
+        if (authorizer.Id == currentUserId)
+        {
+            return ("the authorizing supervisor must be a different person from the cashier.", null);
+        }
+        if (!await permissionResolver.HasAsync(authorizer.Id, "/stock/bundles", PermissionAction.Approve, ct))
+        {
+            return ("the supervisor's role does not carry bundle approval authority.", null);
         }
         return (null, authorizer.Id);
     }
@@ -490,6 +519,12 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         // BRD §7 (CR-040): Promotional rules auto-apply within their ValidFrom/ValidUntil window —
         // no coupon code needed, unlike Type="Coupon". Sku null means "any product."
         var promoRules = activePricingRules.Where(r => r.Type == "Promotional").ToList();
+        // Phase 2 (BRD §5.1) — pallet-tier pricing is a Quantity rule with PalletQty set (excluded
+        // from quantityRules above, see PricingEngine.ResolveQuantityPct); Buy-X-Get-Y and Trade
+        // Value are their own Types. See PricingEngine (Domain/Common) for the math.
+        var palletRules = activePricingRules.Where(r => r.Type == "Quantity" && r.PalletQty is not null).ToList();
+        var buyXGetYRules = activePricingRules.Where(r => r.Type == "Buy X Get Y" && r.BuyQty is not null && r.FreeQty is not null).ToList();
+        var tradeValueRules = activePricingRules.Where(r => r.Type == "Trade Value" && r.MinCartTotal is not null).ToList();
         var order = new Order
         {
             OrderNo = $"ORD-{DateTime.UtcNow:yyyy}-{await db.Orders.CountAsync(ct) + 1:D4}",
@@ -511,15 +546,35 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         // DiscountTotal as the combined bundle discount.
         var pricedLines = request.Lines.Select(l => new PricedLine(l)).ToList();
         decimal bundleDiscountTotal = 0;
+        // Phase 4 (BRD §5.7): true if ANY bundle in this order has StackableDiscount == false —
+        // gates the order-level coupon/manual/Trade-Value layer below.
+        var nonStackableBundleInCart = false;
         foreach (var bundleInput in request.Bundles ?? [])
         {
             if (bundleInput.Qty <= 0) return BadRequest(new { error = "Bundle quantity must be positive." });
             var bundle = await db.ProductBundles.Include(b => b.Lines).ThenInclude(l => l.Product)
                 .FirstOrDefaultAsync(b => b.Id == bundleInput.BundleId, ct);
-            if (bundle is null || bundle.Status != EntityStatus.Active)
+            if (bundle is null) return BadRequest(new { error = $"Bundle {bundleInput.BundleId} does not exist." });
+
+            // Phase 4 (BRD §5.7): scheduling/status, branch, and customer-group eligibility gates.
+            // A supervisor can override any of them for this one sale by re-authenticating inline
+            // (mirrors ValidateVoidAuthorizationAsync) instead of queuing an async approval that
+            // would stall the sale at the register.
+            var usable = BundleLifecycle.IsUsableNow(bundle.Status, bundle.StartDate, bundle.EndDate, DateTime.UtcNow);
+            var branchOk = BundleLifecycle.IsBranchEligible(bundle.EligibleBranchIdsJson, request.BranchId);
+            var customerOk = BundleLifecycle.IsCustomerTypeEligible(bundle.EligibleCustomerTypesJson, customer?.Type);
+            if (!usable || !branchOk || !customerOk)
             {
-                return BadRequest(new { error = $"Bundle {bundleInput.BundleId} does not exist or is inactive." });
+                var (overrideError, _) = await ValidateBundleOverrideAuthorizationAsync(
+                    bundleInput.SupervisorEmail, bundleInput.SupervisorPin, cashierId, ct);
+                if (overrideError is not null)
+                {
+                    var reason = !usable ? "is not currently active" : !branchOk ? "is not available at this branch" : "is not available for this customer";
+                    return BadRequest(new { error = $"Bundle {bundle.Code} {reason} — {overrideError}" });
+                }
             }
+            if (!bundle.StackableDiscount) nonStackableBundleInCart = true;
+
             var individualTotal = bundle.Lines.Sum(l => l.Qty * (l.Product?.SellingPrice ?? 0));
             if (individualTotal <= 0) return BadRequest(new { error = $"Bundle {bundle.Code} has no priced constituents." });
             var priceFactor = bundle.BundlePrice / individualTotal;
@@ -683,14 +738,10 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             // Sku is stored exactly as entered in the catalog — an ordinal match would silently never
             // fire for any product whose real SKU isn't already all-caps (e.g. catalog SKU "Net12"
             // vs. rule SKU "NET12"), so the comparison must ignore case.
-            var quantityPct = quantityRules
-                .Where(r => (r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase)) && stockQty >= r.MinQuantity)
-                .Select(r => r.Value).DefaultIfEmpty(0m).Max();
+            var quantityPct = PricingEngine.ResolveQuantityPct(quantityRules, product.Sku, stockQty);
             // BRD §7 (CR-040): Promotional rules stack into the same "larger of" group as everything
             // else below — a time-boxed promo doesn't add on top of an already-larger discount.
-            var promoPct = promoRules
-                .Where(r => r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase))
-                .Select(r => r.Value).DefaultIfEmpty(0m).Max();
+            var promoPct = PricingEngine.ResolvePromoPct(promoRules, product.Sku);
             // BRD §2.3/§6.2: a cashier-entered per-line discount doesn't stack with the auto contractor/
             // tier/quantity discount either — same "larger of" rule as those three, gated above like the
             // order-level ManualDiscount. Bundle constituents stay exempt (see comment above).
@@ -701,8 +752,73 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             // (that's independent of which price list the line was charged from).
             var effectiveDiscountPct = listPriceApplied ? tierDiscountPct : discountPct;
             var lineDiscountPct = priced.BundleId is null && !manualPriceOverride
-                ? Math.Max(Math.Max(Math.Max(effectiveDiscountPct, quantityPct), promoPct), manualLinePct)
+                ? PricingEngine.ResolveLineDiscountPct(effectiveDiscountPct, quantityPct, promoPct, manualLinePct)
                 : 0m;
+
+            // Phase 2 (BRD §5.1): Buy-X-Get-Y and pallet-tier pricing both split what the cashier
+            // entered as ONE line into TWO OrderLine rows for the same product — stock is already
+            // deducted above as one combined quantity, so this only changes how the sale is priced/
+            // represented, not inventory. Scoped to plain stock-UOM, non-cut-to-size lines (every
+            // example in the spec is whole units of the product's own stock UOM — a cut-to-size
+            // glass panel or an alternate-UOM pallet line never has a sensible "N free units").
+            var eligibleForSplit = priced.BundleId is null && !manualPriceOverride && lengthM is null && sellUom == product.StockUom;
+            var buyXGetYRule = eligibleForSplit
+                ? buyXGetYRules.Where(r => r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(r => r.BranchId != null).ThenByDescending(r => r.Priority).FirstOrDefault()
+                : null;
+            var (paidUnits, freeUnits) = buyXGetYRule is not null ? PricingEngine.ResolveBuyXGetYSplit(buyXGetYRule, stockQty) : (stockQty, 0m);
+
+            if (freeUnits > 0)
+            {
+                var paidLineTotal = Math.Round(paidUnits * unitPrice * (1 - lineDiscountPct / 100), 2);
+                order.Lines.Add(new OrderLine
+                {
+                    ProductId = product.Id, Qty = paidUnits, Uom = sellUom, StockQty = paidUnits, UnitPrice = unitPrice,
+                    DiscountPct = lineDiscountPct, VatRate = product.VatRate, LineTotal = paidLineTotal, Notes = line.Notes,
+                });
+                order.Lines.Add(new OrderLine
+                {
+                    ProductId = product.Id, Qty = freeUnits, Uom = sellUom, StockQty = freeUnits, UnitPrice = unitPrice,
+                    DiscountPct = 100, VatRate = product.VatRate, LineTotal = 0,
+                    Notes = $"Buy {buyXGetYRule!.BuyQty:0.##} Get {buyXGetYRule.FreeQty:0.##} Free",
+                });
+                lineCategoryTotals.Add((product.CategoryId, paidLineTotal));
+                lineCategoryTotals.Add((product.CategoryId, 0m));
+                if (line.RequiresDelivery) deliveryCandidateLines.Add((product.Id, product.StockUom, product.Weight, stockQty, paidLineTotal));
+                continue;
+            }
+
+            var palletRule = eligibleForSplit
+                ? palletRules.Where(r => r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(r => r.BranchId != null).ThenByDescending(r => r.Priority).FirstOrDefault()
+                : null;
+            var (palletUnits, remainderUnits) = palletRule is not null ? PricingEngine.ResolvePalletSplit(palletRule, stockQty) : (0m, stockQty);
+
+            if (palletUnits > 0)
+            {
+                var palletLineTotal = Math.Round(palletUnits * palletRule!.Value, 2);
+                order.Lines.Add(new OrderLine
+                {
+                    ProductId = product.Id, Qty = palletUnits, Uom = sellUom, StockQty = palletUnits, UnitPrice = palletRule.Value,
+                    DiscountPct = 0, VatRate = product.VatRate, LineTotal = palletLineTotal,
+                    Notes = $"Pallet price ({palletRule.PalletQty:0.##}+)",
+                });
+                lineCategoryTotals.Add((product.CategoryId, palletLineTotal));
+                var remainderLineTotal = 0m;
+                if (remainderUnits > 0)
+                {
+                    remainderLineTotal = Math.Round(remainderUnits * unitPrice * (1 - lineDiscountPct / 100), 2);
+                    order.Lines.Add(new OrderLine
+                    {
+                        ProductId = product.Id, Qty = remainderUnits, Uom = sellUom, StockQty = remainderUnits, UnitPrice = unitPrice,
+                        DiscountPct = lineDiscountPct, VatRate = product.VatRate, LineTotal = remainderLineTotal, Notes = line.Notes,
+                    });
+                    lineCategoryTotals.Add((product.CategoryId, remainderLineTotal));
+                }
+                if (line.RequiresDelivery) deliveryCandidateLines.Add((product.Id, product.StockUom, product.Weight, stockQty, palletLineTotal + remainderLineTotal));
+                continue;
+            }
+
             var lineTotal = Math.Round(enteredQty * unitPrice * (1 - lineDiscountPct / 100), 2);
             order.Lines.Add(new OrderLine
             {
@@ -788,11 +904,31 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
                 ? lineTotalsSum * request.ManualDiscount.Value / 100
                 : request.ManualDiscount.Value;
 
-        var orderDiscount = Math.Min(lineTotalsSum, couponDiscount + manualDiscount);
+        // Phase 2 (BRD §5.1) Trade Value: a Contractor whose cart crosses the rule's SAR threshold
+        // gets % off the whole order — an order-level discount like coupon/manual, not a per-line
+        // one, so it shares their VAT-proration treatment via discountRatio below automatically.
+        var tradeValuePct = customer?.Type == CustomerType.Contractor
+            ? PricingEngine.ResolveTradeValuePct(tradeValueRules, lineTotalsSum)
+            : 0m;
+        var tradeValueDiscount = lineTotalsSum * tradeValuePct / 100;
+
+        // Phase 4 (BRD §5.7) "Allow Stack Discounts": a non-stackable bundle's price is already the
+        // deal — no coupon/manual/Trade-Value discount rides on top of it. Rejected outright rather
+        // than silently zeroed, so the cashier sees exactly why the coupon they scanned didn't take.
+        if (nonStackableBundleInCart && couponDiscount + manualDiscount + tradeValueDiscount > 0)
+        {
+            return BadRequest(new
+            {
+                error = "This order contains a bundle that doesn't allow stacking with other discounts — remove the coupon/manual discount, or the bundle, to continue.",
+            });
+        }
+
+        var orderDiscount = Math.Min(lineTotalsSum, couponDiscount + manualDiscount + tradeValueDiscount);
         var discountRatio = lineTotalsSum == 0 ? 0 : orderDiscount / lineTotalsSum;
 
         order.VatTotal = order.Lines.Sum(l => l.LineTotal * (1 - discountRatio) * l.VatRate / 100);
         order.DiscountTotal = contractorDiscount + orderDiscount;
+        order.BundleDiscountTotal = bundleDiscountTotal;
         var taxableTotal = lineTotalsSum - orderDiscount;
 
         // BRD §4.3.2: Silver+ loyalty customers get free delivery on orders above SAR 500 — any
@@ -1030,7 +1166,7 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         int? deliveryOrderId = null, string? deliveryOrderNo = null, string? deliveryStage = null) => new(
         o.Id, o.OrderNo, o.BranchId, o.Branch?.NameEn ?? "", o.TerminalId, o.Cashier?.Name ?? "", o.CustomerId,
         o.Customer?.NameEn ?? "Walk-in Customer", o.Type.ToString(), o.Status.ToString(), o.PaymentStatus.ToString(),
-        o.SubTotal, o.DiscountTotal, o.VatTotal, o.Fees.Sum(f => f.Amount), o.GrandTotal, o.CreatedAt,
+        o.SubTotal, o.DiscountTotal, o.BundleDiscountTotal, o.VatTotal, o.Fees.Sum(f => f.Amount), o.GrandTotal, o.CreatedAt,
         // Legacy lines predating the UOM engine have StockQty=0 — fall back to Qty, same rule the
         // Uom/StockQty doc comment on OrderLineDto already applies to every other stock-UOM reader.
         o.Lines.Select(l => new OrderLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.UnitPrice, l.DiscountPct, l.VatRate, l.LineTotal, l.Uom, l.StockQty, l.LengthM, l.WidthM, l.Id, l.BundleId, l.Bundle?.NameEn,

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using EcrBuilding.Api.Authorization;
 using EcrBuilding.Application.Abstractions;
 using EcrBuilding.Application.Pos;
+using EcrBuilding.Domain.Common;
 using EcrBuilding.Domain.Entities;
 using EcrBuilding.Domain.Enums;
 using EcrBuilding.Infrastructure.Persistence;
@@ -323,20 +324,17 @@ public class QuotationsController(AppDbContext db, IAuditService audit) : Contro
             var unitPrice = manualPriceOverride ? line.ManualUnitPrice!.Value : listPrice;
 
             // Quotation lines are always priced/quantified in stock UOM (no UOM selector on the
-            // quotation builder), so line.Qty is directly comparable to MinQuantity.
-            var quantityPct = quantityRules
-                .Where(r => (r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase)) && line.Qty >= r.MinQuantity)
-                .Select(r => r.Value).DefaultIfEmpty(0m).Max();
+            // quotation builder), so line.Qty is directly comparable to MinQuantity. Shared with
+            // OrdersController.Checkout via PricingEngine so the two can't silently disagree.
+            var quantityPct = PricingEngine.ResolveQuantityPct(quantityRules, product.Sku, line.Qty);
             // BRD §7 (CR-040): Promotional rules auto-apply within their date window, in the same
             // "larger of" group as everything else — never stacked on top.
-            var promoPct = promoRules
-                .Where(r => r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase))
-                .Select(r => r.Value).DefaultIfEmpty(0m).Max();
+            var promoPct = PricingEngine.ResolvePromoPct(promoRules, product.Sku);
             // Once a real segment list price was actually used, the automatic contractor trade %
             // would double-dip on top of an already-negotiated price (same suppression as checkout) —
             // but an explicit DiscountPct the user typed on the quotation form always still applies.
             var effectiveDiscountPct = listPriceApplied && !isManualDiscount ? 0m : discountPct;
-            var lineDiscountPct = manualPriceOverride ? 0m : Math.Max(Math.Max(effectiveDiscountPct, quantityPct), promoPct);
+            var lineDiscountPct = manualPriceOverride ? 0m : PricingEngine.ResolveLineDiscountPct(effectiveDiscountPct, quantityPct, promoPct, 0m);
 
             var lineTotal = Math.Round(line.Qty * unitPrice * (1 - lineDiscountPct / 100), 2);
             lines.Add(new QuotationLine

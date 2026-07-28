@@ -44,23 +44,78 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { productImage } from "@/lib/buildpos/product-images";
-import { categoryDisplayLabel, useCategories, useProducts, type CategoryDto, type ProductUomConversionDto, type CutToSizeUnit } from "@/lib/api/catalog";
-import { areaOf, lengthOf, volumeOf, factorToStock, sellableUoms, toStockQty, unitPriceFor } from "@/lib/buildpos/uom";
-import { nextTierProgress, qualifiesForFreeDelivery, tierDiscountPct, type LoyaltyTierConfig } from "@/lib/buildpos/loyalty";
-import { useBundles, type BundleDto } from "@/lib/api/bundles";
-import { enqueueCheckout, isNetworkError, newClientRequestId, readQueue, replayQueue } from "@/lib/buildpos/offline-queue";
+import {
+  categoryDisplayLabel,
+  useCategories,
+  useProducts,
+  type CategoryDto,
+  type ProductUomConversionDto,
+  type CutToSizeUnit,
+} from "@/lib/api/catalog";
+import {
+  areaOf,
+  lengthOf,
+  volumeOf,
+  factorToStock,
+  sellableUoms,
+  toStockQty,
+  unitPriceFor,
+} from "@/lib/buildpos/uom";
+import {
+  nextTierProgress,
+  qualifiesForFreeDelivery,
+  tierDiscountPct,
+  type LoyaltyTierConfig,
+} from "@/lib/buildpos/loyalty";
+import {
+  resolveBuyXGetYSplit,
+  resolveLineDiscountPct,
+  resolvePalletSplit,
+  resolvePromoPct,
+  resolveQuantityPct,
+  resolveTradeValuePct,
+} from "@/lib/buildpos/pricing";
+import { useBundles, useLogBundleSuggestionEvent, type BundleDto } from "@/lib/api/bundles";
+import { bestBundleSuggestion, type BundleCompletion } from "@/lib/buildpos/bundle-suggestions";
+import {
+  enqueueCheckout,
+  isNetworkError,
+  newClientRequestId,
+  readQueue,
+  replayQueue,
+} from "@/lib/buildpos/offline-queue";
 import { useCreateQuotation } from "@/lib/api/pos";
 import { apiPost } from "@/lib/api/client";
 import { useTerminals, useBranches } from "@/lib/api/admin";
 import {
-  useCustomers, useCheckout, useHoldSale, useResumeSale, useParkedSales, useCreateCustomer, useLoyaltyConfig, usePricingRules,
-  lookupCustomerByPhone, validateCoupon, type CustomerDto, type ValidateCouponResponse, type PaymentInput, type DeliveryDetailsInput,
+  useCustomers,
+  useCheckout,
+  useHoldSale,
+  useResumeSale,
+  useParkedSales,
+  useCreateCustomer,
+  useLoyaltyConfig,
+  usePricingRules,
+  lookupCustomerByPhone,
+  validateCoupon,
+  type CustomerDto,
+  type ValidateCouponResponse,
+  type PaymentInput,
+  type DeliveryDetailsInput,
 } from "@/lib/api/pos";
 import { useZonesApi, useDriversApi, useVehiclesApi } from "@/lib/api/delivery";
 import { useAuth } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
+import { BundleOverrideDialog } from "@/components/buildpos/pos/BundleOverrideDialog";
 import { PaymentDialog } from "@/components/buildpos/pos/PaymentDialog";
 import { PrinterSetupDialog } from "@/components/buildpos/pos/PrinterSetupDialog";
 import { ReceiptDialog } from "@/components/buildpos/pos/ReceiptDialog";
@@ -90,7 +145,12 @@ const productIcon: Record<string, IconType> = {
 
 // BRD §2.3 items 5-6: which dimensions matter — and how they combine into the billed qty — depends
 // on the product's cut-to-size unit. Mirrors the backend's OrdersController.Checkout branch exactly.
-function cutToSizeQty(unit: CutToSizeUnit, lengthM: number, widthM: number, heightM: number): number {
+function cutToSizeQty(
+  unit: CutToSizeUnit,
+  lengthM: number,
+  widthM: number,
+  heightM: number,
+): number {
   if (unit === "Length") return lengthOf(lengthM);
   if (unit === "Volume") return volumeOf(lengthM, widthM, heightM);
   return areaOf(lengthM, widthM);
@@ -114,9 +174,22 @@ const toneClass: Record<string, string> = {
 // which ones matter (Length: lengthM only; Area: length×width; Volume: length×width×height) — and
 // qty = the computed length/area/volume.
 type CartLine = {
-  productId: number; sku: string; name: string; uom: string; price: number; vatRate: number; qty: number;
-  stockUom: string; basePrice: number; factorToStock: number; conversions: ProductUomConversionDto[];
-  isCutToSize: boolean; cutToSizeUnit: CutToSizeUnit; lengthM?: number; widthM?: number; heightM?: number;
+  productId: number;
+  sku: string;
+  name: string;
+  uom: string;
+  price: number;
+  vatRate: number;
+  qty: number;
+  stockUom: string;
+  basePrice: number;
+  factorToStock: number;
+  conversions: ProductUomConversionDto[];
+  isCutToSize: boolean;
+  cutToSizeUnit: CutToSizeUnit;
+  lengthM?: number;
+  widthM?: number;
+  heightM?: number;
   // Real product photo (base64 data URL or absent) — falls back to the static demo map, then an icon.
   imageUrl?: string | null;
   // BRD §3.5: cashier flags this line for delivery instead of counter pickup — a sale can mix
@@ -140,12 +213,25 @@ type CustomFee = { label: string; amount: number };
 // Module 8 (BRD §5.2): a bundle in the cart — kept as one grouped entry (the server expands it into
 // constituent order lines at checkout). vatPerUnit = Σ constituent bundle-share price × its own VAT
 // rate, so the client total matches the server's per-item VAT math.
-type BundleCartEntry = { bundleId: number; code: string; name: string; qty: number; bundlePrice: number; individualTotal: number; vatPerUnit: number };
+type BundleCartEntry = {
+  bundleId: number;
+  code: string;
+  name: string;
+  qty: number;
+  bundlePrice: number;
+  individualTotal: number;
+  vatPerUnit: number;
+  // Phase 4 (BRD §5.7): set only when this bundle was added past a schedule/branch/customer-group
+  // eligibility block via a supervisor override — verified server-side at checkout, not here.
+  supervisorEmail?: string;
+  supervisorPin?: string;
+};
 // BRD §10.2 default: auto-lock after 3 minutes of inactivity (Module 15).
 const IDLE_LOCK_MS = 3 * 60 * 1000;
 // sessionStorage key the Cashier Workspace uses to hand a parked-sale id to this screen for resume.
 export const RESUME_HOLD_KEY = "buildpos.resume-hold-id";
-const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ر.س";
+const money = (n: number) =>
+  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ر.س";
 
 export function PosCheckout() {
   const [query, setQuery] = useState("");
@@ -159,6 +245,13 @@ export function PosCheckout() {
   // sku of the cart line whose price-override input is currently expanded — null collapses all.
   const [priceEditingSku, setPriceEditingSku] = useState<string | null>(null);
   const [bundleCart, setBundleCart] = useState<BundleCartEntry[]>([]);
+  // Phase 3 Bundle Suggestion Engine: bundle ids the cashier has explicitly said "no thanks" to for
+  // THIS sale — cleared by resetSale so a fresh ticket can suggest again.
+  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<number[]>([]);
+  // Phase 4 (BRD §5.7): the bundle currently prompting for a supervisor override (branch/customer-
+  // group restriction), if any — BundleOverrideDialog captures email/PIN, verified server-side at
+  // checkout (same pattern as VoidOrderDialog's authorizerEmail/authorizerPin).
+  const [overrideBundle, setOverrideBundle] = useState<BundleDto | null>(null);
   // Module 11: optional B2B PO reference + project code, carried to the tax invoice.
   const [poReference, setPoReference] = useState("");
   const [orderProjectCode, setOrderProjectCode] = useState("");
@@ -204,7 +297,9 @@ export function PosCheckout() {
   const [customFees, setCustomFees] = useState<CustomFee[]>([]);
 
   // BRD §3.5: one shared delivery detail set for every delivery-flagged line in this cart.
-  const [deliveryAddressType, setDeliveryAddressType] = useState<"Customer Address" | "Project Site" | "Different Address" | "Branch Pickup">("Customer Address");
+  const [deliveryAddressType, setDeliveryAddressType] = useState<
+    "Customer Address" | "Project Site" | "Different Address" | "Branch Pickup"
+  >("Customer Address");
   const [deliveryContactName, setDeliveryContactName] = useState("");
   const [deliveryContactMobile, setDeliveryContactMobile] = useState("");
   const [deliveryCity, setDeliveryCity] = useState("");
@@ -213,7 +308,9 @@ export function PosCheckout() {
   const [deliveryInstructions, setDeliveryInstructions] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [deliveryTime, setDeliveryTime] = useState("09:00");
-  const [deliveryPriority, setDeliveryPriority] = useState<"Urgent" | "High" | "Standard" | "Low">("Standard");
+  const [deliveryPriority, setDeliveryPriority] = useState<"Urgent" | "High" | "Standard" | "Low">(
+    "Standard",
+  );
   const [deliveryZoneId, setDeliveryZoneId] = useState<number | null>(null);
   const [deliveryDriverId, setDeliveryDriverId] = useState<number | null>(null);
   const [deliveryVehicleId, setDeliveryVehicleId] = useState<number | null>(null);
@@ -241,7 +338,10 @@ export function PosCheckout() {
   const effectiveBranchId = user?.branchId ?? selectedBranchId ?? branches?.[0]?.id ?? null;
   const { data: liveProducts } = useProducts(true, effectiveBranchId ?? undefined);
   const { data: categories } = useCategories();
-  const topLevelCategories = useMemo(() => (categories ?? []).filter((c) => c.parentId == null), [categories]);
+  const topLevelCategories = useMemo(
+    () => (categories ?? []).filter((c) => c.parentId == null),
+    [categories],
+  );
   const childCategoriesOf = useMemo(() => {
     const map = new Map<number, CategoryDto[]>();
     for (const c of categories ?? []) {
@@ -269,15 +369,21 @@ export function PosCheckout() {
     }
     return ids;
   }, [categoryFilter, childCategoriesOf]);
-  const categoriesById = useMemo(() => new Map((categories ?? []).map((c) => [c.id, c])), [categories]);
-  const activeCategory = categoryFilter != null ? categoriesById.get(categoryFilter) ?? null : null;
+  const categoriesById = useMemo(
+    () => new Map((categories ?? []).map((c) => [c.id, c])),
+    [categories],
+  );
+  const activeCategory =
+    categoryFilter != null ? (categoriesById.get(categoryFilter) ?? null) : null;
   // Flattened depth-first walk of the whole category tree (any nesting depth, not just two levels)
   // so a single searchable dropdown can render it instead of one chip per category — the chip
   // layout fell apart once a catalog has hundreds of categories/subcategories.
   const categoryTree = useMemo(() => {
     const rows: { category: CategoryDto; depth: number }[] = [];
     const visit = (parentId: number | null, depth: number) => {
-      for (const c of parentId == null ? topLevelCategories : childCategoriesOf.get(parentId) ?? []) {
+      for (const c of parentId == null
+        ? topLevelCategories
+        : (childCategoriesOf.get(parentId) ?? [])) {
         rows.push({ category: c, depth });
         visit(c.id, depth + 1);
       }
@@ -304,12 +410,48 @@ export function PosCheckout() {
     return c ? categoryDisplayLabel(c) : "";
   };
   useEffect(() => {
-    if (user?.branchId === null && selectedBranchId === null && branches?.[0]) setSelectedBranchId(branches[0].id);
+    if (user?.branchId === null && selectedBranchId === null && branches?.[0])
+      setSelectedBranchId(branches[0].id);
   }, [user?.branchId, selectedBranchId, branches]);
 
   const { data: heldSales } = useParkedSales(effectiveBranchId ?? undefined);
   const { data: bundles } = useBundles();
-  const activeBundles = useMemo(() => (bundles ?? []).filter((b) => b.status === "Active"), [bundles]);
+  const logSuggestionEvent = useLogBundleSuggestionEvent();
+  // Phase 4 (BRD §5.7): effectiveStatus, not the raw persisted status — a Draft/PendingApproval/
+  // Scheduled/Expired/Disabled/Archived bundle must never appear sellable at POS even if its raw
+  // Status column still says "Active" from before its schedule started or after it lapsed.
+  const activeBundles = useMemo(
+    () => (bundles ?? []).filter((b) => b.effectiveStatus === "Active"),
+    [bundles],
+  );
+  // Phase 3 Bundle Suggestion Engine (BRD §5.5): the single best "you're close to a bundle deal"
+  // nudge right now, if any. Restricted to factorToStock === 1 lines — BundleLine.Qty is a plain
+  // stock-UOM count with no UOM conversion of its own, same "avoid fragile proportional-UOM math"
+  // guard the Phase 2 pallet/BOGO split uses. Algorithm lives in bundle-suggestions.ts (unit-tested
+  // there) so this is just wiring live cart/bundle state into it.
+  const bundleSuggestion = useMemo(() => {
+    const cartQtyFor = (productId: number) =>
+      cart.find((l) => l.productId === productId && l.factorToStock === 1)?.qty ?? 0;
+    return bestBundleSuggestion(activeBundles, cartQtyFor, {
+      excludeBundleIds: bundleCart.map((e) => e.bundleId),
+      dismissedIds: dismissedSuggestionIds,
+    });
+  }, [activeBundles, bundleCart, cart, dismissedSuggestionIds]);
+  // Phase 5 (BRD §5.5/§5.8): log a "Shown" impression once per distinct bundle the nudge surfaces —
+  // keyed off the bundle id (not the memo re-running) so re-renders while the SAME suggestion is up
+  // don't spam the endpoint. shownSuggestionRef resets to null once the nudge clears (accepted,
+  // dismissed, or the cart no longer qualifies) so the same bundle can be logged again later.
+  const shownSuggestionRef = useRef<number | null>(null);
+  useEffect(() => {
+    const bundleId = bundleSuggestion?.bundle.id ?? null;
+    if (bundleId !== null && shownSuggestionRef.current !== bundleId) {
+      shownSuggestionRef.current = bundleId;
+      logSuggestionEvent.mutate({ bundleId, eventType: "Shown", branchId: effectiveBranchId });
+    } else if (bundleId === null) {
+      shownSuggestionRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bundleSuggestion?.bundle.id]);
   // Only ever bind a terminal that belongs to the effective branch — falling back to ANY terminal
   // would attribute sales (and drawer cash) to another branch's till, and the server hard-rejects a
   // branch/terminal mismatch at checkout. No terminal in this branch → checkout proceeds untilled.
@@ -319,21 +461,42 @@ export function PosCheckout() {
   // Contractor/Wholesale/Project override — null on the product means "not configured," fall back
   // to sellingPrice (Retail), mirroring OrdersController.Checkout's resolution exactly so the cart
   // total the cashier sees matches what checkout will actually charge.
-  const listPriceFor = (p: { sellingPrice: number; contractorPrice?: number | null; wholesalePrice?: number | null; projectPrice?: number | null }) => {
+  const listPriceFor = (p: {
+    sellingPrice: number;
+    contractorPrice?: number | null;
+    wholesalePrice?: number | null;
+    projectPrice?: number | null;
+  }) => {
     switch (customer?.priceListType) {
-      case "Contractor": return p.contractorPrice ?? p.sellingPrice;
-      case "Wholesale": return p.wholesalePrice ?? p.sellingPrice;
-      case "Project": return p.projectPrice ?? p.sellingPrice;
-      default: return p.sellingPrice;
+      case "Contractor":
+        return p.contractorPrice ?? p.sellingPrice;
+      case "Wholesale":
+        return p.wholesalePrice ?? p.sellingPrice;
+      case "Project":
+        return p.projectPrice ?? p.sellingPrice;
+      default:
+        return p.sellingPrice;
     }
   };
   const products = useMemo(
     () =>
       (liveProducts ?? []).map((p) => ({
-        productId: p.id, sku: p.sku, barcode: p.barcode, name: p.nameEn, cat: p.categoryName, categoryId: p.categoryId, uom: p.stockUom,
-        price: listPriceFor(p), vatRate: p.vatRate, stock: p.totalAvailable, tone: toneForStock(p.totalAvailable),
-        conversions: p.uomConversions ?? [], isCutToSize: p.isCutToSize ?? false, cutToSizeUnit: p.cutToSizeUnit ?? "Area",
-        weight: p.weight, imageUrl: p.imageUrl,
+        productId: p.id,
+        sku: p.sku,
+        barcode: p.barcode,
+        name: p.nameEn,
+        cat: p.categoryName,
+        categoryId: p.categoryId,
+        uom: p.stockUom,
+        price: listPriceFor(p),
+        vatRate: p.vatRate,
+        stock: p.totalAvailable,
+        tone: toneForStock(p.totalAvailable),
+        conversions: p.uomConversions ?? [],
+        isCutToSize: p.isCutToSize ?? false,
+        cutToSizeUnit: p.cutToSizeUnit ?? "Area",
+        weight: p.weight,
+        imageUrl: p.imageUrl,
         // Carried through so lineDiscountPct can tell whether THIS line actually got a distinct list
         // price (and should suppress the legacy contractor trade % — see contractorDiscountPct below).
         hasDistinctListPrice: listPriceFor(p) !== p.sellingPrice,
@@ -346,11 +509,13 @@ export function PosCheckout() {
   // lines' price to the newly-resolved list price so the cart total never drifts from what checkout
   // will actually charge (which always resolves fresh from the customer on file at that moment).
   useEffect(() => {
-    setCart((c) => c.map((l) => {
-      const prod = products.find((p) => p.sku === l.sku);
-      if (!prod || prod.price === l.basePrice) return l;
-      return { ...l, basePrice: prod.price, price: unitPriceFor(prod.price, l.factorToStock) };
-    }));
+    setCart((c) =>
+      c.map((l) => {
+        const prod = products.find((p) => p.sku === l.sku);
+        if (!prod || prod.price === l.basePrice) return l;
+        return { ...l, basePrice: prod.price, price: unitPriceFor(prod.price, l.factorToStock) };
+      }),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customer?.priceListType]);
 
@@ -375,7 +540,9 @@ export function PosCheckout() {
   function submitScan(raw: string) {
     const q = raw.trim().toLowerCase();
     if (!q) return;
-    const match = products.find((p) => p.barcode?.toLowerCase() === q) ?? products.find((p) => p.sku.toLowerCase() === q);
+    const match =
+      products.find((p) => p.barcode?.toLowerCase() === q) ??
+      products.find((p) => p.sku.toLowerCase() === q);
     if (match) {
       addToCart(match);
     } else {
@@ -431,7 +598,15 @@ export function PosCheckout() {
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payOpen, receiptOrder, locked, approvalDialogOpen, creditApprovalDialogOpen, query, products]);
+  }, [
+    payOpen,
+    receiptOrder,
+    locked,
+    approvalDialogOpen,
+    creditApprovalDialogOpen,
+    query,
+    products,
+  ]);
 
   function addToCart(p: (typeof products)[number]) {
     const line = cart.find((l) => l.sku === p.sku);
@@ -458,14 +633,29 @@ export function PosCheckout() {
       // Cut-to-size products start at 1m on every dimension the mode needs — the cashier edits the
       // real measurements on the line.
       const isCut = p.isCutToSize;
-      return [...c, {
-        productId: p.productId, sku: p.sku, name: p.name, uom: p.uom, price: p.price, vatRate: p.vatRate,
-        qty: 1, stockUom: p.uom, basePrice: p.price, factorToStock: 1, conversions: p.conversions,
-        isCutToSize: isCut, cutToSizeUnit: p.cutToSizeUnit, lengthM: isCut ? 1 : undefined,
-        widthM: isCut && p.cutToSizeUnit !== "Length" ? 1 : undefined,
-        heightM: isCut && p.cutToSizeUnit === "Volume" ? 1 : undefined,
-        weight: p.weight, imageUrl: p.imageUrl,
-      }];
+      return [
+        ...c,
+        {
+          productId: p.productId,
+          sku: p.sku,
+          name: p.name,
+          uom: p.uom,
+          price: p.price,
+          vatRate: p.vatRate,
+          qty: 1,
+          stockUom: p.uom,
+          basePrice: p.price,
+          factorToStock: 1,
+          conversions: p.conversions,
+          isCutToSize: isCut,
+          cutToSizeUnit: p.cutToSizeUnit,
+          lengthM: isCut ? 1 : undefined,
+          widthM: isCut && p.cutToSizeUnit !== "Length" ? 1 : undefined,
+          heightM: isCut && p.cutToSizeUnit === "Volume" ? 1 : undefined,
+          weight: p.weight,
+          imageUrl: p.imageUrl,
+        },
+      ];
     });
     setLastAdded(p.sku);
     setQuery("");
@@ -517,12 +707,18 @@ export function PosCheckout() {
     }
     const available = products.find((p) => p.sku === sku)?.stock ?? Infinity;
     if (toStockQty(line.qty, factor) > available) {
-      toast.error(`Only ${available} ${line.stockUom} available — ${line.qty} ${nextUom} needs ${toStockQty(line.qty, factor)}.`);
+      toast.error(
+        `Only ${available} ${line.stockUom} available — ${line.qty} ${nextUom} needs ${toStockQty(line.qty, factor)}.`,
+      );
       return;
     }
-    setCart((c) => c.map((l) => (l.sku === sku
-      ? { ...l, uom: nextUom, factorToStock: factor, price: unitPriceFor(l.basePrice, factor) }
-      : l)));
+    setCart((c) =>
+      c.map((l) =>
+        l.sku === sku
+          ? { ...l, uom: nextUom, factorToStock: factor, price: unitPriceFor(l.basePrice, factor) }
+          : l,
+      ),
+    );
   }
 
   // BRD §2.3 items 5-6: dimension entry for cut-to-size lines — qty becomes the computed
@@ -544,16 +740,25 @@ export function PosCheckout() {
       );
       const available = products.find((p) => p.sku === sku)?.stock ?? Infinity;
       if (nextQty > available) {
-        toast.error(`Only ${available} ${line.stockUom} available at this branch — ${nextQty.toFixed(2)} needed.`);
+        toast.error(
+          `Only ${available} ${line.stockUom} available at this branch — ${nextQty.toFixed(2)} needed.`,
+        );
         return;
       }
     }
-    setCart((c) => c.map((l) => {
-      if (l.sku !== sku || !l.isCutToSize) return l;
-      const next = { ...l, [side]: value } as CartLine;
-      const qty = cutToSizeQty(l.cutToSizeUnit, next.lengthM ?? 0, next.widthM ?? 0, next.heightM ?? 0);
-      return { ...next, qty: qty > 0 ? qty : l.qty };
-    }));
+    setCart((c) =>
+      c.map((l) => {
+        if (l.sku !== sku || !l.isCutToSize) return l;
+        const next = { ...l, [side]: value } as CartLine;
+        const qty = cutToSizeQty(
+          l.cutToSizeUnit,
+          next.lengthM ?? 0,
+          next.widthM ?? 0,
+          next.heightM ?? 0,
+        );
+        return { ...next, qty: qty > 0 ? qty : l.qty };
+      }),
+    );
   }
 
   function removeLine(sku: string) {
@@ -583,7 +788,9 @@ export function PosCheckout() {
   // BRD §3.5: toggling a line's delivery flag never removes it from the cart — the customer still
   // pays for it here, only the fulfillment method changes (counter pickup vs. shipped).
   function toggleDelivery(sku: string) {
-    setCart((c) => c.map((l) => (l.sku === sku ? { ...l, requiresDelivery: !l.requiresDelivery } : l)));
+    setCart((c) =>
+      c.map((l) => (l.sku === sku ? { ...l, requiresDelivery: !l.requiresDelivery } : l)),
+    );
   }
 
   // Module 8 (BRD §5.2/§5.3): out-of-stock constituents make the whole bundle unavailable; adding a
@@ -599,7 +806,27 @@ export function PosCheckout() {
     return null;
   }
 
-  function addBundle(b: BundleDto) {
+  // Phase 4 (BRD §5.7): branch/customer-group restrictions — distinct from stock availability above
+  // because these two are overridable by a supervisor at add-time; stock is never overridable (there
+  // is no unit to sell). Empty array on the bundle means "no restriction."
+  function bundleEligibility(b: BundleDto): string | null {
+    if (
+      b.eligibleBranchIds.length > 0 &&
+      effectiveBranchId != null &&
+      !b.eligibleBranchIds.includes(effectiveBranchId)
+    ) {
+      return "not available at this branch";
+    }
+    if (
+      b.eligibleCustomerTypes.length > 0 &&
+      !(customer && b.eligibleCustomerTypes.includes(customer.type))
+    ) {
+      return "not available for this customer";
+    }
+    return null;
+  }
+
+  function addBundle(b: BundleDto, override?: { email: string; pin: string }) {
     const existing = bundleCart.find((e) => e.bundleId === b.id);
     const nextQty = (existing?.qty ?? 0) + 1;
     const blocked = bundleAvailability(b, nextQty);
@@ -607,13 +834,46 @@ export function PosCheckout() {
       toast.error(`Unavailable — ${blocked}.`);
       return;
     }
+    if (bundleEligibility(b) && !override) {
+      toast.error("This bundle needs a supervisor override to add here.");
+      return;
+    }
     setBundleCart((entries) => {
-      if (existing) return entries.map((e) => (e.bundleId === b.id ? { ...e, qty: e.qty + 1 } : e));
+      if (existing) {
+        return entries.map((e) =>
+          e.bundleId === b.id
+            ? {
+                ...e,
+                qty: e.qty + 1,
+                supervisorEmail: override?.email ?? e.supervisorEmail,
+                supervisorPin: override?.pin ?? e.supervisorPin,
+              }
+            : e,
+        );
+      }
       const priceFactor = b.individualTotal > 0 ? b.bundlePrice / b.individualTotal : 1;
-      const vatPerUnit = b.lines.reduce((s, l) => s + l.qty * l.sellingPrice * priceFactor * (l.vatRate / 100), 0);
-      return [...entries, { bundleId: b.id, code: b.code, name: b.nameEn, qty: 1, bundlePrice: b.bundlePrice, individualTotal: b.individualTotal, vatPerUnit }];
+      const vatPerUnit = b.lines.reduce(
+        (s, l) => s + l.qty * l.sellingPrice * priceFactor * (l.vatRate / 100),
+        0,
+      );
+      return [
+        ...entries,
+        {
+          bundleId: b.id,
+          code: b.code,
+          name: b.nameEn,
+          qty: 1,
+          bundlePrice: b.bundlePrice,
+          individualTotal: b.individualTotal,
+          vatPerUnit,
+          supervisorEmail: override?.email,
+          supervisorPin: override?.pin,
+        },
+      ];
     });
-    toast.success(`${b.nameEn} added`, { description: `Saves ${(b.individualTotal - b.bundlePrice).toFixed(2)} ر.س vs individual prices.` });
+    toast.success(`${b.nameEn} added`, {
+      description: `Saves ${(b.individualTotal - b.bundlePrice).toFixed(2)} ر.س vs individual prices.`,
+    });
   }
 
   function updateBundleQty(bundleId: number, delta: number) {
@@ -632,12 +892,99 @@ export function PosCheckout() {
         return;
       }
     }
-    setBundleCart((entries) => entries.map((e) => (e.bundleId === bundleId ? { ...e, qty: nextQty } : e)));
+    setBundleCart((entries) =>
+      entries.map((e) => (e.bundleId === bundleId ? { ...e, qty: nextQty } : e)),
+    );
+  }
+
+  // Phase 3 Bundle Suggestion Engine: accepting a suggestion either (a) converts already-scanned
+  // constituents into the real bundle line — at 100% completion — or (b) tops up the missing
+  // constituent(s) to reach 100%, which then re-renders bundleSuggestion as the (a) case for the
+  // cashier's next click (chains the "80% → complete → add bundle" flow across two actions).
+  function acceptBundleSuggestion(candidate: BundleCompletion) {
+    const { bundle, missing } = candidate;
+    if (missing.length === 0) {
+      const blocked = bundleAvailability(bundle, 1);
+      if (blocked) {
+        toast.error(`Unavailable — ${blocked}.`);
+        return;
+      }
+      setCart((c) =>
+        bundle.lines
+          .reduce(
+            (acc, bl) =>
+              acc.map((l) =>
+                l.productId === bl.productId && l.factorToStock === 1
+                  ? { ...l, qty: l.qty - bl.qty }
+                  : l,
+              ),
+            c,
+          )
+          .filter((l) => l.qty > 0.0001),
+      );
+      addBundle(bundle);
+      setDismissedSuggestionIds((ids) => ids.filter((id) => id !== bundle.id));
+      logSuggestionEvent.mutate({
+        bundleId: bundle.id,
+        eventType: "Accepted",
+        branchId: effectiveBranchId,
+      });
+      return;
+    }
+    for (const line of missing) {
+      const product = products.find((p) => p.productId === line.productId);
+      if (!product || line.qty > product.stock) {
+        toast.error(
+          `Only ${product?.stock ?? 0} ${product?.uom ?? ""} of ${line.productName} available.`,
+        );
+        return;
+      }
+    }
+    setCart((c) => {
+      let next = c;
+      for (const line of missing) {
+        const product = products.find((p) => p.productId === line.productId);
+        if (!product) continue;
+        const existing = next.find((l) => l.productId === line.productId && l.factorToStock === 1);
+        next = existing
+          ? next.map((l) => (l === existing ? { ...l, qty: line.qty } : l))
+          : [
+              ...next,
+              {
+                productId: product.productId,
+                sku: product.sku,
+                name: product.name,
+                uom: product.uom,
+                price: product.price,
+                vatRate: product.vatRate,
+                qty: line.qty,
+                stockUom: product.uom,
+                basePrice: product.price,
+                factorToStock: 1,
+                conversions: product.conversions,
+                isCutToSize: false,
+                cutToSizeUnit: product.cutToSizeUnit,
+                weight: product.weight,
+                imageUrl: product.imageUrl,
+              },
+            ];
+      }
+      return next;
+    });
+    toast.success(
+      `Added ${missing.map((l) => l.productName).join(", ")} — ${bundle.nameEn} is now complete.`,
+    );
+  }
+
+  function dismissBundleSuggestion(bundleId: number) {
+    setDismissedSuggestionIds((ids) => [...ids, bundleId]);
+    logSuggestionEvent.mutate({ bundleId, eventType: "Rejected", branchId: effectiveBranchId });
   }
 
   function resetSale() {
     setCart([]);
     setBundleCart([]);
+    setDismissedSuggestionIds([]);
     setPoReference("");
     setOrderProjectCode("");
     setCustomer(null);
@@ -680,7 +1027,10 @@ export function PosCheckout() {
   async function handleCreateCustomer() {
     if (!newCustomerName.trim() || !phone.trim()) return;
     try {
-      const created = await createCustomer.mutateAsync({ nameEn: newCustomerName.trim(), phone: phone.trim() });
+      const created = await createCustomer.mutateAsync({
+        nameEn: newCustomerName.trim(),
+        phone: phone.trim(),
+      });
       setCustomer(created);
       setNotFound(false);
       toast.success(`${created.nameEn} added`);
@@ -723,11 +1073,16 @@ export function PosCheckout() {
     }
     try {
       await holdSale.mutateAsync({
-        branchId: effectiveBranchId, terminalId: terminal?.id ?? null, customerId: customer?.id ?? null,
+        branchId: effectiveBranchId,
+        terminalId: terminal?.id ?? null,
+        customerId: customer?.id ?? null,
         notes: customer ? undefined : "Walk-in",
         // Parked sales don't persist a selling UOM, so hold in stock UOM (2 Pallet → 100 Bag) — the
         // resumed cart reopens at the same total value, just expressed in stock units.
-        lines: cart.map((l) => ({ productId: l.productId, qty: toStockQty(l.qty, l.factorToStock) })),
+        lines: cart.map((l) => ({
+          productId: l.productId,
+          qty: toStockQty(l.qty, l.factorToStock),
+        })),
       });
       toast.success("Sale held", { description: "Resume it anytime from Held Sales." });
       resetSale();
@@ -745,7 +1100,11 @@ export function PosCheckout() {
     try {
       await resumeSale.mutateAsync(holdId);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : `Could not resume ${held.ticketNo} — it may have already been resumed elsewhere.`);
+      toast.error(
+        err instanceof ApiError
+          ? err.message
+          : `Could not resume ${held.ticketNo} — it may have already been resumed elsewhere.`,
+      );
       return;
     }
 
@@ -758,11 +1117,21 @@ export function PosCheckout() {
     const lines: CartLine[] = held.lines.map((l) => {
       const product = products.find((p) => p.productId === l.productId);
       return {
-        productId: l.productId, sku: l.sku, name: l.productName, uom: product?.uom ?? "Piece",
-        price: l.unitPrice, vatRate: product?.vatRate ?? 15, qty: l.qty,
-        stockUom: product?.uom ?? "Piece", basePrice: l.unitPrice, factorToStock: 1,
-        conversions: product?.conversions ?? [], isCutToSize: product?.isCutToSize ?? false,
-        cutToSizeUnit: product?.cutToSizeUnit ?? "Area", weight: product?.weight ?? 0, imageUrl: product?.imageUrl,
+        productId: l.productId,
+        sku: l.sku,
+        name: l.productName,
+        uom: product?.uom ?? "Piece",
+        price: l.unitPrice,
+        vatRate: product?.vatRate ?? 15,
+        qty: l.qty,
+        stockUom: product?.uom ?? "Piece",
+        basePrice: l.unitPrice,
+        factorToStock: 1,
+        conversions: product?.conversions ?? [],
+        isCutToSize: product?.isCutToSize ?? false,
+        cutToSizeUnit: product?.cutToSizeUnit ?? "Area",
+        weight: product?.weight ?? 0,
+        imageUrl: product?.imageUrl,
       };
     });
     setCart(lines);
@@ -782,11 +1151,13 @@ export function PosCheckout() {
   // ones too) and this cart preview must only ever apply what the server would actually apply.
   const activePricingRules = useMemo(() => {
     const now = Date.now();
-    return (pricingRules ?? []).filter((r) =>
-      r.status === "Active"
-      && (r.branchId == null || r.branchId === effectiveBranchId)
-      && (r.validFrom == null || new Date(r.validFrom).getTime() <= now)
-      && (r.validUntil == null || new Date(r.validUntil).getTime() >= now));
+    return (pricingRules ?? []).filter(
+      (r) =>
+        r.status === "Active" &&
+        (r.branchId == null || r.branchId === effectiveBranchId) &&
+        (r.validFrom == null || new Date(r.validFrom).getTime() <= now) &&
+        (r.validUntil == null || new Date(r.validUntil).getTime() >= now),
+    );
   }, [pricingRules, effectiveBranchId]);
 
   const isContractor = customer?.type === "Contractor";
@@ -795,13 +1166,22 @@ export function PosCheckout() {
   // contractor discount (a manager must create one on the Pricing page).
   const tradeTierRule = useMemo(() => {
     if (!isContractor) return null;
-    return activePricingRules
-      .filter((r) => r.type === "Trade Tier")
-      .sort((a, b) => (Number(b.branchId != null) - Number(a.branchId != null)) || b.priority - a.priority)[0] ?? null;
+    return (
+      activePricingRules
+        .filter((r) => r.type === "Trade Tier")
+        .sort(
+          (a, b) =>
+            Number(b.branchId != null) - Number(a.branchId != null) || b.priority - a.priority,
+        )[0] ?? null
+    );
   }, [activePricingRules, isContractor]);
   // Module 7 (BRD §4.3.2): per-line discount is the LARGER of contractor trade % and the customer's
   // loyalty tier % — mirrors OrdersController.Checkout exactly, so the display total matches the charge.
-  const loyaltyTierPct = tierDiscountPct(customer?.loyaltyTier, customer?.loyaltyEnrolled, tierConfig);
+  const loyaltyTierPct = tierDiscountPct(
+    customer?.loyaltyTier,
+    customer?.loyaltyEnrolled,
+    tierConfig,
+  );
   const contractorDiscountPct = Math.max(tradeTierRule?.value ?? 0, loyaltyTierPct);
 
   // BRD §6.2 Quantity Discount: a per-SKU (or "any product" when Sku is null) quantity threshold —
@@ -812,58 +1192,152 @@ export function PosCheckout() {
     () => activePricingRules.filter((r) => r.type === "Quantity" && r.minQuantity != null),
     [activePricingRules],
   );
-  const quantityPctFor = (l: CartLine) => {
-    const stockQty = toStockQty(l.qty, l.factorToStock);
-    return quantityRules
-      .filter((r) => (!r.sku || r.sku.toUpperCase() === l.sku.toUpperCase()) && stockQty >= r.minQuantity!)
-      .reduce((max, r) => Math.max(max, r.value), 0);
-  };
+  const quantityPctFor = (l: CartLine) =>
+    resolveQuantityPct(quantityRules, l.sku, toStockQty(l.qty, l.factorToStock));
   // BRD §7 (CR-040): Promotional rules auto-apply within their date window — no coupon code needed.
-  const promoRules = useMemo(() => activePricingRules.filter((r) => r.type === "Promotional"), [activePricingRules]);
-  const promoPctFor = (l: CartLine) => promoRules
-    .filter((r) => !r.sku || r.sku.toUpperCase() === l.sku.toUpperCase())
-    .reduce((max, r) => Math.max(max, r.value), 0);
+  const promoRules = useMemo(
+    () => activePricingRules.filter((r) => r.type === "Promotional"),
+    [activePricingRules],
+  );
+  const promoPctFor = (l: CartLine) => resolvePromoPct(promoRules, l.sku);
   // BRD §7 (CR-038): once a line actually got a distinct Contractor/Wholesale/Project list price
   // (see products/listPriceFor above), the legacy automatic contractor trade % would double-dip on
   // top of an already-negotiated price — suppressed in that case, but loyalty-tier % still applies
   // (mirrors OrdersController.Checkout's effectiveDiscountPct exactly).
-  const hasDistinctListPriceFor = (l: CartLine) => products.find((p) => p.sku === l.sku)?.hasDistinctListPrice ?? false;
+  const hasDistinctListPriceFor = (l: CartLine) =>
+    products.find((p) => p.sku === l.sku)?.hasDistinctListPrice ?? false;
+  // Shared with QuotationFormDialog.tsx/OrdersController.Checkout via resolveLineDiscountPct so all
+  // three can never silently disagree on the same cart.
   const lineDiscountPct = (l: CartLine) => {
     // A manual price override (BRD §7 CR-039) replaces the price entirely — no discount stacks.
     if (l.manualUnitPrice != null) return 0;
     const baseDiscountPct = hasDistinctListPriceFor(l) ? loyaltyTierPct : contractorDiscountPct;
-    return Math.max(Math.max(baseDiscountPct, quantityPctFor(l)), Math.max(promoPctFor(l), l.manualDiscountPct ?? 0));
+    return resolveLineDiscountPct(
+      baseDiscountPct,
+      quantityPctFor(l),
+      promoPctFor(l),
+      l.manualDiscountPct ?? 0,
+    );
   };
+
+  // Phase 2 (BRD §5.1): pallet-tier and Buy-X-Get-Y rules, previewed here the same way Quantity
+  // rules already are above — scoped to plain stock-UOM lines (no cut-to-size dimensions, no
+  // alternate selling UOM), matching OrdersController.Checkout's eligibility exactly.
+  const palletRules = useMemo(
+    () => activePricingRules.filter((r) => r.type === "Quantity" && r.palletQty != null),
+    [activePricingRules],
+  );
+  const buyXGetYRules = useMemo(
+    () =>
+      activePricingRules.filter(
+        (r) => r.type === "Buy X Get Y" && r.buyQty != null && r.freeQty != null,
+      ),
+    [activePricingRules],
+  );
+  const splitEligible = (l: CartLine) =>
+    l.manualUnitPrice == null && l.lengthM == null && (!l.uom || l.uom === l.stockUom);
+  const buyXGetYRuleFor = (l: CartLine) =>
+    splitEligible(l)
+      ? (buyXGetYRules
+          .filter((r) => !r.sku || r.sku.toUpperCase() === l.sku.toUpperCase())
+          .sort(
+            (a, b) =>
+              Number(b.branchId != null) - Number(a.branchId != null) || b.priority - a.priority,
+          )[0] ?? null)
+      : null;
+  const palletRuleFor = (l: CartLine) =>
+    splitEligible(l)
+      ? (palletRules
+          .filter((r) => !r.sku || r.sku.toUpperCase() === l.sku.toUpperCase())
+          .sort(
+            (a, b) =>
+              Number(b.branchId != null) - Number(a.branchId != null) || b.priority - a.priority,
+          )[0] ?? null)
+      : null;
+  // Trade Value (BRD §5.1): a Contractor whose cart crosses the rule's SAR threshold gets % off the
+  // whole order — resolved against lineTotalsSum below once it's known.
+  const tradeValueRules = useMemo(
+    () => activePricingRules.filter((r) => r.type === "Trade Value" && r.minCartTotal != null),
+    [activePricingRules],
+  );
   // The actual per-unit price charged for this line — the manual override when set, else the
   // resolved list price (see products/listPriceFor above).
   const lineUnitPrice = (l: CartLine) => l.manualUnitPrice ?? l.price;
 
+  // Phase 2: the actual charge for a line once Buy-X-Get-Y/pallet splits are accounted for — the
+  // naive qty × unitPrice × (1 - discount%) undercounts what checkout will actually charge once a
+  // rule frees or re-prices part of the quantity. subtotal (below) intentionally keeps using the
+  // naive full-price total so the savings show up as a visible discount, same as bundle savings do.
+  const lineChargeTotal = (l: CartLine): number => {
+    const buyXGetYRule = buyXGetYRuleFor(l);
+    if (buyXGetYRule) {
+      const { paidUnits } = resolveBuyXGetYSplit(buyXGetYRule, toStockQty(l.qty, l.factorToStock));
+      return paidUnits * lineUnitPrice(l) * (1 - lineDiscountPct(l) / 100);
+    }
+    const palletRule = palletRuleFor(l);
+    if (palletRule) {
+      const { palletUnits, remainderUnits } = resolvePalletSplit(
+        palletRule,
+        toStockQty(l.qty, l.factorToStock),
+      );
+      if (palletUnits > 0) {
+        return (
+          palletUnits * palletRule.value +
+          remainderUnits * lineUnitPrice(l) * (1 - lineDiscountPct(l) / 100)
+        );
+      }
+    }
+    return lineUnitPrice(l) * l.qty * (1 - lineDiscountPct(l) / 100);
+  };
+
   // BRD §4.3.3: the points balance + SAR equivalent must be visible at checkout, not just inside
   // the Charge dialog — a cashier deciding whether to offer redemption needs it up front.
-  const loyaltyBalanceSar = customer && loyaltyConfig ? customer.loyaltyPoints / loyaltyConfig.pointsPerSarRedeemed : 0;
-  const canRedeemPoints = Boolean(customer?.loyaltyEnrolled) && loyaltyConfig !== undefined && customer!.loyaltyPoints >= loyaltyConfig.minRedeemPoints;
+  const loyaltyBalanceSar =
+    customer && loyaltyConfig ? customer.loyaltyPoints / loyaltyConfig.pointsPerSarRedeemed : 0;
+  const canRedeemPoints =
+    Boolean(customer?.loyaltyEnrolled) &&
+    loyaltyConfig !== undefined &&
+    customer!.loyaltyPoints >= loyaltyConfig.minRedeemPoints;
 
   // Module 8 (BRD §5.2): bundle cart entries — priced at the bundle price with per-constituent VAT;
   // the individual-vs-bundle difference is a visible discount. No further % discount on bundle lines.
   const bundleTaxable = bundleCart.reduce((s, b) => s + b.bundlePrice * b.qty, 0);
-  const bundleSavings = bundleCart.reduce((s, b) => s + Math.max(0, b.individualTotal - b.bundlePrice) * b.qty, 0);
+  const bundleSavings = bundleCart.reduce(
+    (s, b) => s + Math.max(0, b.individualTotal - b.bundlePrice) * b.qty,
+    0,
+  );
 
-  const subtotal = cart.reduce((s, l) => s + lineUnitPrice(l) * l.qty, 0) + bundleCart.reduce((s, b) => s + b.individualTotal * b.qty, 0);
+  const subtotal =
+    cart.reduce((s, l) => s + lineUnitPrice(l) * l.qty, 0) +
+    bundleCart.reduce((s, b) => s + b.individualTotal * b.qty, 0);
   // Total kg across the cart — matters for bundle/pallet items (rebar, cement) where the physical
   // load size is what the yard crew and delivery truck actually care about, not just the SAR total.
-  const totalCartWeight = cart.reduce((s, l) => s + l.weight * toStockQty(l.qty, l.factorToStock), 0);
-  const lineTotalsSum = cart.reduce((s, l) => s + lineUnitPrice(l) * l.qty * (1 - lineDiscountPct(l) / 100), 0) + bundleTaxable;
+  const totalCartWeight = cart.reduce(
+    (s, l) => s + l.weight * toStockQty(l.qty, l.factorToStock),
+    0,
+  );
+  const lineTotalsSum = cart.reduce((s, l) => s + lineChargeTotal(l), 0) + bundleTaxable;
   const contractorDiscount = subtotal - lineTotalsSum;
   // True whenever at least one line's discount came entirely from a Quantity rule rather than the
   // customer-level contractor/tier rate — drives which label the summary below shows.
   const hasQuantityRuleDiscount = cart.some((l) => quantityPctFor(l) > contractorDiscountPct);
 
   const couponAmount = appliedCoupon?.valid
-    ? appliedCoupon.discountType === "Percentage" ? (lineTotalsSum * appliedCoupon.value) / 100 : appliedCoupon.value
+    ? appliedCoupon.discountType === "Percentage"
+      ? (lineTotalsSum * appliedCoupon.value) / 100
+      : appliedCoupon.value
     : 0;
   const manualValue = Number(discountValue) || 0;
-  const manualAmount = discountType === "Percentage" ? (lineTotalsSum * manualValue) / 100 : discountType === "Fixed" ? manualValue : 0;
-  const orderDiscount = Math.min(lineTotalsSum, couponAmount + manualAmount);
+  const manualAmount =
+    discountType === "Percentage"
+      ? (lineTotalsSum * manualValue) / 100
+      : discountType === "Fixed"
+        ? manualValue
+        : 0;
+  // Phase 2 Trade Value: resolved against lineTotalsSum exactly like OrdersController.Checkout.
+  const tradeValuePct = isContractor ? resolveTradeValuePct(tradeValueRules, lineTotalsSum) : 0;
+  const tradeValueAmount = (lineTotalsSum * tradeValuePct) / 100;
+  const orderDiscount = Math.min(lineTotalsSum, couponAmount + manualAmount + tradeValueAmount);
   const discountRatio = lineTotalsSum === 0 ? 0 : orderDiscount / lineTotalsSum;
 
   // BRD §6.2 discount authorization tiers (mirrors the server-side check in OrdersController.Checkout):
@@ -874,12 +1348,16 @@ export function PosCheckout() {
   const orderDiscountNeedsApproval =
     discountType === "Fixed" && manualValue > 0
       ? !(discountCeiling === null || discountCeiling >= 15)
-      : discountType === "Percentage" && manualValue > 0 && discountCeiling !== null && manualValue > discountCeiling;
+      : discountType === "Percentage" &&
+        manualValue > 0 &&
+        discountCeiling !== null &&
+        manualValue > discountCeiling;
   // A cashier-entered per-line discount (BRD §2.3) is gated the same way — mirrors
   // OrdersController.Checkout's maxLineManualPct check, so the banner below shows *before* the
   // server would reject the sale, not just after.
   const maxLineManualPct = cart.reduce((max, l) => Math.max(max, l.manualDiscountPct ?? 0), 0);
-  const lineDiscountNeedsApproval = maxLineManualPct > 0 && discountCeiling !== null && maxLineManualPct > discountCeiling;
+  const lineDiscountNeedsApproval =
+    maxLineManualPct > 0 && discountCeiling !== null && maxLineManualPct > discountCeiling;
   const discountNeedsApproval = orderDiscountNeedsApproval || lineDiscountNeedsApproval;
   // "Ready" only means a request has been submitted, not that a supervisor has approved it yet — the
   // POS has no live channel to that, so the honest state is "requested, retry Charge once approved"
@@ -897,7 +1375,8 @@ export function PosCheckout() {
   const canOverrideItemPrice = user?.posCeilings.canOverrideItemPrice ?? false;
   const hasPriceOverride = cart.some((l) => l.manualUnitPrice != null);
   const priceOverrideNeedsApproval = hasPriceOverride && !canOverrideItemPrice;
-  const priceOverrideApprovalRequested = priceOverrideNeedsApproval && priceOverrideApprovalId !== null;
+  const priceOverrideApprovalRequested =
+    priceOverrideNeedsApproval && priceOverrideApprovalId !== null;
 
   // A previously-granted approval only covers the override(s) it was requested for — clear it once
   // any line's override value changes, same rule as the discount approval above.
@@ -907,25 +1386,41 @@ export function PosCheckout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [priceOverrideSignature]);
 
-  const vat = cart.reduce((s, l) => s + lineUnitPrice(l) * l.qty * (1 - lineDiscountPct(l) / 100) * (1 - discountRatio) * (l.vatRate / 100), 0)
-    + bundleCart.reduce((s, b) => s + b.vatPerUnit * b.qty * (1 - discountRatio), 0);
+  const vat =
+    cart.reduce((s, l) => s + lineChargeTotal(l) * (1 - discountRatio) * (l.vatRate / 100), 0) +
+    bundleCart.reduce((s, b) => s + b.vatPerUnit * b.qty * (1 - discountRatio), 0);
   // Module 7 (BRD §4.3.2): Silver+ loyalty customers get delivery fees waived on orders over SAR 500
   // — must mirror the server's waiver exactly or the payment total won't match at checkout.
   const taxableTotal = lineTotalsSum - orderDiscount;
-  const freeDelivery = qualifiesForFreeDelivery(customer?.loyaltyTier, customer?.loyaltyEnrolled, taxableTotal, tierConfig);
+  const freeDelivery = qualifiesForFreeDelivery(
+    customer?.loyaltyTier,
+    customer?.loyaltyEnrolled,
+    taxableTotal,
+    tierConfig,
+  );
 
   const hasDeliveryLines = cart.some((l) => l.requiresDelivery);
   const selectedDeliveryZone = deliveryZones?.find((z) => z.id === deliveryZoneId) ?? null;
   // BRD §3.5 "calculated ... automatically": picking a zone auto-derives the delivery fee — the
   // cashier can still add/edit a manual "Delivery" custom fee below instead if no zone applies.
-  const autoDeliveryFee = hasDeliveryLines && selectedDeliveryZone && selectedDeliveryZone.fee > 0
-    ? { label: `Delivery Fee (${selectedDeliveryZone.name})`, amount: selectedDeliveryZone.fee }
-    : null;
-  const deliveryDetailsComplete = !hasDeliveryLines
-    || Boolean(deliveryContactName.trim() && deliveryContactMobile.trim() && deliveryCity.trim() && deliveryDate);
+  const autoDeliveryFee =
+    hasDeliveryLines && selectedDeliveryZone && selectedDeliveryZone.fee > 0
+      ? { label: `Delivery Fee (${selectedDeliveryZone.name})`, amount: selectedDeliveryZone.fee }
+      : null;
+  const deliveryDetailsComplete =
+    !hasDeliveryLines ||
+    Boolean(
+      deliveryContactName.trim() &&
+      deliveryContactMobile.trim() &&
+      deliveryCity.trim() &&
+      deliveryDate,
+    );
 
   const allFees = autoDeliveryFee ? [...customFees, autoDeliveryFee] : customFees;
-  const feesTotal = allFees.reduce((s, f) => s + (freeDelivery && /delivery/i.test(f.label) ? 0 : f.amount), 0);
+  const feesTotal = allFees.reduce(
+    (s, f) => s + (freeDelivery && /delivery/i.test(f.label) ? 0 : f.amount),
+    0,
+  );
   const total = taxableTotal + vat + feesTotal;
 
   // BRD §4.2 credit limit — informational until the cashier actually picks Account Credit in
@@ -958,9 +1453,12 @@ export function PosCheckout() {
     const term = phone.trim().toLowerCase();
     if (term.length < 2 || customer) return [];
     return (customers ?? [])
-      .filter((c) => c.nameEn.toLowerCase().includes(term)
-        || (c.nameAr ?? "").toLowerCase().includes(term)
-        || (c.phone ?? "").includes(term))
+      .filter(
+        (c) =>
+          c.nameEn.toLowerCase().includes(term) ||
+          (c.nameAr ?? "").toLowerCase().includes(term) ||
+          (c.phone ?? "").includes(term),
+      )
       .slice(0, 6);
   }, [phone, customers, customer]);
 
@@ -970,47 +1468,81 @@ export function PosCheckout() {
     const term = deliveryCustomerSearch.trim().toLowerCase();
     if (term.length < 2) return [];
     return (customers ?? [])
-      .filter((c) => c.nameEn.toLowerCase().includes(term)
-        || (c.nameAr ?? "").toLowerCase().includes(term)
-        || (c.phone ?? "").includes(term))
+      .filter(
+        (c) =>
+          c.nameEn.toLowerCase().includes(term) ||
+          (c.nameAr ?? "").toLowerCase().includes(term) ||
+          (c.phone ?? "").includes(term),
+      )
       .slice(0, 6);
   }, [deliveryCustomerSearch, customers]);
 
   async function handleCharge(payments: PaymentInput[]) {
     if (!effectiveBranchId) throw new Error("No branch selected.");
     if (!deliveryDetailsComplete) {
-      throw new Error("Delivery contact name, mobile, city and promised date are required for the flagged line(s).");
+      throw new Error(
+        "Delivery contact name, mobile, city and promised date are required for the flagged line(s).",
+      );
     }
-    const delivery: DeliveryDetailsInput | null = hasDeliveryLines ? {
-      addressType: deliveryAddressType, contactName: deliveryContactName.trim(), contactMobile: deliveryContactMobile.trim(),
-      city: deliveryCity.trim(), district: deliveryDistrict.trim() || null, street: deliveryStreet.trim() || null,
-      landmark: null, instructions: deliveryInstructions.trim() || null,
-      promisedDate: deliveryDate, promisedTime: deliveryTime, timeSlot: null, priority: deliveryPriority,
-      driverId: deliveryDriverId, vehicleId: deliveryVehicleId, zoneId: deliveryZoneId, weightTons: null,
-    } : null;
+    const delivery: DeliveryDetailsInput | null = hasDeliveryLines
+      ? {
+          addressType: deliveryAddressType,
+          contactName: deliveryContactName.trim(),
+          contactMobile: deliveryContactMobile.trim(),
+          city: deliveryCity.trim(),
+          district: deliveryDistrict.trim() || null,
+          street: deliveryStreet.trim() || null,
+          landmark: null,
+          instructions: deliveryInstructions.trim() || null,
+          promisedDate: deliveryDate,
+          promisedTime: deliveryTime,
+          timeSlot: null,
+          priority: deliveryPriority,
+          driverId: deliveryDriverId,
+          vehicleId: deliveryVehicleId,
+          zoneId: deliveryZoneId,
+          weightTons: null,
+        }
+      : null;
     const request = {
       branchId: effectiveBranchId,
       terminalId: terminal?.id ?? null,
       customerId: customer?.id ?? null,
       type: isContractor ? "Contractor" : "Retail",
-      lines: cart.map((l) => l.isCutToSize && l.lengthM
-        ? {
-            productId: l.productId, qty: 0, lengthM: l.lengthM,
-            widthM: l.cutToSizeUnit !== "Length" ? l.widthM : undefined,
-            heightM: l.cutToSizeUnit === "Volume" ? l.heightM : undefined,
-            requiresDelivery: l.requiresDelivery, notes: l.notes?.trim() || null, manualDiscountPct: l.manualDiscountPct ?? null,
-            manualUnitPrice: l.manualUnitPrice ?? null,
-          }
-        : {
-            productId: l.productId, qty: l.qty, uom: l.uom, requiresDelivery: l.requiresDelivery,
-            notes: l.notes?.trim() || null, manualDiscountPct: l.manualDiscountPct ?? null,
-            manualUnitPrice: l.manualUnitPrice ?? null,
-          }),
+      lines: cart.map((l) =>
+        l.isCutToSize && l.lengthM
+          ? {
+              productId: l.productId,
+              qty: 0,
+              lengthM: l.lengthM,
+              widthM: l.cutToSizeUnit !== "Length" ? l.widthM : undefined,
+              heightM: l.cutToSizeUnit === "Volume" ? l.heightM : undefined,
+              requiresDelivery: l.requiresDelivery,
+              notes: l.notes?.trim() || null,
+              manualDiscountPct: l.manualDiscountPct ?? null,
+              manualUnitPrice: l.manualUnitPrice ?? null,
+            }
+          : {
+              productId: l.productId,
+              qty: l.qty,
+              uom: l.uom,
+              requiresDelivery: l.requiresDelivery,
+              notes: l.notes?.trim() || null,
+              manualDiscountPct: l.manualDiscountPct ?? null,
+              manualUnitPrice: l.manualUnitPrice ?? null,
+            },
+      ),
       payments,
       couponCode: appliedCoupon?.code ?? null,
-      manualDiscount: discountType && manualValue > 0 ? { type: discountType, value: manualValue } : null,
+      manualDiscount:
+        discountType && manualValue > 0 ? { type: discountType, value: manualValue } : null,
       customFees: allFees,
-      bundles: bundleCart.map((b) => ({ bundleId: b.bundleId, qty: b.qty })),
+      bundles: bundleCart.map((b) => ({
+        bundleId: b.bundleId,
+        qty: b.qty,
+        supervisorEmail: b.supervisorEmail,
+        supervisorPin: b.supervisorPin,
+      })),
       poReference: poReference.trim() || null,
       projectCode: orderProjectCode.trim() || null,
       discountApprovalRequestId: discountNeedsApproval ? discountApprovalId : null,
@@ -1023,7 +1555,9 @@ export function PosCheckout() {
     };
     try {
       const order = await checkout.mutateAsync(request);
-      toast.success(`Payment accepted · ${order.orderNo}`, { description: money(order.grandTotal) });
+      toast.success(`Payment accepted · ${order.orderNo}`, {
+        description: money(order.grandTotal),
+      });
       setLastOrderNo(order.orderNo);
       setReceiptOrder(order);
       setLastCompletedOrder(order);
@@ -1053,7 +1587,9 @@ export function PosCheckout() {
       try {
         const { synced, failed } = await replayQueue();
         if (synced.length > 0) {
-          toast.success(`${synced.length} offline sale(s) synced`, { description: synced.map((o) => o.orderNo).join(", ") });
+          toast.success(`${synced.length} offline sale(s) synced`, {
+            description: synced.map((o) => o.orderNo).join(", "),
+          });
         }
         for (const f of failed) {
           toast.error(`Offline sale could not be synced`, { description: f.error });
@@ -1105,11 +1641,16 @@ export function PosCheckout() {
       const quotation = await createQuotation.mutateAsync({
         branchId: effectiveBranchId,
         customerId: customer?.id ?? null,
-        lines: cart.map((l) => ({ productId: l.productId, qty: toStockQty(l.qty, l.factorToStock) })),
+        lines: cart.map((l) => ({
+          productId: l.productId,
+          qty: toStockQty(l.qty, l.factorToStock),
+        })),
         projectCode,
         customerReference,
       });
-      toast.success(`${quotation.quoteNo} created`, { description: `Valid until ${new Date(quotation.validUntil).toLocaleDateString()} · no stock reserved.` });
+      toast.success(`${quotation.quoteNo} created`, {
+        description: `Valid until ${new Date(quotation.validUntil).toLocaleDateString()} · no stock reserved.`,
+      });
       resetSale();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not create the quotation.");
@@ -1156,7 +1697,9 @@ export function PosCheckout() {
                 className="h-9 rounded-lg border border-black/10 bg-white px-2 text-xs font-medium text-foreground outline-none focus:border-brand"
               >
                 {branches.map((b) => (
-                  <option key={b.id} value={b.id}>{b.nameEn}</option>
+                  <option key={b.id} value={b.id}>
+                    {b.nameEn}
+                  </option>
                 ))}
               </select>
             ) : (
@@ -1178,10 +1721,14 @@ export function PosCheckout() {
             <div className="flex items-center gap-3">
               <span className="relative grid h-11 w-11 place-items-center rounded-xl bg-white/10 backdrop-blur ring-1 ring-white/15">
                 <Radar className="h-5 w-5 text-white" />
-                {idle && <span className="pos-radar absolute inset-0 rounded-xl ring-2 ring-white/50" />}
+                {idle && (
+                  <span className="pos-radar absolute inset-0 rounded-xl ring-2 ring-white/50" />
+                )}
               </span>
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/60">Point&nbsp;of&nbsp;Sale · {terminal?.code ?? "Terminal"}</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/60">
+                  Point&nbsp;of&nbsp;Sale · {terminal?.code ?? "Terminal"}
+                </p>
                 <p className="font-display text-lg font-semibold">Scanner Ready</p>
               </div>
             </div>
@@ -1223,7 +1770,6 @@ export function PosCheckout() {
                 </span>
               )}
             </div>
-
           </div>
 
           {idle && (
@@ -1233,38 +1779,142 @@ export function PosCheckout() {
           )}
         </div>
 
+        {/* Phase 3 Bundle Suggestion Engine (BRD §5.5): fires once a bundle is >=80% complete from
+            plain scanned items — a "you're one item away" nudge below 100%, an "add the full bundle"
+            offer at 100% (which converts the already-scanned lines into the real bundle so pricing
+            matches exactly what BundlesController would have charged). Dismissing hides it until the
+            next sale (resetSale clears dismissedSuggestionIds) — it never nags twice for the same
+            bundle in one ticket. */}
+        {bundleSuggestion && (
+          <div className="rounded-2xl border border-brand/30 bg-brand/5 p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-brand">
+                  {bundleSuggestion.missing.length === 0
+                    ? "Complete bundle available"
+                    : "You're close to a bundle deal"}
+                </p>
+                <p className="mt-0.5 text-sm font-medium text-foreground">
+                  📦 {bundleSuggestion.bundle.nameEn}
+                  {bundleSuggestion.missing.length === 0
+                    ? " — every item is already in the cart."
+                    : ` — you're ${bundleSuggestion.missing.length} item${bundleSuggestion.missing.length > 1 ? "s" : ""} away (${Math.round(bundleSuggestion.pct * 100)}% there).`}
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {bundleSuggestion.missing.length > 0 &&
+                    `Add ${bundleSuggestion.missing.map((l) => l.productName).join(", ")} to complete it — `}
+                  Save{" "}
+                  {money(
+                    Math.max(
+                      0,
+                      bundleSuggestion.bundle.individualTotal - bundleSuggestion.bundle.bundlePrice,
+                    ),
+                  )}{" "}
+                  vs individual prices.
+                </p>
+              </div>
+              <button
+                onClick={() => dismissBundleSuggestion(bundleSuggestion.bundle.id)}
+                className="grid h-6 w-6 flex-none place-items-center rounded-md text-muted-foreground hover:bg-black/5"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                onClick={() => dismissBundleSuggestion(bundleSuggestion.bundle.id)}
+                className="rounded-lg border border-black/10 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-black/5"
+              >
+                No thanks
+              </button>
+              <button
+                onClick={() => acceptBundleSuggestion(bundleSuggestion)}
+                className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground hover:bg-brand/90"
+              >
+                {bundleSuggestion.missing.length === 0 ? "Add Full Bundle" : "Add missing item(s)"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Bundles & Packages (BRD §5.3): active bundles browseable without searching; a bundle with
             any out-of-stock constituent is greyed out with the blocking item named. Scanning/searching
-            a constituent SKU also surfaces its bundle here as a suggestion (BRD §5.2). */}
+            a constituent SKU also surfaces its bundle here as a suggestion (BRD §5.2). Bundle Search
+            (BRD §5.6) matches bundle code/name, any constituent SKU/name substring, or barcode. */}
         {activeBundles.length > 0 && (
           <div className="rounded-2xl border border-black/5 bg-white p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
-            <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bundles &amp; Packages</p>
+            <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Bundles &amp; Packages
+            </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
               {activeBundles
-                .filter((b) => query === ""
-                  || b.nameEn.toLowerCase().includes(query.toLowerCase())
-                  || b.code.toLowerCase().includes(query.toLowerCase())
-                  || b.lines.some((l) => l.sku.toLowerCase() === query.trim().toLowerCase()))
+                .filter((b) => {
+                  const q = query.trim().toLowerCase();
+                  if (q === "") return true;
+                  return (
+                    b.nameEn.toLowerCase().includes(q) ||
+                    b.code.toLowerCase().includes(q) ||
+                    b.lines.some(
+                      (l) =>
+                        l.sku.toLowerCase().includes(q) ||
+                        l.productName.toLowerCase().includes(q) ||
+                        (l.barcode?.toLowerCase() ?? "") === q,
+                    )
+                  );
+                })
                 .map((b) => {
-                  const blocked = bundleAvailability(b, (bundleCart.find((e) => e.bundleId === b.id)?.qty ?? 0) + 1);
+                  const stockBlocked = bundleAvailability(
+                    b,
+                    (bundleCart.find((e) => e.bundleId === b.id)?.qty ?? 0) + 1,
+                  );
+                  // Phase 4: eligibility blocks (branch/customer-group) are overridable by a
+                  // supervisor; stock blocks above are not — there's no unit to sell either way.
+                  const eligibilityBlocked = stockBlocked ? null : bundleEligibility(b);
                   const savings = Math.max(0, b.individualTotal - b.bundlePrice);
-                  const savingsPct = b.individualTotal > 0 ? Math.round((savings / b.individualTotal) * 100) : 0;
+                  const savingsPct =
+                    b.individualTotal > 0 ? Math.round((savings / b.individualTotal) * 100) : 0;
                   return (
                     <button
                       key={b.id}
-                      onClick={() => addBundle(b)}
-                      disabled={blocked !== null}
-                      className={`flex flex-col items-start rounded-xl border p-3 text-left transition ${blocked ? "cursor-not-allowed border-black/5 opacity-50" : "border-black/5 hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md"}`}
+                      onClick={() => {
+                        if (eligibilityBlocked) {
+                          setOverrideBundle(b);
+                          return;
+                        }
+                        addBundle(b);
+                      }}
+                      disabled={stockBlocked !== null}
+                      className={`flex flex-col items-start rounded-xl border p-3 text-left transition ${
+                        stockBlocked
+                          ? "cursor-not-allowed border-black/5 opacity-50"
+                          : eligibilityBlocked
+                            ? "border-warning/30 bg-warning/5 hover:-translate-y-0.5 hover:border-warning/50"
+                            : "border-black/5 hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md"
+                      }`}
                     >
                       <p className="text-sm font-semibold text-foreground">📦 {b.nameEn}</p>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">{b.lines.map((l) => `${l.qty}× ${l.sku}`).join(" + ")}</p>
-                      {blocked ? (
-                        <p className="mt-1 text-[10px] font-semibold text-critical">Unavailable — {blocked}</p>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        {b.lines.map((l) => `${l.qty}× ${l.sku}`).join(" + ")}
+                      </p>
+                      {stockBlocked ? (
+                        <p className="mt-1 text-[10px] font-semibold text-critical">
+                          Unavailable — {stockBlocked}
+                        </p>
+                      ) : eligibilityBlocked ? (
+                        <p className="mt-1 text-[10px] font-semibold text-warning">
+                          {eligibilityBlocked} — tap for supervisor override
+                        </p>
                       ) : (
                         <p className="mt-1 text-xs">
-                          <span className="text-muted-foreground line-through">{b.individualTotal.toFixed(2)}</span>{" "}
-                          <span className="font-mono font-semibold text-brand">{b.bundlePrice.toFixed(2)} ر.س</span>{" "}
-                          <span className="rounded bg-success/10 px-1 py-0.5 text-[10px] font-semibold text-success">Save {savingsPct}%</span>
+                          <span className="text-muted-foreground line-through">
+                            {b.individualTotal.toFixed(2)}
+                          </span>{" "}
+                          <span className="font-mono font-semibold text-brand">
+                            {b.bundlePrice.toFixed(2)} ر.س
+                          </span>{" "}
+                          <span className="rounded bg-success/10 px-1 py-0.5 text-[10px] font-semibold text-success">
+                            Save {savingsPct}%
+                          </span>
                         </p>
                       )}
                     </button>
@@ -1290,7 +1940,9 @@ export function PosCheckout() {
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     <FolderTree className="h-4 w-4 flex-none" />
-                    <span className="truncate">{activeCategoryName === "All" ? "All Categories" : activeCategoryName}</span>
+                    <span className="truncate">
+                      {activeCategoryName === "All" ? "All Categories" : activeCategoryName}
+                    </span>
                   </span>
                   <ChevronDown className="h-3.5 w-3.5 flex-none text-muted-foreground" />
                 </button>
@@ -1309,7 +1961,9 @@ export function PosCheckout() {
                         }}
                       >
                         <span className="flex-1 truncate font-medium">All Categories</span>
-                        {categoryFilter == null && <Check className="h-4 w-4 flex-none text-brand" />}
+                        {categoryFilter == null && (
+                          <Check className="h-4 w-4 flex-none text-brand" />
+                        )}
                       </CommandItem>
                     </CommandGroup>
                     <CommandGroup heading={`${categories?.length ?? 0} categories`}>
@@ -1325,14 +1979,22 @@ export function PosCheckout() {
                           className="flex-col items-start gap-0"
                         >
                           <div className="flex w-full items-center gap-2">
-                            {depth > 0 && <span className="flex-none text-muted-foreground/50">└</span>}
-                            <span className={`flex-1 truncate ${depth === 0 ? "font-medium" : ""}`}>{c.nameEn}</span>
-                            {categoryFilter === c.id && <Check className="h-4 w-4 flex-none text-brand" />}
+                            {depth > 0 && (
+                              <span className="flex-none text-muted-foreground/50">└</span>
+                            )}
+                            <span className={`flex-1 truncate ${depth === 0 ? "font-medium" : ""}`}>
+                              {c.nameEn}
+                            </span>
+                            {categoryFilter === c.id && (
+                              <Check className="h-4 w-4 flex-none text-brand" />
+                            )}
                           </div>
                           {/* Search can surface a deep subcategory with its parent(s) filtered out of view —
                               always show the ancestor chain so the cashier knows which "Wire" this is. */}
                           {c.parentId != null && (
-                            <span className="truncate pl-5 text-[10px] text-muted-foreground">{categoryPath(c.parentId)}</span>
+                            <span className="truncate pl-5 text-[10px] text-muted-foreground">
+                              {categoryPath(c.parentId)}
+                            </span>
                           )}
                         </CommandItem>
                       ))}
@@ -1342,7 +2004,10 @@ export function PosCheckout() {
               </PopoverContent>
             </Popover>
             {activeCategory && (
-              <button onClick={() => setCategoryFilter(null)} className="text-[11px] font-medium text-muted-foreground hover:text-brand">
+              <button
+                onClick={() => setCategoryFilter(null)}
+                className="text-[11px] font-medium text-muted-foreground hover:text-brand"
+              >
                 Clear
               </button>
             )}
@@ -1369,7 +2034,9 @@ export function PosCheckout() {
               </button>
             </div>
             {shown.length === 0 ? (
-              <div className="p-6 text-center text-sm text-muted-foreground">No product found. Try SKU, name or barcode.</div>
+              <div className="p-6 text-center text-sm text-muted-foreground">
+                No product found. Try SKU, name or barcode.
+              </div>
             ) : (
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
                 {shown.map((p, i) => {
@@ -1384,7 +2051,9 @@ export function PosCheckout() {
                       style={{ animationDelay: `${i * 40}ms` }}
                       className="pos-slide-up group relative flex flex-col items-start overflow-hidden rounded-xl border border-black/5 bg-white p-3 text-left shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md"
                     >
-                      <span className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${toneClass[p.tone]}`}>
+                      <span
+                        className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${toneClass[p.tone]}`}
+                      >
                         {p.stock} {p.uom}
                       </span>
                       <div className="relative mb-2 grid aspect-square w-full place-items-center overflow-hidden rounded-lg bg-gradient-to-br from-canvas to-concrete">
@@ -1402,13 +2071,20 @@ export function PosCheckout() {
                         )}
                         <span className="pointer-events-none absolute inset-0 blueprint-grid opacity-30" />
                       </div>
-                      <p className="mt-2 text-sm font-medium text-foreground line-clamp-2">{p.name}</p>
+                      <p className="mt-2 text-sm font-medium text-foreground line-clamp-2">
+                        {p.name}
+                      </p>
                       <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{p.sku}</p>
                       {categoryLabelFor(p.categoryId) && (
-                        <p className="mt-0.5 truncate text-[10px] text-brand">{categoryLabelFor(p.categoryId)}</p>
+                        <p className="mt-0.5 truncate text-[10px] text-brand">
+                          {categoryLabelFor(p.categoryId)}
+                        </p>
                       )}
                       <p className="mt-2 font-display text-lg font-bold text-foreground">
-                        {p.price.toFixed(2)} <span className="text-xs font-medium text-muted-foreground">ر.س / {p.uom}</span>
+                        {p.price.toFixed(2)}{" "}
+                        <span className="text-xs font-medium text-muted-foreground">
+                          ر.س / {p.uom}
+                        </span>
                       </p>
                     </button>
                   );
@@ -1422,7 +2098,9 @@ export function PosCheckout() {
         {heldSales && heldSales.length > 0 && (
           <div className="rounded-2xl border border-black/5 bg-white p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
             <div className="mb-2 flex items-center justify-between px-1">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Held Sales ({heldSales.length})</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Held Sales ({heldSales.length})
+              </p>
             </div>
             <div className="space-y-1.5">
               {heldSales.map((h) => (
@@ -1432,11 +2110,18 @@ export function PosCheckout() {
                   className="flex w-full items-center justify-between gap-3 rounded-lg border border-black/5 bg-canvas px-3 py-2 text-left transition hover:border-brand/40 hover:bg-brand/5"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-foreground">{h.ticketNo} · {h.customerName ?? "Walk-in"}</p>
-                    <p className="text-[11px] text-muted-foreground">{h.lines.length} item{h.lines.length === 1 ? "" : "s"} · {h.notes ?? "No notes"}</p>
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {h.ticketNo} · {h.customerName ?? "Walk-in"}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {h.lines.length} item{h.lines.length === 1 ? "" : "s"} ·{" "}
+                      {h.notes ?? "No notes"}
+                    </p>
                   </div>
                   <span className="flex flex-none items-center gap-2">
-                    <span className="font-mono text-sm font-semibold text-foreground">{money(h.total)}</span>
+                    <span className="font-mono text-sm font-semibold text-foreground">
+                      {money(h.total)}
+                    </span>
                     <span className="flex items-center gap-1 rounded-md bg-brand/10 px-2 py-1 text-xs font-semibold text-brand">
                       <Play className="h-3 w-3" /> Resume
                     </span>
@@ -1478,7 +2163,12 @@ export function PosCheckout() {
               className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               title="Hold sale"
             >
-              {holdSale.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />} Hold
+              {holdSale.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Pause className="h-3.5 w-3.5" />
+              )}{" "}
+              Hold
             </button>
             <button
               onClick={handleCreateQuotation}
@@ -1486,7 +2176,12 @@ export function PosCheckout() {
               className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               title="Convert cart to quotation"
             >
-              {createQuotation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />} Quote
+              {createQuotation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <FileText className="h-3.5 w-3.5" />
+              )}{" "}
+              Quote
             </button>
             <button
               onClick={() => toast.info("Process returns from Finance → Returns & Refunds.")}
@@ -1506,15 +2201,28 @@ export function PosCheckout() {
                 <div className="flex items-center gap-1.5 text-foreground">
                   <User className="h-3.5 w-3.5 text-brand" />
                   <span className="font-medium">{customer.nameEn}</span>
-                  <span className="text-muted-foreground">· {customer.type} · {customer.phone}</span>
+                  <span className="text-muted-foreground">
+                    · {customer.type} · {customer.phone}
+                  </span>
                 </div>
-                <button onClick={() => setCustomer(null)} className="text-muted-foreground hover:text-critical"><X className="h-3.5 w-3.5" /></button>
+                <button
+                  onClick={() => setCustomer(null)}
+                  className="text-muted-foreground hover:text-critical"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               </div>
               {(customer.type === "Contractor" || customer.type === "B2B") && (
                 <div className="flex items-center justify-between rounded-lg bg-canvas px-2.5 py-1 text-[11px] text-muted-foreground">
-                  <span>Credit: {money(customer.creditLimit - customer.outstanding)} available of {money(customer.creditLimit)}</span>
+                  <span>
+                    Credit: {money(customer.creditLimit - customer.outstanding)} available of{" "}
+                    {money(customer.creditLimit)}
+                  </span>
                   {creditNeedsApproval && (
-                    <button onClick={() => setCreditApprovalDialogOpen(true)} className="font-medium text-warning hover:underline">
+                    <button
+                      onClick={() => setCreditApprovalDialogOpen(true)}
+                      className="font-medium text-warning hover:underline"
+                    >
                       {creditApprovalId ? `Requested #${creditApprovalId}` : "Request approval"}
                     </button>
                   )}
@@ -1530,7 +2238,12 @@ export function PosCheckout() {
                     {freeDelivery && " · free delivery"}
                   </span>
                   {nextTierProgress(customer.loyaltyLifetimeSpend, tierConfig) && (
-                    <span>{money(nextTierProgress(customer.loyaltyLifetimeSpend, tierConfig)!.remaining)} to {nextTierProgress(customer.loyaltyLifetimeSpend, tierConfig)!.nextTier}</span>
+                    <span>
+                      {money(
+                        nextTierProgress(customer.loyaltyLifetimeSpend, tierConfig)!.remaining,
+                      )}{" "}
+                      to {nextTierProgress(customer.loyaltyLifetimeSpend, tierConfig)!.nextTier}
+                    </span>
                   )}
                 </div>
               )}
@@ -1540,15 +2253,24 @@ export function PosCheckout() {
               {customer.loyaltyEnrolled && (
                 <div className="flex items-center justify-between rounded-lg bg-canvas px-2.5 py-1 text-[11px]">
                   <span className="text-muted-foreground">
-                    {customer.loyaltyPoints.toLocaleString("en-US")} pts{loyaltyConfig ? ` (≈ ${money(loyaltyBalanceSar)})` : ""}
-                    {loyaltyConfig && !canRedeemPoints && customer.loyaltyPoints < loyaltyConfig.minRedeemPoints && (
-                      <span> · needs {loyaltyConfig.minRedeemPoints.toLocaleString("en-US")}+ to redeem</span>
-                    )}
+                    {customer.loyaltyPoints.toLocaleString("en-US")} pts
+                    {loyaltyConfig ? ` (≈ ${money(loyaltyBalanceSar)})` : ""}
+                    {loyaltyConfig &&
+                      !canRedeemPoints &&
+                      customer.loyaltyPoints < loyaltyConfig.minRedeemPoints && (
+                        <span>
+                          {" "}
+                          · needs {loyaltyConfig.minRedeemPoints.toLocaleString("en-US")}+ to redeem
+                        </span>
+                      )}
                   </span>
                   <button
                     type="button"
                     disabled={!canRedeemPoints || cartIsEmpty}
-                    onClick={() => { setPayInitialTab("points"); setPayOpen(true); }}
+                    onClick={() => {
+                      setPayInitialTab("points");
+                      setPayOpen(true);
+                    }}
                     title={
                       cartIsEmpty
                         ? "Add an item to the cart first"
@@ -1565,18 +2287,23 @@ export function PosCheckout() {
               {/* Module 20 (BRD §4.3.4): warn the cashier when the customer's points lapse next month. */}
               {customer.pointsExpiringSoon && (customer.loyaltyPoints ?? 0) > 0 && (
                 <p className="rounded-lg bg-warning/15 px-2.5 py-1 text-[11px] font-medium text-warning-foreground">
-                  ⚠ {customer.loyaltyPoints} points expire next month unless the customer makes a purchase.
+                  ⚠ {customer.loyaltyPoints} points expire next month unless the customer makes a
+                  purchase.
                 </p>
               )}
               {/* Module 11 (BRD §4.2): B2B PO reference + project code, carried onto the tax invoice. */}
               {isB2B && (
                 <div className="flex gap-1.5">
                   <input
-                    value={poReference} onChange={(e) => setPoReference(e.target.value)} placeholder="PO reference"
+                    value={poReference}
+                    onChange={(e) => setPoReference(e.target.value)}
+                    placeholder="PO reference"
                     className="h-7 w-1/2 rounded-md border border-black/10 bg-white px-2 text-[11px] outline-none focus:border-brand"
                   />
                   <input
-                    value={orderProjectCode} onChange={(e) => setOrderProjectCode(e.target.value)} placeholder="Project code"
+                    value={orderProjectCode}
+                    onChange={(e) => setOrderProjectCode(e.target.value)}
+                    placeholder="Project code"
                     className="h-7 w-1/2 rounded-md border border-black/10 bg-white px-2 text-[11px] outline-none focus:border-brand"
                   />
                 </div>
@@ -1589,7 +2316,10 @@ export function PosCheckout() {
                   <User className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                   <input
                     value={phone}
-                    onChange={(e) => { setPhone(e.target.value); setNotFound(false); }}
+                    onChange={(e) => {
+                      setPhone(e.target.value);
+                      setNotFound(false);
+                    }}
                     onKeyDown={(e) => e.key === "Enter" && handleFindCustomer()}
                     placeholder="Customer name or phone (blank = walk-in)"
                     className="h-8 w-full rounded-md border border-black/10 bg-white pl-8 pr-2 text-xs outline-none focus:border-brand"
@@ -1610,12 +2340,17 @@ export function PosCheckout() {
                   {customerSuggestions.map((c) => (
                     <button
                       key={c.id}
-                      onClick={() => { setCustomer(c); setPhone(""); setNotFound(false); }}
+                      onClick={() => {
+                        setCustomer(c);
+                        setPhone("");
+                        setNotFound(false);
+                      }}
                       className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs hover:bg-brand/5"
                     >
                       <span className="truncate font-medium text-foreground">{c.nameEn}</span>
                       <span className="ml-2 flex-none text-[10px] text-muted-foreground">
-                        {c.type}{c.phone ? ` · ${c.phone}` : ""}
+                        {c.type}
+                        {c.phone ? ` · ${c.phone}` : ""}
                       </span>
                     </button>
                   ))}
@@ -1623,7 +2358,9 @@ export function PosCheckout() {
               )}
               {notFound && (
                 <div className="rounded-lg border border-warning/30 bg-warning/10 p-2">
-                  <p className="mb-1.5 text-[11px] font-medium text-[oklch(0.4_0.13_70)]">Not found — save as new customer?</p>
+                  <p className="mb-1.5 text-[11px] font-medium text-[oklch(0.4_0.13_70)]">
+                    Not found — save as new customer?
+                  </p>
                   <div className="flex items-center gap-1.5">
                     <input
                       value={newCustomerName}
@@ -1637,9 +2374,18 @@ export function PosCheckout() {
                       disabled={!newCustomerName.trim() || createCustomer.isPending}
                       className="h-8 rounded-md bg-brand px-2.5 text-xs font-medium text-brand-foreground hover:bg-brand/90 disabled:opacity-40"
                     >
-                      {createCustomer.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+                      {createCustomer.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        "Save"
+                      )}
                     </button>
-                    <button onClick={() => setNotFound(false)} className="h-8 rounded-md px-2 text-xs text-muted-foreground hover:bg-black/5">Skip</button>
+                    <button
+                      onClick={() => setNotFound(false)}
+                      className="h-8 rounded-md px-2 text-xs text-muted-foreground hover:bg-black/5"
+                    >
+                      Skip
+                    </button>
                   </div>
                 </div>
               )}
@@ -1654,7 +2400,9 @@ export function PosCheckout() {
                 <ShoppingCart className="h-5 w-5" />
               </span>
               <p className="text-sm text-muted-foreground">Cart is empty</p>
-              <p className="text-[11px] text-muted-foreground/70">Scanned items will appear here.</p>
+              <p className="text-[11px] text-muted-foreground/70">
+                Scanned items will appear here.
+              </p>
             </div>
           )}
           {/* Module 8 (BRD §5.2): bundles ride the cart as grouped entries — the server expands them
@@ -1663,13 +2411,23 @@ export function PosCheckout() {
             <div key={`bundle-${b.bundleId}`} className="bg-brand/5 px-4 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">📦 {b.name}</p>
+                  <p className="truncate text-sm font-medium text-foreground">
+                    📦 {b.name}
+                    {b.supervisorEmail && (
+                      <span className="ml-1.5 rounded bg-warning/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-warning">
+                        Supervisor Override
+                      </span>
+                    )}
+                  </p>
                   <p className="font-mono text-[10px] text-muted-foreground">
-                    {b.code} · saves {money((b.individualTotal - b.bundlePrice) * b.qty)} vs individual
+                    {b.code} · saves {money((b.individualTotal - b.bundlePrice) * b.qty)} vs
+                    individual
                   </p>
                 </div>
                 <button
-                  onClick={() => setBundleCart((entries) => entries.filter((e) => e.bundleId !== b.bundleId))}
+                  onClick={() =>
+                    setBundleCart((entries) => entries.filter((e) => e.bundleId !== b.bundleId))
+                  }
                   className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-critical/10 hover:text-critical"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -1691,18 +2449,31 @@ export function PosCheckout() {
                     <Plus className="h-3.5 w-3.5" />
                   </button>
                 </div>
-                <p className="font-mono text-sm font-semibold text-foreground">{money(b.bundlePrice * b.qty)}</p>
+                <p className="font-mono text-sm font-semibold text-foreground">
+                  {money(b.bundlePrice * b.qty)}
+                </p>
               </div>
             </div>
           ))}
           {cart.map((l) => (
-            <div key={l.sku} className={`px-4 py-3 ${lastAdded === l.sku ? "pos-pop bg-brand/5" : "pos-slide-up"}`}>
+            <div
+              key={l.sku}
+              className={`px-4 py-3 ${lastAdded === l.sku ? "pos-pop bg-brand/5" : "pos-slide-up"}`}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="grid h-10 w-10 shrink-0 overflow-hidden place-items-center rounded-md bg-canvas ring-1 ring-black/5">
                     {(() => {
                       const img = l.imageUrl || productImage[l.sku];
-                      if (img) return <img src={img} alt={l.name} loading="lazy" className="h-full w-full object-contain p-0.5" />;
+                      if (img)
+                        return (
+                          <img
+                            src={img}
+                            alt={l.name}
+                            loading="lazy"
+                            className="h-full w-full object-contain p-0.5"
+                          />
+                        );
                       const Icon = productIcon[l.sku] ?? Package;
                       return <Icon className="h-4 w-4 text-brand" />;
                     })()}
@@ -1716,7 +2487,8 @@ export function PosCheckout() {
                     </p>
                     <p className="font-mono text-[10px] text-muted-foreground">
                       {l.sku} · {l.uom}
-                      {l.weight > 0 && ` · ${(l.weight * toStockQty(l.qty, l.factorToStock)).toFixed(1)} kg`}
+                      {l.weight > 0 &&
+                        ` · ${(l.weight * toStockQty(l.qty, l.factorToStock)).toFixed(1)} kg`}
                     </p>
                   </div>
                 </div>
@@ -1726,7 +2498,9 @@ export function PosCheckout() {
                     title="Add a note to this item"
                     aria-pressed={notesEditingSku === l.sku}
                     className={`grid h-7 w-7 place-items-center rounded-md transition ${
-                      l.notes ? "bg-brand/10 text-brand" : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
+                      l.notes
+                        ? "bg-brand/10 text-brand"
+                        : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
                     }`}
                   >
                     <StickyNote className="h-3.5 w-3.5" />
@@ -1736,7 +2510,9 @@ export function PosCheckout() {
                     title="Override this item's price"
                     aria-pressed={priceEditingSku === l.sku}
                     className={`grid h-7 w-7 place-items-center rounded-md transition ${
-                      l.manualUnitPrice != null ? "bg-brand/10 text-brand" : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
+                      l.manualUnitPrice != null
+                        ? "bg-brand/10 text-brand"
+                        : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
                     }`}
                   >
                     <PenLine className="h-3.5 w-3.5" />
@@ -1746,7 +2522,9 @@ export function PosCheckout() {
                     title="Deliver this line instead of counter pickup"
                     aria-pressed={Boolean(l.requiresDelivery)}
                     className={`grid h-7 w-7 place-items-center rounded-md transition ${
-                      l.requiresDelivery ? "bg-brand/10 text-brand" : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
+                      l.requiresDelivery
+                        ? "bg-brand/10 text-brand"
+                        : "text-muted-foreground hover:bg-brand/10 hover:text-brand"
                     }`}
                   >
                     <Truck className="h-3.5 w-3.5" />
@@ -1760,15 +2538,57 @@ export function PosCheckout() {
                 </div>
               </div>
               {l.requiresDelivery && (
-                <p className="mt-1 flex items-center gap-1 text-[10px] font-medium text-brand"><Truck className="h-3 w-3" /> Delivery</p>
+                <p className="mt-1 flex items-center gap-1 text-[10px] font-medium text-brand">
+                  <Truck className="h-3 w-3" /> Delivery
+                </p>
               )}
+              {/* Phase 2 (BRD §5.1): let the cashier see a Buy-X-Get-Y/pallet rule fired before
+                  checkout, not just discover it on the receipt afterward. */}
+              {(() => {
+                const buyXGetYRule = buyXGetYRuleFor(l);
+                if (buyXGetYRule) {
+                  const { freeUnits } = resolveBuyXGetYSplit(
+                    buyXGetYRule,
+                    toStockQty(l.qty, l.factorToStock),
+                  );
+                  if (freeUnits > 0) {
+                    return (
+                      <p className="mt-1 flex items-center gap-1 text-[10px] font-medium text-success">
+                        <Tag className="h-3 w-3" /> Buy {buyXGetYRule.buyQty} Get{" "}
+                        {buyXGetYRule.freeQty} — {freeUnits} free
+                      </p>
+                    );
+                  }
+                }
+                const palletRule = palletRuleFor(l);
+                if (palletRule) {
+                  const { palletUnits } = resolvePalletSplit(
+                    palletRule,
+                    toStockQty(l.qty, l.factorToStock),
+                  );
+                  if (palletUnits > 0) {
+                    return (
+                      <p className="mt-1 flex items-center gap-1 text-[10px] font-medium text-success">
+                        <Tag className="h-3 w-3" /> Pallet price applied to {palletUnits} of{" "}
+                        {toStockQty(l.qty, l.factorToStock)}
+                      </p>
+                    );
+                  }
+                }
+                return null;
+              })()}
               {/* BRD §2.3: per-line note — expanded via the note icon above, or whenever a note
                   already exists so it's never hidden after the icon is toggled closed. */}
               {(notesEditingSku === l.sku || l.notes) && (
                 <input
-                  type="text" value={l.notes ?? ""} placeholder="Note for this item…" aria-label={`${l.sku} note`}
+                  type="text"
+                  value={l.notes ?? ""}
+                  placeholder="Note for this item…"
+                  aria-label={`${l.sku} note`}
                   onChange={(e) => setLineNotes(l.sku, e.target.value)}
-                  onBlur={() => { if (!l.notes) setNotesEditingSku(null); }}
+                  onBlur={() => {
+                    if (!l.notes) setNotesEditingSku(null);
+                  }}
                   className="mt-1.5 w-full rounded-md border border-black/10 bg-white px-2 py-1 text-xs outline-none focus:border-brand"
                 />
               )}
@@ -1777,14 +2597,22 @@ export function PosCheckout() {
               {(priceEditingSku === l.sku || l.manualUnitPrice != null) && (
                 <div className="mt-1.5 flex items-center gap-1.5">
                   <input
-                    type="number" min="0" step="0.01" value={l.manualUnitPrice ?? ""}
-                    placeholder={`Override price (list ${money(l.price)})`} aria-label={`${l.sku} price override`}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={l.manualUnitPrice ?? ""}
+                    placeholder={`Override price (list ${money(l.price)})`}
+                    aria-label={`${l.sku} price override`}
                     onChange={(e) => setLineManualPrice(l.sku, e.target.value)}
-                    onBlur={() => { if (l.manualUnitPrice == null) setPriceEditingSku(null); }}
+                    onBlur={() => {
+                      if (l.manualUnitPrice == null) setPriceEditingSku(null);
+                    }}
                     className="w-full rounded-md border border-black/10 bg-white px-2 py-1 text-xs outline-none focus:border-brand"
                   />
                   {!canOverrideItemPrice && l.manualUnitPrice != null && (
-                    <span className="shrink-0 text-[10px] font-medium text-warning">needs approval</span>
+                    <span className="shrink-0 text-[10px] font-medium text-warning">
+                      needs approval
+                    </span>
                   )}
                 </div>
               )}
@@ -1796,7 +2624,11 @@ export function PosCheckout() {
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1 text-xs">
                     <input
-                      type="number" min="0.01" step="0.01" value={l.lengthM ?? ""} aria-label={`${l.sku} length (m)`}
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={l.lengthM ?? ""}
+                      aria-label={`${l.sku} length (m)`}
                       onChange={(e) => changeDimension(l.sku, "lengthM", e.target.value)}
                       className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
                     />
@@ -1804,7 +2636,11 @@ export function PosCheckout() {
                       <>
                         <span className="text-muted-foreground">×</span>
                         <input
-                          type="number" min="0.01" step="0.01" value={l.widthM ?? ""} aria-label={`${l.sku} width (m)`}
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={l.widthM ?? ""}
+                          aria-label={`${l.sku} width (m)`}
                           onChange={(e) => changeDimension(l.sku, "widthM", e.target.value)}
                           className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
                         />
@@ -1814,35 +2650,57 @@ export function PosCheckout() {
                       <>
                         <span className="text-muted-foreground">×</span>
                         <input
-                          type="number" min="0.01" step="0.01" value={l.heightM ?? ""} aria-label={`${l.sku} height (m)`}
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={l.heightM ?? ""}
+                          aria-label={`${l.sku} height (m)`}
                           onChange={(e) => changeDimension(l.sku, "heightM", e.target.value)}
                           className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
                         />
                       </>
                     )}
-                    <span className="ml-1 font-medium text-muted-foreground">m = {l.qty} {l.stockUom}</span>
+                    <span className="ml-1 font-medium text-muted-foreground">
+                      m = {l.qty} {l.stockUom}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     {/* BRD §2.3/§6.2: cashier-entered per-line discount %, gated by the same
                         authorization ceiling as the order-level manual discount. */}
                     <input
-                      type="number" min="0" max="100" step="0.5" value={l.manualDiscountPct ?? ""} placeholder="0%"
-                      aria-label={`${l.sku} discount percent`} title="Per-line discount %"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.5"
+                      value={l.manualDiscountPct ?? ""}
+                      placeholder="0%"
+                      aria-label={`${l.sku} discount percent`}
+                      title="Per-line discount %"
                       onChange={(e) => setLineDiscountPct(l.sku, e.target.value)}
                       className="h-7 w-12 rounded-md border border-black/10 bg-white px-1 text-center text-xs outline-none focus:border-brand"
                     />
                     {l.manualUnitPrice != null ? (
                       <div className="text-right">
-                        <p className="font-mono text-[10px] text-muted-foreground line-through">{money(l.price * l.qty)}</p>
-                        <p className="font-mono text-sm font-semibold text-brand">{money(l.manualUnitPrice * l.qty)}</p>
+                        <p className="font-mono text-[10px] text-muted-foreground line-through">
+                          {money(l.price * l.qty)}
+                        </p>
+                        <p className="font-mono text-sm font-semibold text-brand">
+                          {money(l.manualUnitPrice * l.qty)}
+                        </p>
                       </div>
-                    ) : lineDiscountPct(l) > 0 ? (
+                    ) : lineChargeTotal(l) !== l.price * l.qty ? (
                       <div className="text-right">
-                        <p className="font-mono text-[10px] text-muted-foreground line-through">{money(l.price * l.qty)}</p>
-                        <p className="font-mono text-sm font-semibold text-foreground">{money(l.price * l.qty * (1 - lineDiscountPct(l) / 100))}</p>
+                        <p className="font-mono text-[10px] text-muted-foreground line-through">
+                          {money(l.price * l.qty)}
+                        </p>
+                        <p className="font-mono text-sm font-semibold text-foreground">
+                          {money(lineChargeTotal(l))}
+                        </p>
                       </div>
                     ) : (
-                      <p className="font-mono text-sm font-semibold text-foreground">{money(l.price * l.qty)}</p>
+                      <p className="font-mono text-sm font-semibold text-foreground">
+                        {money(l.price * l.qty)}
+                      </p>
                     )}
                   </div>
                 </div>
@@ -1857,7 +2715,11 @@ export function PosCheckout() {
                         <Minus className="h-3.5 w-3.5" />
                       </button>
                       <input
-                        type="number" min="1" step="1" value={l.qty} aria-label={`${l.sku} quantity`}
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={l.qty}
+                        aria-label={`${l.sku} quantity`}
                         onChange={(e) => setQtyDirect(l.sku, e.target.value)}
                         className="w-10 border-0 bg-transparent text-center text-sm font-semibold outline-none focus:bg-brand/5"
                       />
@@ -1872,36 +2734,55 @@ export function PosCheckout() {
                         rendered when the product actually has configured conversions. */}
                     {l.conversions.length > 0 && (
                       <select
-                        value={l.uom} aria-label={`${l.sku} unit of measure`}
+                        value={l.uom}
+                        aria-label={`${l.sku} unit of measure`}
                         onChange={(e) => changeUom(l.sku, e.target.value)}
                         className="h-7 rounded-md border border-black/10 bg-white px-1.5 text-xs font-medium outline-none focus:border-brand"
                       >
                         {sellableUoms(l.stockUom, l.conversions).map((o) => (
-                          <option key={o.uom} value={o.uom}>{o.uom}</option>
+                          <option key={o.uom} value={o.uom}>
+                            {o.uom}
+                          </option>
                         ))}
                       </select>
                     )}
                     {/* BRD §2.3/§6.2: cashier-entered per-line discount %, gated by the same
                         authorization ceiling as the order-level manual discount. */}
                     <input
-                      type="number" min="0" max="100" step="0.5" value={l.manualDiscountPct ?? ""} placeholder="0%"
-                      aria-label={`${l.sku} discount percent`} title="Per-line discount %"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.5"
+                      value={l.manualDiscountPct ?? ""}
+                      placeholder="0%"
+                      aria-label={`${l.sku} discount percent`}
+                      title="Per-line discount %"
                       onChange={(e) => setLineDiscountPct(l.sku, e.target.value)}
                       className="h-7 w-12 rounded-md border border-black/10 bg-white px-1 text-center text-xs outline-none focus:border-brand"
                     />
                   </div>
                   {l.manualUnitPrice != null ? (
                     <div className="text-right">
-                      <p className="font-mono text-[10px] text-muted-foreground line-through">{money(l.price * l.qty)}</p>
-                      <p className="font-mono text-sm font-semibold text-brand">{money(l.manualUnitPrice * l.qty)}</p>
+                      <p className="font-mono text-[10px] text-muted-foreground line-through">
+                        {money(l.price * l.qty)}
+                      </p>
+                      <p className="font-mono text-sm font-semibold text-brand">
+                        {money(l.manualUnitPrice * l.qty)}
+                      </p>
                     </div>
                   ) : lineDiscountPct(l) > 0 ? (
                     <div className="text-right">
-                      <p className="font-mono text-[10px] text-muted-foreground line-through">{money(l.price * l.qty)}</p>
-                      <p className="font-mono text-sm font-semibold text-foreground">{money(l.price * l.qty * (1 - lineDiscountPct(l) / 100))}</p>
+                      <p className="font-mono text-[10px] text-muted-foreground line-through">
+                        {money(l.price * l.qty)}
+                      </p>
+                      <p className="font-mono text-sm font-semibold text-foreground">
+                        {money(l.price * l.qty * (1 - lineDiscountPct(l) / 100))}
+                      </p>
                     </div>
                   ) : (
-                    <p className="font-mono text-sm font-semibold text-foreground">{money(l.price * l.qty)}</p>
+                    <p className="font-mono text-sm font-semibold text-foreground">
+                      {money(l.price * l.qty)}
+                    </p>
                   )}
                 </div>
               )}
@@ -1912,11 +2793,15 @@ export function PosCheckout() {
         {/* BRD §3.5: delivery details — captured once per checkout for every delivery-flagged line. */}
         {hasDeliveryLines && (
           <div className="space-y-2 border-t border-black/5 bg-brand/5 px-4 py-2.5 text-xs">
-            <p className="flex items-center gap-1.5 font-semibold text-brand"><Truck className="h-3.5 w-3.5" /> Delivery details</p>
+            <p className="flex items-center gap-1.5 font-semibold text-brand">
+              <Truck className="h-3.5 w-3.5" /> Delivery details
+            </p>
             <div className="grid grid-cols-2 gap-1.5">
               <select
                 value={deliveryAddressType}
-                onChange={(e) => setDeliveryAddressType(e.target.value as typeof deliveryAddressType)}
+                onChange={(e) =>
+                  setDeliveryAddressType(e.target.value as typeof deliveryAddressType)
+                }
                 className="h-8 rounded-md border border-black/10 bg-white px-1.5 outline-none focus:border-brand"
               >
                 <option value="Customer Address">Customer Address</option>
@@ -1939,11 +2824,15 @@ export function PosCheckout() {
                   {customer ? (
                     <div className="flex h-8 items-center justify-between gap-1.5 rounded-md border border-black/10 bg-white px-2">
                       <span className="truncate text-[11px] font-medium text-foreground">
-                        {customer.nameEn}{customer.phone ? ` · ${customer.phone}` : ""}
+                        {customer.nameEn}
+                        {customer.phone ? ` · ${customer.phone}` : ""}
                       </span>
                       <button
                         type="button"
-                        onClick={() => { setCustomer(null); setDeliveryCustomerSearch(""); }}
+                        onClick={() => {
+                          setCustomer(null);
+                          setDeliveryCustomerSearch("");
+                        }}
                         className="flex-none text-[10px] font-medium text-brand hover:underline"
                       >
                         Change
@@ -1963,12 +2852,18 @@ export function PosCheckout() {
                             <button
                               key={c.id}
                               type="button"
-                              onClick={() => { setCustomer(c); setDeliveryCustomerSearch(""); }}
+                              onClick={() => {
+                                setCustomer(c);
+                                setDeliveryCustomerSearch("");
+                              }}
                               className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[11px] hover:bg-brand/5"
                             >
-                              <span className="truncate font-medium text-foreground">{c.nameEn}</span>
+                              <span className="truncate font-medium text-foreground">
+                                {c.nameEn}
+                              </span>
                               <span className="ml-2 flex-none text-[10px] text-muted-foreground">
-                                {c.type}{c.phone ? ` · ${c.phone}` : ""}
+                                {c.type}
+                                {c.phone ? ` · ${c.phone}` : ""}
                               </span>
                             </button>
                           ))}
@@ -1979,31 +2874,45 @@ export function PosCheckout() {
                 </div>
               )}
               <input
-                value={deliveryContactName} onChange={(e) => setDeliveryContactName(e.target.value)} placeholder="Contact name *"
+                value={deliveryContactName}
+                onChange={(e) => setDeliveryContactName(e.target.value)}
+                placeholder="Contact name *"
                 className="h-8 rounded-md border border-black/10 bg-white px-2 outline-none focus:border-brand"
               />
               <input
-                value={deliveryContactMobile} onChange={(e) => setDeliveryContactMobile(e.target.value)} placeholder="Contact mobile *"
+                value={deliveryContactMobile}
+                onChange={(e) => setDeliveryContactMobile(e.target.value)}
+                placeholder="Contact mobile *"
                 className="h-8 rounded-md border border-black/10 bg-white px-2 outline-none focus:border-brand"
               />
               <input
-                value={deliveryCity} onChange={(e) => setDeliveryCity(e.target.value)} placeholder="City *"
+                value={deliveryCity}
+                onChange={(e) => setDeliveryCity(e.target.value)}
+                placeholder="City *"
                 className="h-8 rounded-md border border-black/10 bg-white px-2 outline-none focus:border-brand"
               />
               <input
-                value={deliveryDistrict} onChange={(e) => setDeliveryDistrict(e.target.value)} placeholder="District"
+                value={deliveryDistrict}
+                onChange={(e) => setDeliveryDistrict(e.target.value)}
+                placeholder="District"
                 className="h-8 rounded-md border border-black/10 bg-white px-2 outline-none focus:border-brand"
               />
               <input
-                value={deliveryStreet} onChange={(e) => setDeliveryStreet(e.target.value)} placeholder="Street"
+                value={deliveryStreet}
+                onChange={(e) => setDeliveryStreet(e.target.value)}
+                placeholder="Street"
                 className="col-span-2 h-8 rounded-md border border-black/10 bg-white px-2 outline-none focus:border-brand"
               />
               <input
-                type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)}
+                type="date"
+                value={deliveryDate}
+                onChange={(e) => setDeliveryDate(e.target.value)}
                 className="h-8 rounded-md border border-black/10 bg-white px-2 outline-none focus:border-brand"
               />
               <input
-                type="time" value={deliveryTime} onChange={(e) => setDeliveryTime(e.target.value)}
+                type="time"
+                value={deliveryTime}
+                onChange={(e) => setDeliveryTime(e.target.value)}
                 className="h-8 rounded-md border border-black/10 bg-white px-2 outline-none focus:border-brand"
               />
               <select
@@ -2013,39 +2922,61 @@ export function PosCheckout() {
               >
                 <option value="">Delivery zone (fee)…</option>
                 {(deliveryZones ?? []).map((z) => (
-                  <option key={z.id} value={z.id}>{z.name} — {z.fee.toFixed(0)} ر.س</option>
+                  <option key={z.id} value={z.id}>
+                    {z.name} — {z.fee.toFixed(0)} ر.س
+                  </option>
                 ))}
               </select>
               <select
                 value={deliveryDriverId ?? ""}
-                onChange={(e) => setDeliveryDriverId(e.target.value ? Number(e.target.value) : null)}
+                onChange={(e) =>
+                  setDeliveryDriverId(e.target.value ? Number(e.target.value) : null)
+                }
                 className="h-8 rounded-md border border-black/10 bg-white px-1.5 outline-none focus:border-brand"
               >
                 <option value="">Driver (optional)…</option>
-                {(deliveryDrivers ?? []).filter((d) => d.available).map((d) => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
+                {(deliveryDrivers ?? [])
+                  .filter((d) => d.available)
+                  .map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
               </select>
               <select
                 value={deliveryVehicleId ?? ""}
-                onChange={(e) => setDeliveryVehicleId(e.target.value ? Number(e.target.value) : null)}
+                onChange={(e) =>
+                  setDeliveryVehicleId(e.target.value ? Number(e.target.value) : null)
+                }
                 className="col-span-2 h-8 rounded-md border border-black/10 bg-white px-1.5 outline-none focus:border-brand"
               >
                 <option value="">Vehicle (optional)…</option>
-                {(deliveryVehicles ?? []).filter((v) => v.status === "Available").map((v) => (
-                  <option key={v.id} value={v.id}>{v.registration} — {v.type}</option>
-                ))}
+                {(deliveryVehicles ?? [])
+                  .filter((v) => v.status === "Available")
+                  .map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.registration} — {v.type}
+                    </option>
+                  ))}
               </select>
               <textarea
-                value={deliveryInstructions} onChange={(e) => setDeliveryInstructions(e.target.value)} placeholder="Delivery instructions"
-                rows={2} className="col-span-2 rounded-md border border-black/10 bg-white px-2 py-1.5 outline-none focus:border-brand"
+                value={deliveryInstructions}
+                onChange={(e) => setDeliveryInstructions(e.target.value)}
+                placeholder="Delivery instructions"
+                rows={2}
+                className="col-span-2 rounded-md border border-black/10 bg-white px-2 py-1.5 outline-none focus:border-brand"
               />
             </div>
             {autoDeliveryFee && (
-              <p className="text-muted-foreground">Delivery fee (auto): <span className="font-medium text-foreground">{money(autoDeliveryFee.amount)}</span></p>
+              <p className="text-muted-foreground">
+                Delivery fee (auto):{" "}
+                <span className="font-medium text-foreground">{money(autoDeliveryFee.amount)}</span>
+              </p>
             )}
             {!deliveryDetailsComplete && (
-              <p className="text-warning">Contact name, mobile, city and promised date are required to charge.</p>
+              <p className="text-warning">
+                Contact name, mobile, city and promised date are required to charge.
+              </p>
             )}
           </div>
         )}
@@ -2054,8 +2985,15 @@ export function PosCheckout() {
         <div className="space-y-2 border-t border-black/5 bg-canvas px-4 py-2.5 text-xs">
           {appliedCoupon?.valid ? (
             <div className="flex items-center justify-between rounded-md bg-brand/10 px-2.5 py-1.5">
-              <span className="flex items-center gap-1.5 font-medium text-brand"><Tag className="h-3.5 w-3.5" /> {appliedCoupon.code} — saves {money(couponAmount)}</span>
-              <button onClick={() => setAppliedCoupon(null)} className="text-brand hover:text-critical"><X className="h-3.5 w-3.5" /></button>
+              <span className="flex items-center gap-1.5 font-medium text-brand">
+                <Tag className="h-3.5 w-3.5" /> {appliedCoupon.code} — saves {money(couponAmount)}
+              </span>
+              <button
+                onClick={() => setAppliedCoupon(null)}
+                className="text-brand hover:text-critical"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
           ) : (
             <div className="flex items-center gap-1.5">
@@ -2151,16 +3089,27 @@ export function PosCheckout() {
               placeholder="0.00"
               className="h-8 w-20 rounded-md border border-black/10 bg-white px-2 text-xs outline-none focus:border-brand"
             />
-            <button onClick={addCustomFee} className="h-8 rounded-md border border-black/10 bg-white px-2.5 text-xs font-medium hover:border-brand/40">
+            <button
+              onClick={addCustomFee}
+              className="h-8 rounded-md border border-black/10 bg-white px-2.5 text-xs font-medium hover:border-brand/40"
+            >
               Add
             </button>
           </div>
           {customFees.map((f, i) => (
-            <div key={i} className="flex items-center justify-between rounded-md bg-white px-2.5 py-1">
+            <div
+              key={i}
+              className="flex items-center justify-between rounded-md bg-white px-2.5 py-1"
+            >
               <span className="text-foreground">{f.label}</span>
               <span className="flex items-center gap-1.5">
                 {money(f.amount)}
-                <button onClick={() => setCustomFees((fs) => fs.filter((_, idx) => idx !== i))} className="text-muted-foreground hover:text-critical"><X className="h-3 w-3" /></button>
+                <button
+                  onClick={() => setCustomFees((fs) => fs.filter((_, idx) => idx !== i))}
+                  className="text-muted-foreground hover:text-critical"
+                >
+                  <X className="h-3 w-3" />
+                </button>
               </span>
             </div>
           ))}
@@ -2188,10 +3137,18 @@ export function PosCheckout() {
               <span>-{money(contractorDiscount)}</span>
             </div>
           )}
-          {orderDiscount > 0 && (
+          {tradeValueAmount > 0 && (
+            <div className="flex justify-between text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <Percent className="h-3.5 w-3.5" /> Trade Value {tradeValuePct}%
+              </span>
+              <span>-{money(tradeValueAmount)}</span>
+            </div>
+          )}
+          {couponAmount + manualAmount > 0 && (
             <div className="flex justify-between text-muted-foreground">
               <span>Coupon / manual discount</span>
-              <span>-{money(orderDiscount)}</span>
+              <span>-{money(couponAmount + manualAmount)}</span>
             </div>
           )}
           {feesTotal > 0 && (
@@ -2206,7 +3163,9 @@ export function PosCheckout() {
           </div>
           <div className="mt-1 flex items-center justify-between border-t border-black/10 pt-2">
             <span className="font-display text-base font-semibold text-foreground">Total</span>
-            <span key={total} className="pos-pop font-display text-2xl font-bold text-brand">{money(Math.max(0, total))}</span>
+            <span key={total} className="pos-pop font-display text-2xl font-bold text-brand">
+              {money(Math.max(0, total))}
+            </span>
           </div>
         </div>
 
@@ -2219,7 +3178,10 @@ export function PosCheckout() {
             <Printer className="h-4 w-4" /> Reprint
           </button>
           <button
-            onClick={() => { setPayInitialTab("cash"); setPayOpen(true); }}
+            onClick={() => {
+              setPayInitialTab("cash");
+              setPayOpen(true);
+            }}
             disabled={cartIsEmpty || !deliveryDetailsComplete}
             className="flex items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition hover:bg-brand/90 hover:shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-brand"
           >
@@ -2236,7 +3198,19 @@ export function PosCheckout() {
         customer={customer}
         initialTab={payInitialTab}
       />
-      <ReceiptDialog order={receiptOrder} terminalId={terminal?.id ?? null} onClose={() => setReceiptOrder(null)} />
+      <ReceiptDialog
+        order={receiptOrder}
+        terminalId={terminal?.id ?? null}
+        onClose={() => setReceiptOrder(null)}
+      />
+      <BundleOverrideDialog
+        bundle={overrideBundle}
+        reason={overrideBundle && bundleEligibility(overrideBundle)}
+        onClose={() => setOverrideBundle(null)}
+        onConfirm={(email, pin) => {
+          if (overrideBundle) addBundle(overrideBundle, { email, pin });
+        }}
+      />
       <RequestApprovalDialog
         open={approvalDialogOpen}
         onOpenChange={setApprovalDialogOpen}
@@ -2256,7 +3230,11 @@ export function PosCheckout() {
         branchId={effectiveBranchId ?? null}
         defaultType="CreditOverride"
         defaultAmount={total ? total.toFixed(2) : ""}
-        defaultReason={customer ? `${customer.nameEn}'s order would exceed their ${money(customer.creditLimit)} credit limit` : ""}
+        defaultReason={
+          customer
+            ? `${customer.nameEn}'s order would exceed their ${money(customer.creditLimit)} credit limit`
+            : ""
+        }
         onCreated={(approval) => setCreditApprovalId(approval.id)}
       />
       <RequestApprovalDialog
@@ -2264,8 +3242,14 @@ export function PosCheckout() {
         onOpenChange={setPriceOverrideApprovalDialogOpen}
         branchId={effectiveBranchId ?? null}
         defaultType="PriceOverride"
-        defaultAmount={cart.filter((l) => l.manualUnitPrice != null).reduce((s, l) => s + (l.manualUnitPrice ?? 0) * l.qty, 0).toFixed(2)}
-        defaultReason={`Price override on ${cart.filter((l) => l.manualUnitPrice != null).map((l) => l.sku).join(", ")}`}
+        defaultAmount={cart
+          .filter((l) => l.manualUnitPrice != null)
+          .reduce((s, l) => s + (l.manualUnitPrice ?? 0) * l.qty, 0)
+          .toFixed(2)}
+        defaultReason={`Price override on ${cart
+          .filter((l) => l.manualUnitPrice != null)
+          .map((l) => l.sku)
+          .join(", ")}`}
         onCreated={(approval) => setPriceOverrideApprovalId(approval.id)}
       />
 
@@ -2275,7 +3259,10 @@ export function PosCheckout() {
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-sm">
           <div className="w-80 rounded-2xl bg-white p-6 text-center shadow-2xl">
             <p className="text-lg font-semibold text-foreground">Register locked</p>
-            <p className="mt-1 text-xs text-muted-foreground">Locked after 3 minutes of inactivity. Enter your PIN to resume — the cart is untouched.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Locked after 3 minutes of inactivity. Enter your PIN to resume — the cart is
+              untouched.
+            </p>
             <input
               type="password"
               value={unlockPin}

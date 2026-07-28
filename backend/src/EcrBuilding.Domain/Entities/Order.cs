@@ -28,6 +28,10 @@ public class Order : BaseEntity
     public PaymentStatus PaymentStatus { get; set; } = PaymentStatus.Unpaid;
     public decimal SubTotal { get; set; }
     public decimal DiscountTotal { get; set; }
+    // Portion of DiscountTotal attributable to bundle constituent pricing (individual price minus
+    // bundle price) — broken out so the receipt can show "Bundle Discount" as its own line instead
+    // of folding it into the generic Discount total alongside coupon/contractor/manual discounts.
+    public decimal BundleDiscountTotal { get; set; }
     public decimal VatTotal { get; set; }
     public decimal GrandTotal { get; set; }
     public string? Notes { get; set; }

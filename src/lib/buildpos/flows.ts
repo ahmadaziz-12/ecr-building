@@ -15,7 +15,6 @@ import {
   Printer,
   Sliders,
   CalendarClock,
-  Blocks,
   PackageCheck,
   Receipt,
   Wallet,
@@ -24,7 +23,15 @@ import {
 } from "lucide-react";
 
 export type FieldType =
-  "text" | "number" | "select" | "textarea" | "tags" | "toggle" | "date" | "lineItems" | "image";
+  | "text"
+  | "number"
+  | "select"
+  | "textarea"
+  | "tags"
+  | "toggle"
+  | "date"
+  | "lineItems"
+  | "image";
 
 // A lineItems field renders as an add/remove-able table instead of a single input. "product" and
 // "branch" columns pull their options live (products/branches) inside FlowDialog; "select" columns
@@ -35,7 +42,13 @@ export type FieldType =
 // conversions, e.g. Pallet/Ton) — requires a "product"-type column elsewhere on the same row; picking
 // a UOM re-suggests the unit cost scaled by that UOM's factor (same convention as the POS cart).
 export type LineItemColumnType =
-  "product" | "branch" | "select" | "number" | "text" | "date" | "uom";
+  | "product"
+  | "branch"
+  | "select"
+  | "number"
+  | "text"
+  | "date"
+  | "uom";
 export type LineItemColumn = {
   key: string;
   label: string;
@@ -334,7 +347,8 @@ export const flows: Record<string, Flow> = {
             label: "Selling Units & Conversions",
             type: "text",
             full: true,
-            placeholder: "Pallet=50; Ton=20  (1 unit = N stock UOM — leave blank if only sold in the stock unit)",
+            placeholder:
+              "Pallet=50; Ton=20  (1 unit = N stock UOM — leave blank if only sold in the stock unit)",
           },
           {
             name: "cutToSizeMode",
@@ -442,7 +456,8 @@ export const flows: Record<string, Flow> = {
             label: "Selling Units & Conversions",
             type: "text",
             full: true,
-            placeholder: "Pallet=50; Ton=20  (1 unit = N stock UOM — leave blank if only sold in the stock unit)",
+            placeholder:
+              "Pallet=50; Ton=20  (1 unit = N stock UOM — leave blank if only sold in the stock unit)",
           },
           {
             name: "cutToSizeMode",
@@ -870,37 +885,10 @@ export const flows: Record<string, Flow> = {
     ],
   },
 
-  "Create Bundle": {
-    key: "create-bundle",
-    title: "Create Bundle",
-    subtitle: "Package component SKUs into a sellable kit",
-    icon: Blocks,
-    steps: [
-      {
-        name: "Bundle",
-        fields: [
-          {
-            name: "code",
-            label: "Bundle Code",
-            type: "text",
-            placeholder: "BND-XXX-01",
-            required: true,
-          },
-          { name: "nameEn", label: "Name (English)", type: "text", required: true },
-          { name: "nameAr", label: "Name (Arabic)", type: "text" },
-          { name: "price", label: "Bundle Price (ر.س)", type: "number", required: true },
-          {
-            name: "lines",
-            label: "Components (SKU x Qty)",
-            type: "tags",
-            placeholder: "TILE-GRY-60X60 x 10, SEAL-SILC-300 x 2",
-            full: true,
-            required: true,
-          },
-        ],
-      },
-    ],
-  },
+  // "Create Bundle" is handled by the bespoke BundleFormDialog (see ModulePage.tsx), not this
+  // generic flow — bundle components need a real product search + qty per line, which the generic
+  // flow's free-text "SKU x Qty" tags field can't drive, and it also handles Edit (this flow never
+  // did).
 
   "Add Supplier": {
     key: "add-supplier",

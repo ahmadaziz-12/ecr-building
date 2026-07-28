@@ -8,7 +8,6 @@ import {
 } from "./catalog";
 import { parseUomConversions, parseCutToSizeMode } from "@/lib/buildpos/uom";
 import { parseAttributes } from "@/lib/buildpos/attributes";
-import { useCreateBundle } from "./bundles";
 import {
   useCreateBranchStockBatch,
   useCreateStockAdjustment,
@@ -46,15 +45,6 @@ import {
 } from "./procurement";
 import { useCreateExpense, useCreateReturn, useCreateTaxCode } from "./finance";
 import { useCustomers, useOrders } from "./pos";
-
-export function parseSkuQtyLines(raw: string): { sku: string; qty: number }[] {
-  return raw.split(",").map((token) => {
-    const trimmed = token.trim();
-    const m = trimmed.match(/^(.+?)\s*[x×]\s*(\d+(?:\.\d+)?)$/i);
-    if (!m) throw new Error(`Could not parse "${trimmed}" — use the format "SKU x Qty".`);
-    return { sku: m[1].trim(), qty: Number(m[2]) };
-  });
-}
 
 // "PVC-PIPE-2IN x 4 @ 180" per customer-return line — amount is the refund amount for that line,
 // not a unit cost (a customer return refunds what was charged, not what the item cost the store).
@@ -99,7 +89,6 @@ export function useFlowSubmitHandlers(): Record<
   const createTransfer = useCreateStockTransfer();
   const createWarehouse = useCreateWarehouse();
   const createWarehouseBin = useCreateWarehouseBin();
-  const createBundle = useCreateBundle();
   const { data: branches } = useBranches();
   const { data: roles } = useRoles();
   const { data: terminals } = useTerminals();
@@ -316,7 +305,8 @@ export function useFlowSubmitHandlers(): Record<
       if (!rows.length) throw new Error("At least one line item is required.");
 
       const lines = rows.map((row) => {
-        if (!row.sku || !(Number(row.qty) > 0)) throw new Error("Every line needs an item and a quantity greater than 0.");
+        if (!row.sku || !(Number(row.qty) > 0))
+          throw new Error("Every line needs an item and a quantity greater than 0.");
         const product = products?.find((p) => p.sku.toLowerCase() === row.sku.toLowerCase());
         if (!product) throw new Error(`Unknown SKU "${row.sku}".`);
         return {
@@ -370,24 +360,8 @@ export function useFlowSubmitHandlers(): Record<
       }
     },
 
-    "create-bundle": async (values) => {
-      if (!values.code || !values.nameEn) throw new Error("Bundle code and name are required.");
-      if (!values.lines) throw new Error("At least one component (SKU x Qty) is required.");
-
-      const lines = parseSkuQtyLines(values.lines).map(({ sku, qty }) => {
-        const product = products?.find((p) => p.sku.toLowerCase() === sku.toLowerCase());
-        if (!product) throw new Error(`Unknown SKU "${sku}".`);
-        return { productId: product.id, qty };
-      });
-
-      await createBundle.mutateAsync({
-        code: values.code,
-        nameEn: values.nameEn,
-        nameAr: values.nameAr || null,
-        bundlePrice: Number(values.price || 0),
-        lines,
-      });
-    },
+    // "create-bundle" is handled by BundleFormDialog now (see ModulePage.tsx) — it calls
+    // useCreateBundle/useUpdateBundle directly instead of going through this generic flow map.
 
     "add-supplier": async (values) => {
       if (!values.code || !values.nameEn)
@@ -424,7 +398,10 @@ export function useFlowSubmitHandlers(): Record<
       // Each row can target several branches at once (the multi-select branch pills) — that
       // fans out into one PO line per branch, all carrying the same qty/cost/batch/expiry.
       const lines = rows.flatMap((row) => {
-        if (!row.sku || !row.branch || !(Number(row.qty) > 0)) throw new Error("Every PO line needs an item, at least one branch and a quantity greater than 0.");
+        if (!row.sku || !row.branch || !(Number(row.qty) > 0))
+          throw new Error(
+            "Every PO line needs an item, at least one branch and a quantity greater than 0.",
+          );
         const product = products?.find((p) => p.sku === row.sku);
         if (!product) throw new Error(`Unknown SKU "${row.sku}".`);
         const branchNames = row.branch
@@ -478,7 +455,8 @@ export function useFlowSubmitHandlers(): Record<
         : undefined;
 
       const lines = rows.map((row) => {
-        if (!row.sku || !(Number(row.qty) > 0)) throw new Error("Every return line needs an item and a quantity greater than 0.");
+        if (!row.sku || !(Number(row.qty) > 0))
+          throw new Error("Every return line needs an item and a quantity greater than 0.");
         const product = products?.find((p) => p.sku === row.sku);
         if (!product) throw new Error(`Unknown SKU "${row.sku}".`);
         return {

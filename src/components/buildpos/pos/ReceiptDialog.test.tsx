@@ -12,25 +12,78 @@ import { ReceiptDialog } from "./ReceiptDialog";
 // loyaltyPointsEarned/loyaltyPointsBalance/loyaltyNextTierThreshold fields on the checkout response.
 function baseOrder(overrides: Partial<OrderDto> = {}): OrderDto {
   return {
-    id: 1, orderNo: "ORD-2026-0001", branchId: 1, branchName: "Main Branch", terminalId: null,
-    cashierName: "Cashier", customerId: 1, customerName: "Ahmed Al-Rashid", type: "Retail", status: "Completed",
-    paymentStatus: "Paid", subTotal: 100, discountTotal: 0, vatTotal: 0, feesTotal: 0, grandTotal: 100,
+    id: 1,
+    orderNo: "ORD-2026-0001",
+    branchId: 1,
+    branchName: "Main Branch",
+    terminalId: null,
+    cashierName: "Cashier",
+    customerId: 1,
+    customerName: "Ahmed Al-Rashid",
+    type: "Retail",
+    status: "Completed",
+    paymentStatus: "Paid",
+    subTotal: 100,
+    discountTotal: 0,
+    bundleDiscountTotal: 0,
+    vatTotal: 0,
+    feesTotal: 0,
+    grandTotal: 100,
     createdAt: new Date(0).toISOString(),
-    lines: [{ id: 1, productId: 1, sku: "CEM-001", productName: "Portland Cement 50kg", qty: 1, unitPrice: 100, discountPct: 0, vatRate: 0, lineTotal: 100, uom: "Bag", stockQty: 1, lengthM: null, widthM: null, heightM: null, bundleId: null, bundleName: null, lineWeight: 0 }],
-    payments: [{ method: "Cash", amount: 100, referenceNumber: null, status: "Completed", createdAt: new Date(0).toISOString() }],
+    lines: [
+      {
+        id: 1,
+        productId: 1,
+        sku: "CEM-001",
+        productName: "Portland Cement 50kg",
+        qty: 1,
+        unitPrice: 100,
+        discountPct: 0,
+        vatRate: 0,
+        lineTotal: 100,
+        uom: "Bag",
+        stockQty: 1,
+        lengthM: null,
+        widthM: null,
+        heightM: null,
+        bundleId: null,
+        bundleName: null,
+        lineWeight: 0,
+      },
+    ],
+    payments: [
+      {
+        method: "Cash",
+        amount: 100,
+        referenceNumber: null,
+        status: "Completed",
+        createdAt: new Date(0).toISOString(),
+      },
+    ],
     fees: [],
-    loyaltyPointsEarned: null, loyaltyPointsBalance: null, loyaltyNextTierThreshold: null, loyaltyPointsRedeemed: null,
-    deliveryOrderId: null, deliveryOrderNo: null, deliveryStage: null,
+    loyaltyPointsEarned: null,
+    loyaltyPointsBalance: null,
+    loyaltyNextTierThreshold: null,
+    loyaltyPointsRedeemed: null,
+    deliveryOrderId: null,
+    deliveryOrderNo: null,
+    deliveryStage: null,
     ...overrides,
   };
 }
 
 function renderReceipt(order: OrderDto) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   server.use(
-    http.get(`${API_BASE}/api/zatca/invoices/by-order/:orderId`, () => HttpResponse.json(null, { status: 404 })),
+    http.get(`${API_BASE}/api/zatca/invoices/by-order/:orderId`, () =>
+      HttpResponse.json(null, { status: 404 }),
+    ),
     http.get(`${API_BASE}/api/network/devices`, () => HttpResponse.json([])),
-    http.post(`${API_BASE}/api/print/receipt`, () => HttpResponse.json({ id: 1, escPosBase64: "" })),
+    http.post(`${API_BASE}/api/print/receipt`, () =>
+      HttpResponse.json({ id: 1, escPosBase64: "" }),
+    ),
   );
   render(
     <QueryClientProvider client={queryClient}>
@@ -47,7 +100,13 @@ describe("ReceiptDialog loyalty section", () => {
   });
 
   it("shows points earned, balance, and next tier threshold for a loyalty customer", () => {
-    renderReceipt(baseOrder({ loyaltyPointsEarned: 10, loyaltyPointsBalance: 505, loyaltyNextTierThreshold: 2000 }));
+    renderReceipt(
+      baseOrder({
+        loyaltyPointsEarned: 10,
+        loyaltyPointsBalance: 505,
+        loyaltyNextTierThreshold: 2000,
+      }),
+    );
 
     expect(screen.getByText("Points earned")).toBeInTheDocument();
     expect(screen.getByText("+10")).toBeInTheDocument();
@@ -56,7 +115,13 @@ describe("ReceiptDialog loyalty section", () => {
   });
 
   it("omits the next-tier line once the customer is already at the top tier", () => {
-    renderReceipt(baseOrder({ loyaltyPointsEarned: 10, loyaltyPointsBalance: 6000, loyaltyNextTierThreshold: null }));
+    renderReceipt(
+      baseOrder({
+        loyaltyPointsEarned: 10,
+        loyaltyPointsBalance: 6000,
+        loyaltyNextTierThreshold: null,
+      }),
+    );
 
     expect(screen.getByText("Points balance")).toBeInTheDocument();
     expect(screen.queryByText("Next tier at")).not.toBeInTheDocument();

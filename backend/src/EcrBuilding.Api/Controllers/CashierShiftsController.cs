@@ -198,6 +198,7 @@ public class PricingRulesController(AppDbContext db, IAuditService audit, IPermi
             Action = request.Action, Priority = request.Priority, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil,
             Code = request.Code?.ToUpperInvariant(), DiscountType = Enum.Parse<RuleDiscountType>(request.DiscountType), Value = request.Value,
             MinQuantity = request.MinQuantity, Sku = request.Sku?.ToUpperInvariant(),
+            PalletQty = request.PalletQty, BuyQty = request.BuyQty, FreeQty = request.FreeQty, MinCartTotal = request.MinCartTotal,
             // Every rule created through the UI needs a manager sign-off before it can discount a
             // sale or be redeemed as a coupon — seeded demo rules bypass this via the entity default.
             Status = PricingRuleStatus.PendingApproval,
@@ -257,6 +258,7 @@ public class PricingRulesController(AppDbContext db, IAuditService audit, IPermi
         rule.ValidFrom = request.ValidFrom; rule.ValidUntil = request.ValidUntil;
         rule.Code = request.Code?.ToUpperInvariant(); rule.DiscountType = Enum.Parse<RuleDiscountType>(request.DiscountType); rule.Value = request.Value;
         rule.MinQuantity = request.MinQuantity; rule.Sku = request.Sku?.ToUpperInvariant();
+        rule.PalletQty = request.PalletQty; rule.BuyQty = request.BuyQty; rule.FreeQty = request.FreeQty; rule.MinCartTotal = request.MinCartTotal;
         // Editing a live rule's terms (discount %, threshold, code…) re-opens the same manager
         // sign-off the rule needed to go live in the first place — otherwise "Edit" would be a
         // silent side door around the self/cross-approval control on the status endpoint above.
@@ -285,7 +287,8 @@ public class PricingRulesController(AppDbContext db, IAuditService audit, IPermi
 
     private static PricingRuleDto Map(PricingRule r) => new(
         r.Id, r.Name, r.Type, r.Scope, r.Condition, r.Action, r.Priority, r.ValidUntil, r.Status.ToString(), r.Code, r.DiscountType.ToString(), r.Value,
-        r.BranchId, r.Branch?.NameEn, r.MinQuantity, r.Sku, r.ValidFrom);
+        r.BranchId, r.Branch?.NameEn, r.MinQuantity, r.Sku, r.ValidFrom,
+        r.PalletQty, r.BuyQty, r.FreeQty, r.MinCartTotal);
 }
 
 // Separate controller (no Finance-module gate) — any authenticated POS role needs to redeem a

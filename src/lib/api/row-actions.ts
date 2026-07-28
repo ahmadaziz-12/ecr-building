@@ -1,7 +1,12 @@
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import type { Field } from "@/lib/buildpos/flows";
-import { formatUomConversions, parseUomConversions, formatCutToSizeMode, parseCutToSizeMode } from "@/lib/buildpos/uom";
+import {
+  formatUomConversions,
+  parseUomConversions,
+  formatCutToSizeMode,
+  parseCutToSizeMode,
+} from "@/lib/buildpos/uom";
 import { formatAttributes, parseAttributes } from "@/lib/buildpos/attributes";
 import {
   resolveParentCategory,
@@ -14,7 +19,7 @@ import {
   useUpdateCategory,
   useUpdateProduct,
 } from "./catalog";
-import { useBundles, useSetBundleStatus } from "./bundles";
+import { useBundles, useSetBundleStatus, type BundleDto } from "./bundles";
 import {
   useApproveTransfer,
   useBranchStockBatches,
@@ -158,6 +163,7 @@ export function useRowActions(
   // net difference between the return's credit and the replacement item(s)), not the generic
   // text-field "Approve Return" flow every other return type uses.
   openApproveExchange?: (ret: ReturnDto) => void,
+  openBundleEditor?: (bundle: BundleDto) => void,
 ): (id: number | undefined, row: (string | number)[], statusText: string) => RowAction[] {
   const navigate = useNavigate();
 
@@ -324,7 +330,8 @@ export function useRowActions(
             expiryDate?: string;
           }[];
           const lines = rows.map((row) => {
-            if (!row.sku || !(Number(row.qty) > 0)) throw new Error("Every line needs an item and a quantity greater than 0.");
+            if (!row.sku || !(Number(row.qty) > 0))
+              throw new Error("Every line needs an item and a quantity greater than 0.");
             const p = products?.find((pr) => pr.sku.toLowerCase() === row.sku!.toLowerCase());
             if (!p) throw new Error(`Unknown SKU "${row.sku}".`);
             return {
@@ -376,8 +383,10 @@ export function useRowActions(
                   returnable: product.returnable ? "on" : "",
                   cost: String(product.costPrice),
                   price: String(product.sellingPrice),
-                  contractorPrice: product.contractorPrice != null ? String(product.contractorPrice) : "",
-                  wholesalePrice: product.wholesalePrice != null ? String(product.wholesalePrice) : "",
+                  contractorPrice:
+                    product.contractorPrice != null ? String(product.contractorPrice) : "",
+                  wholesalePrice:
+                    product.wholesalePrice != null ? String(product.wholesalePrice) : "",
                   projectPrice: product.projectPrice != null ? String(product.projectPrice) : "",
                   vat:
                     product.vatRate === 0
@@ -412,7 +421,9 @@ export function useRowActions(
                       brand: values.brand || null,
                       costPrice: Number(values.cost || 0),
                       sellingPrice: Number(values.price || 0),
-                      contractorPrice: values.contractorPrice ? Number(values.contractorPrice) : null,
+                      contractorPrice: values.contractorPrice
+                        ? Number(values.contractorPrice)
+                        : null,
                       wholesalePrice: values.wholesalePrice ? Number(values.wholesalePrice) : null,
                       projectPrice: values.projectPrice ? Number(values.projectPrice) : null,
                       vatRate,
@@ -825,27 +836,74 @@ export function useRowActions(
         return actions;
       }
 
+      // Phase 4 (BRD §5.7): Draft -> PendingApproval -> Active <-> Inactive, Archived terminal from
+      // any of the first four — mirrors PricingRulesController's PendingApproval/Active/Expired/
+      // Inactive row actions above, one status tier richer for the extra Draft/Archived states.
       case "/stock/bundles": {
         const bundle = bundles?.find((b) => b.id === id);
         if (!bundle) return [];
-        return [
-          bundle.status === "Active"
-            ? {
-                label: "Deactivate",
-                onClick: guarded(
-                  () => setBundleStatus.mutateAsync({ id: bundle.id, status: "Inactive" }),
-                  "Bundle deactivated",
-                ),
-                tone: "critical",
-              }
-            : {
-                label: "Activate",
-                onClick: guarded(
-                  () => setBundleStatus.mutateAsync({ id: bundle.id, status: "Active" }),
-                  "Bundle activated",
-                ),
-              },
-        ];
+        const actions: RowAction[] = [];
+        if (bundle.status !== "Archived") {
+          actions.push({ label: "Edit", onClick: () => openBundleEditor?.(bundle) });
+        }
+        if (bundle.status === "Draft") {
+          actions.push({
+            label: "Submit for Approval",
+            onClick: guarded(
+              () => setBundleStatus.mutateAsync({ id: bundle.id, status: "PendingApproval" }),
+              "Submitted for approval",
+            ),
+          });
+        }
+        if (bundle.status === "PendingApproval") {
+          actions.push(
+            {
+              label: "Approve",
+              onClick: guarded(
+                () => setBundleStatus.mutateAsync({ id: bundle.id, status: "Active" }),
+                "Bundle approved",
+              ),
+            },
+            {
+              label: "Send back to Draft",
+              onClick: guarded(
+                () => setBundleStatus.mutateAsync({ id: bundle.id, status: "Draft" }),
+                "Sent back to Draft",
+              ),
+            },
+          );
+        }
+        if (bundle.status === "Active") {
+          actions.push({
+            label: "Disable",
+            onClick: guarded(
+              () => setBundleStatus.mutateAsync({ id: bundle.id, status: "Inactive" }),
+              "Bundle disabled",
+            ),
+            tone: "critical",
+          });
+        }
+        if (bundle.status === "Inactive") {
+          actions.push({
+            label: "Re-enable",
+            onClick: guarded(
+              () => setBundleStatus.mutateAsync({ id: bundle.id, status: "Active" }),
+              "Bundle re-enabled",
+            ),
+          });
+        }
+        if (bundle.status !== "Archived") {
+          actions.push({
+            label: "Archive",
+            onClick: confirmed(
+              `Archive bundle "${bundle.nameEn}"? It'll no longer be editable or sellable.`,
+              () => setBundleStatus.mutateAsync({ id: bundle.id, status: "Archived" }),
+              "Bundle archived",
+            ),
+            tone: "critical",
+          });
+        }
+        return actions;
       }
 
       case "/suppliers/suppliers": {

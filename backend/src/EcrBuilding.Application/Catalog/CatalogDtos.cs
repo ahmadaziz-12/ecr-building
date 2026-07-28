@@ -23,13 +23,21 @@ public record UpsertProductRequest(string Sku, string? Barcode, string NameEn, s
 
 public record SetStatusRequest(string Status);
 
-public record BundleLineDto(int ProductId, string Sku, string ProductName, decimal Qty, decimal UnitCost, decimal SellingPrice = 0, decimal VatRate = 0);
+// Barcode is nullable/optional (trailing) so Bundle Search (BRD §5.6) can match a scanned barcode
+// against a bundle's constituents, not just its own Code/Name.
+public record BundleLineDto(int ProductId, string Sku, string ProductName, decimal Qty, decimal UnitCost, decimal SellingPrice = 0, decimal VatRate = 0, string? Barcode = null);
 public record BundleDto(int Id, string Code, string NameEn, string? NameAr, decimal BundlePrice, decimal ComponentCost, string Status, IReadOnlyList<BundleLineDto> Lines,
     // Module 8 (BRD §5): bundle type + what the constituents would cost individually — the POS card
     // shows "individual total vs bundle price" and the savings from these.
-    string Type = "ProductSystem", decimal IndividualTotal = 0);
+    string Type = "ProductSystem", decimal IndividualTotal = 0,
+    // Phase 4 (BRD §5.7 Business Controls): Status above is the raw persisted lifecycle value;
+    // EffectiveStatus is what a cashier/manager should actually read (Scheduled/Active/Expired
+    // computed from StartDate/EndDate — see BundleLifecycle.ResolveEffectiveStatus).
+    string EffectiveStatus = "Draft", DateTime? StartDate = null, DateTime? EndDate = null,
+    string[]? EligibleCustomerTypes = null, int[]? EligibleBranchIds = null, bool StackableDiscount = true);
 public record BundleLineInput(int ProductId, decimal Qty);
-public record UpsertBundleRequest(string Code, string NameEn, string? NameAr, decimal BundlePrice, List<BundleLineInput> Lines, string Type = "ProductSystem");
-
-// BRD §5.4 Bundle Sales Report row.
-public record BundleSalesReportRowDto(int BundleId, string Code, string NameEn, string Type, decimal UnitsSold, decimal RevenueAtBundlePrice, decimal RevenueAtIndividualPrice, decimal DiscountGiven);
+public record UpsertBundleRequest(string Code, string NameEn, string? NameAr, decimal BundlePrice, List<BundleLineInput> Lines, string Type = "ProductSystem",
+    // Phase 4: create as Draft (default) or submit straight for approval; scheduling/eligibility/
+    // stacking are all optional — omitted means "no restriction."
+    bool Publish = false, DateTime? StartDate = null, DateTime? EndDate = null,
+    string[]? EligibleCustomerTypes = null, int[]? EligibleBranchIds = null, bool StackableDiscount = true);

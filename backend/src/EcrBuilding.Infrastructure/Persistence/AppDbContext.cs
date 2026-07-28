@@ -38,6 +38,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ProductAttribute> ProductAttributes => Set<ProductAttribute>();
     public DbSet<ProductBundle> ProductBundles => Set<ProductBundle>();
     public DbSet<BundleLine> BundleLines => Set<BundleLine>();
+    public DbSet<BundleSuggestionEvent> BundleSuggestionEvents => Set<BundleSuggestionEvent>();
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
     public DbSet<WarehouseBin> WarehouseBins => Set<WarehouseBin>();
     public DbSet<StockLevel> StockLevels => Set<StockLevel>();
@@ -242,6 +243,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             b.HasOne(x => x.Bundle).WithMany(x => x.Lines).HasForeignKey(x => x.BundleId);
             b.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId);
+        });
+
+        modelBuilder.Entity<BundleSuggestionEvent>(b =>
+        {
+            b.HasOne(x => x.Bundle).WithMany().HasForeignKey(x => x.BundleId);
+            // The Suggestion Report groups by BundleId + EventType within a date window — this is
+            // the query shape the index needs to actually support (unlike AuditLogs, which has none).
+            b.HasIndex(x => new { x.BundleId, x.EventType, x.CreatedAt });
         });
 
         modelBuilder.Entity<Warehouse>(b =>

@@ -111,6 +111,23 @@ public enum BundleType
     Promotional = 5,
 }
 
+// Phase 4 (BRD §5.7 Business Controls): Draft -> PendingApproval -> Active -> Inactive, with a
+// terminal Archived reachable from any non-Active state. "Approved but not live yet" and "past its
+// end date" are deliberately NOT separate persisted members — same convention as PricingRuleStatus,
+// which never rewrites a row to "Expired" either: Scheduled/Active/Expired is computed at read time
+// from Status == Active plus StartDate/EndDate (see BundleLifecycle.ResolveEffectiveStatus). Legacy
+// data note: the two pre-Phase-4 values ("Active"/"Inactive") already parse as these exact member
+// names via LegacyTolerantEnumConverter, so no EnumLegacyAliases entry or data migration is needed
+// for existing rows — they simply read as already-approved/disabled bundles.
+public enum BundleStatus
+{
+    Draft,
+    PendingApproval,
+    Active,
+    Inactive,
+    Archived,
+}
+
 public class ProductBundle : BaseEntity
 {
     public string Code { get; set; } = string.Empty;
@@ -118,7 +135,19 @@ public class ProductBundle : BaseEntity
     public string? NameAr { get; set; }
     public BundleType Type { get; set; } = BundleType.ProductSystem;
     public decimal BundlePrice { get; set; }
-    public EntityStatus Status { get; set; } = EntityStatus.Active;
+    public BundleStatus Status { get; set; } = BundleStatus.Draft;
+    public int? CreatedByUserId { get; set; }
+    // Scheduling/expiry (BRD §5.7): null = no bound on that side.
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+    // Customer-group / branch eligibility (BRD §5.7): JSON int/string arrays, same convention as
+    // Product.SellUomsJson — "[]" (empty array), not null, means "no restriction, everyone/every
+    // branch eligible" so callers never need a separate null-check path.
+    public string EligibleCustomerTypesJson { get; set; } = "[]";
+    public string EligibleBranchIdsJson { get; set; } = "[]";
+    // BRD §5.7 "Allow Stack Discounts": when false, an order containing this bundle gets no
+    // additional coupon/manual/Trade-Value discount on top of it (OrdersController.Checkout).
+    public bool StackableDiscount { get; set; } = true;
 
     public ICollection<BundleLine> Lines { get; set; } = new List<BundleLine>();
 }

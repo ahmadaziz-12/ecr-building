@@ -2,7 +2,10 @@ using EcrBuilding.Domain.Common;
 
 namespace EcrBuilding.Domain.Entities;
 
-public enum RuleDiscountType { Percentage, Fixed }
+// FixedUnitPrice (Phase 2): Value is an override price PER UNIT for the pallet-tier portion of a
+// Quantity/PalletQty rule — distinct from Fixed ("this many SAR off"), so pallet mode's Value can
+// never be misread as a subtractive discount amount.
+public enum RuleDiscountType { Percentage, Fixed, FixedUnitPrice }
 
 // Trade/quantity/fee rules go live immediately (Active); coupons and promos start PendingApproval
 // so a manager signs off before they're redeemable — mirrors the manual-discount approval pattern
@@ -40,4 +43,15 @@ public class PricingRule : BaseEntity
     // entity's Active default anyway, so there's nothing to self-approve. Used to block the creator
     // from activating their own PendingApproval rule, same rule ApprovalsController enforces.
     public int? CreatedByUserId { get; set; }
+
+    // Phase 2 (BRD §5.1) — see PricingEngine (Domain/Common) for how each is applied.
+    // Type="Quantity" + PalletQty set: repeating-tier pallet pricing instead of a single %
+    // threshold — Value becomes the DiscountType=FixedUnitPrice override price per unit.
+    public decimal? PalletQty { get; set; }
+    // Type="Buy X Get Y": every (BuyQty + FreeQty) units bought yields FreeQty free units.
+    public decimal? BuyQty { get; set; }
+    public decimal? FreeQty { get; set; }
+    // Type="Trade Value": cart-subtotal threshold (SAR) — Value is the % off the whole order once
+    // a Contractor customer's cart reaches this, distinct from the always-on flat Trade Tier %.
+    public decimal? MinCartTotal { get; set; }
 }

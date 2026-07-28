@@ -4,6 +4,7 @@ using EcrBuilding.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EcrBuilding.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260728083120_AddPricingRuleAdvancedTypes")]
+    partial class AddPricingRuleAdvancedTypes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -480,38 +483,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProductId");
 
                     b.ToTable("BundleLines");
-                });
-
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.BundleSuggestionEvent", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int?>("BranchId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("BundleId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("EventType")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
-
-                    b.Property<int?>("UserId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BundleId", "EventType", "CreatedAt");
-
-                    b.ToTable("BundleSuggestionEvents");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.CashMovement", b =>
@@ -2712,32 +2683,12 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<int?>("CreatedByUserId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("EligibleBranchIdsJson")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<string>("EligibleCustomerTypesJson")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<DateTime?>("EndDate")
-                        .HasColumnType("datetime(6)");
-
                     b.Property<string>("NameAr")
                         .HasColumnType("longtext");
 
                     b.Property<string>("NameEn")
                         .IsRequired()
                         .HasColumnType("longtext");
-
-                    b.Property<bool>("StackableDiscount")
-                        .HasColumnType("tinyint(1)");
-
-                    b.Property<DateTime?>("StartDate")
-                        .HasColumnType("datetime(6)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -5035,17 +4986,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Bundle");
 
                     b.Navigation("Product");
-                });
-
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.BundleSuggestionEvent", b =>
-                {
-                    b.HasOne("EcrBuilding.Domain.Entities.ProductBundle", "Bundle")
-                        .WithMany()
-                        .HasForeignKey("BundleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Bundle");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.CashMovement", b =>

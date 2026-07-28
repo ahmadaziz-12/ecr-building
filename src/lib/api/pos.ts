@@ -83,6 +83,9 @@ export type OrderDto = {
   paymentStatus: string;
   subTotal: number;
   discountTotal: number;
+  // Portion of discountTotal from bundle constituent pricing (individual price minus bundle
+  // price) — broken out so the receipt can show it as its own line (BRD §5.2).
+  bundleDiscountTotal: number;
   vatTotal: number;
   feesTotal: number;
   grandTotal: number;
@@ -141,6 +144,14 @@ export type PricingRuleDto = {
   sku: string | null;
   // Type="Promotional" only (BRD §7 CR-040): the rule's start date — null = active immediately.
   validFrom: string | null;
+  // Phase 2 (BRD §5.1) — see src/lib/buildpos/pricing.ts for how each is applied.
+  // Type="Quantity" + palletQty set: repeating-tier pallet pricing instead of a single % threshold.
+  palletQty: number | null;
+  // Type="Buy X Get Y": every (buyQty + freeQty) units bought yields freeQty free units.
+  buyQty: number | null;
+  freeQty: number | null;
+  // Type="Trade Value": cart-subtotal threshold (SAR) — value is the % off the whole order.
+  minCartTotal: number | null;
 };
 
 export const useCustomers = (enabled = true, filters?: { type?: string; search?: string }) =>
@@ -188,10 +199,19 @@ export const usePricingRules = (enabled = true) =>
 // ladder (thresholds/multipliers/discounts/free-delivery) — all Settings-driven, read here instead
 // of hardcoding the BRD's own default numbers.
 export type LoyaltyConfigDto = {
-  pointsPerSarEarned: number; pointsPerSarRedeemed: number; minRedeemPoints: number; maxRedeemPctOfTotal: number;
-  silverThreshold: number; goldThreshold: number; platinumThreshold: number;
-  silverMultiplier: number; goldMultiplier: number; platinumMultiplier: number;
-  silverDiscountPct: number; goldDiscountPct: number; platinumDiscountPct: number;
+  pointsPerSarEarned: number;
+  pointsPerSarRedeemed: number;
+  minRedeemPoints: number;
+  maxRedeemPctOfTotal: number;
+  silverThreshold: number;
+  goldThreshold: number;
+  platinumThreshold: number;
+  silverMultiplier: number;
+  goldMultiplier: number;
+  platinumMultiplier: number;
+  silverDiscountPct: number;
+  goldDiscountPct: number;
+  platinumDiscountPct: number;
   freeDeliveryMinOrderSar: number;
 };
 export const useLoyaltyConfig = (enabled = true) =>
@@ -218,6 +238,10 @@ export type UpsertPricingRuleRequest = {
   minQuantity?: number | null;
   sku?: string | null;
   validFrom?: string | null;
+  palletQty?: number | null;
+  buyQty?: number | null;
+  freeQty?: number | null;
+  minCartTotal?: number | null;
 };
 export function useCreatePricingRule() {
   const queryClient = useQueryClient();
@@ -261,8 +285,16 @@ export function useDeletePricingRule() {
 // list price entirely (no discount stacks on top), gated by Role.CanOverrideItemPrice or a
 // PriceOverride approval (see CheckoutRequest.priceOverrideApprovalRequestId), distinct from a discount.
 export type CartLine = {
-  productId: number; qty: number; uom?: string; lengthM?: number; widthM?: number; heightM?: number; requiresDelivery?: boolean;
-  notes?: string | null; manualDiscountPct?: number | null; manualUnitPrice?: number | null;
+  productId: number;
+  qty: number;
+  uom?: string;
+  lengthM?: number;
+  widthM?: number;
+  heightM?: number;
+  requiresDelivery?: boolean;
+  notes?: string | null;
+  manualDiscountPct?: number | null;
+  manualUnitPrice?: number | null;
 };
 export type PaymentInput = { method: string; amount: number };
 export type ManualDiscountInput = { type: "Percentage" | "Fixed"; value: number };
@@ -270,10 +302,22 @@ export type CustomFeeInput = { label: string; amount: number };
 // BRD §3.5: one shared address/date/driver-vehicle-preference for every delivery-flagged line in
 // the cart. zoneId (optional): the delivery fee auto-calculates from the zone's configured fee.
 export type DeliveryDetailsInput = {
-  addressType: string; contactName: string; contactMobile: string; city: string;
-  district?: string | null; street?: string | null; landmark?: string | null; instructions?: string | null;
-  promisedDate: string; promisedTime: string; timeSlot?: string | null; priority?: string | null;
-  driverId?: number | null; vehicleId?: number | null; zoneId?: number | null; weightTons?: number | null;
+  addressType: string;
+  contactName: string;
+  contactMobile: string;
+  city: string;
+  district?: string | null;
+  street?: string | null;
+  landmark?: string | null;
+  instructions?: string | null;
+  promisedDate: string;
+  promisedTime: string;
+  timeSlot?: string | null;
+  priority?: string | null;
+  driverId?: number | null;
+  vehicleId?: number | null;
+  zoneId?: number | null;
+  weightTons?: number | null;
 };
 export type CheckoutRequest = {
   branchId: number;
@@ -287,8 +331,9 @@ export type CheckoutRequest = {
   customFees?: CustomFeeInput[];
   notes?: string;
   // BRD §5.2: bundles in the cart — the server expands each into constituent lines at proportional
-  // bundle prices with per-item VAT.
-  bundles?: { bundleId: number; qty: number }[];
+  // bundle prices with per-item VAT. supervisorEmail/Pin (Phase 4, BRD §5.7) are only read when the
+  // bundle failed a schedule/branch/customer-group eligibility check client-side.
+  bundles?: { bundleId: number; qty: number; supervisorEmail?: string; supervisorPin?: string }[];
   // Module 11 (BRD §4.2): B2B purchase-order reference + project code for the tax invoice.
   poReference?: string | null;
   projectCode?: string | null;
@@ -412,7 +457,13 @@ export const useCustomerStatement = (customerId: number | null) =>
 // Reconstructed from GL postings to Accounts Receivable (1100) — every AccountCredit sale, B2B
 // return credit, or RecordPayment settlement shows up here, in the same reference-based way
 // SuppliersController.Ledger already works for suppliers (see useSupplierLedger).
-export type CustomerLedgerLineDto = { date: string; reference: string; description: string; debit: number; credit: number };
+export type CustomerLedgerLineDto = {
+  date: string;
+  reference: string;
+  description: string;
+  debit: number;
+  credit: number;
+};
 export const useCustomerLedger = (id: number | undefined) =>
   useQuery({
     queryKey: ["pos", "customers", id, "ledger"],
@@ -420,7 +471,12 @@ export const useCustomerLedger = (id: number | undefined) =>
     enabled: id !== undefined,
   });
 
-export type RecordCustomerPaymentInput = { amount: number; method: string; referenceNo?: string | null; notes?: string | null };
+export type RecordCustomerPaymentInput = {
+  amount: number;
+  method: string;
+  referenceNo?: string | null;
+  notes?: string | null;
+};
 export function useRecordCustomerPayment() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -440,7 +496,15 @@ export function useRecordCustomerPayment() {
 export function usePayOrder() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, payments, terminalId }: { id: number; payments: PaymentInput[]; terminalId?: number | null }) =>
+    mutationFn: ({
+      id,
+      payments,
+      terminalId,
+    }: {
+      id: number;
+      payments: PaymentInput[];
+      terminalId?: number | null;
+    }) =>
       apiPut<OrderDto>(`/api/pos/orders/${id}/pay`, { payments, terminalId: terminalId ?? null }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pos", "orders"] });
@@ -454,10 +518,25 @@ export function usePayOrder() {
 export function useVoidOrder() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, reason, reasonCode, authorizerEmail, authorizerPin }: {
-      id: number; reason: string; reasonCode: string; authorizerEmail?: string; authorizerPin?: string;
+    mutationFn: ({
+      id,
+      reason,
+      reasonCode,
+      authorizerEmail,
+      authorizerPin,
+    }: {
+      id: number;
+      reason: string;
+      reasonCode: string;
+      authorizerEmail?: string;
+      authorizerPin?: string;
     }) =>
-      apiPut<OrderDto>(`/api/pos/orders/${id}/void`, { reason, reasonCode, authorizerEmail, authorizerPin }),
+      apiPut<OrderDto>(`/api/pos/orders/${id}/void`, {
+        reason,
+        reasonCode,
+        authorizerEmail,
+        authorizerPin,
+      }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "orders"] }),
   });
 }
@@ -466,10 +545,28 @@ export function useVoidOrder() {
 export function useVoidOrderLine() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, orderLineId, reason, reasonCode, authorizerEmail, authorizerPin }: {
-      id: number; orderLineId: number; reason: string; reasonCode: string; authorizerEmail?: string; authorizerPin?: string;
+    mutationFn: ({
+      id,
+      orderLineId,
+      reason,
+      reasonCode,
+      authorizerEmail,
+      authorizerPin,
+    }: {
+      id: number;
+      orderLineId: number;
+      reason: string;
+      reasonCode: string;
+      authorizerEmail?: string;
+      authorizerPin?: string;
     }) =>
-      apiPut<OrderDto>(`/api/pos/orders/${id}/void-line`, { orderLineId, reason, reasonCode, authorizerEmail, authorizerPin }),
+      apiPut<OrderDto>(`/api/pos/orders/${id}/void-line`, {
+        orderLineId,
+        reason,
+        reasonCode,
+        authorizerEmail,
+        authorizerPin,
+      }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "orders"] }),
   });
 }
@@ -584,7 +681,14 @@ export function useCashMovement() {
 
 // Itemized trail behind CashierShiftDto's aggregate cashIn/cashOut — lets a till reconciliation
 // drill into exactly which events made up that total instead of only seeing the sum.
-export type CashMovementDto = { id: number; direction: "In" | "Out"; amount: number; reason: string; createdAt: string; createdByName: string | null };
+export type CashMovementDto = {
+  id: number;
+  direction: "In" | "Out";
+  amount: number;
+  reason: string;
+  createdAt: string;
+  createdByName: string | null;
+};
 export const useCashMovements = (shiftId: number | undefined) =>
   useQuery({
     queryKey: ["pos", "cashier-shifts", shiftId, "movements"],

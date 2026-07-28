@@ -36,7 +36,7 @@ public record OrderPaymentDto(string Method, decimal Amount, string? ReferenceNu
 public record OrderFeeDto(string Label, decimal Amount);
 public record OrderDto(
     int Id, string OrderNo, int BranchId, string BranchName, int? TerminalId, string CashierName, int? CustomerId, string CustomerName,
-    string Type, string Status, string PaymentStatus, decimal SubTotal, decimal DiscountTotal, decimal VatTotal, decimal FeesTotal,
+    string Type, string Status, string PaymentStatus, decimal SubTotal, decimal DiscountTotal, decimal BundleDiscountTotal, decimal VatTotal, decimal FeesTotal,
     decimal GrandTotal, DateTime CreatedAt, IReadOnlyList<OrderLineDto> Lines, IReadOnlyList<OrderPaymentDto> Payments, IReadOnlyList<OrderFeeDto> Fees,
     // Populated only on the checkout response for a loyalty-enrolled customer (BRD §4.3.1: the receipt
     // must show points earned this transaction, updated balance, and next tier threshold). Null on
@@ -73,7 +73,9 @@ public record ManualDiscountInput(string Type, decimal Value); // Type: "Percent
 public record CustomFeeInput(string Label, decimal Amount);
 // BRD §5.2: a bundle in the cart — server expands it into constituent order lines at proportional
 // bundle prices, so VAT stays per-item at each constituent's own rate (BRD §5.4, never blended).
-public record BundleCartInput(int BundleId, decimal Qty);
+// Phase 4 (BRD §5.7): SupervisorEmail/Pin are only read when the bundle fails a schedule/branch/
+// customer-group eligibility check — an inline override, not a request queued for later approval.
+public record BundleCartInput(int BundleId, decimal Qty, string? SupervisorEmail = null, string? SupervisorPin = null);
 public record CreateOrderRequest(
     int BranchId, int? TerminalId, int? CustomerId, string Type, List<CartLineInput> Lines, List<PaymentInput> Payments,
     string? CouponCode, ManualDiscountInput? ManualDiscount, List<CustomFeeInput>? CustomFees, string? Notes,
@@ -141,8 +143,10 @@ public record CreateApprovalRequestInput(string Type, int BranchId, decimal Amou
 
 // BranchId/BranchName null = applies company-wide.
 // ValidFrom (BRD §7 CR-040): a Promotional rule's start date — null = active immediately.
-public record PricingRuleDto(int Id, string Name, string Type, string Scope, string Condition, string Action, int Priority, DateTime? ValidUntil, string Status, string? Code, string DiscountType, decimal Value, int? BranchId = null, string? BranchName = null, decimal? MinQuantity = null, string? Sku = null, DateTime? ValidFrom = null);
-public record UpsertPricingRuleRequest(string Name, string Type, string Scope, string Condition, string Action, int Priority, DateTime? ValidUntil, string? Code, string DiscountType, decimal Value, int? BranchId = null, decimal? MinQuantity = null, string? Sku = null, DateTime? ValidFrom = null);
+public record PricingRuleDto(int Id, string Name, string Type, string Scope, string Condition, string Action, int Priority, DateTime? ValidUntil, string Status, string? Code, string DiscountType, decimal Value, int? BranchId = null, string? BranchName = null, decimal? MinQuantity = null, string? Sku = null, DateTime? ValidFrom = null,
+    decimal? PalletQty = null, decimal? BuyQty = null, decimal? FreeQty = null, decimal? MinCartTotal = null);
+public record UpsertPricingRuleRequest(string Name, string Type, string Scope, string Condition, string Action, int Priority, DateTime? ValidUntil, string? Code, string DiscountType, decimal Value, int? BranchId = null, decimal? MinQuantity = null, string? Sku = null, DateTime? ValidFrom = null,
+    decimal? PalletQty = null, decimal? BuyQty = null, decimal? FreeQty = null, decimal? MinCartTotal = null);
 public record ValidateCouponResponse(bool Valid, string? Code, string? Name, string DiscountType, decimal Value, string? Reason);
 
 public record ParkedLineDto(int ProductId, string Sku, string ProductName, decimal Qty, decimal UnitPrice);

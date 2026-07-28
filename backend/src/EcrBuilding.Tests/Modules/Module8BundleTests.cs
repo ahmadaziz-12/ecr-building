@@ -47,12 +47,18 @@ public class Module8BundleTests : IAsyncLifetime
         var bundle = new ProductBundle
         {
             Code = "BND-WPK", NameEn = "Waterproof Kit", Type = BundleType.ProductSystem, BundlePrice = 990m,
+            // Phase 4 (BRD §5.7): a freshly-constructed bundle defaults to Draft, invisible to
+            // checkout — these tests are about checkout/pricing behavior, so seed it as already
+            // approved and live, same as a bundle that passed the real approval workflow.
+            Status = BundleStatus.Active,
             Lines = [new BundleLine { ProductId = cement.Id, Qty = 10m }, new BundleLine { ProductId = sealant.Id, Qty = 2m }],
         };
         db.ProductBundles.Add(bundle);
         db.SaveChanges();
 
-        var role = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders, ModuleArea.Inventory]);
+        // Phase 5: bundle-sales now lives under /insights/reports (Insights section), not
+        // /stock/bundles (Inventory) — needs ModuleArea.Insights too for the report test below.
+        var role = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos, ModuleArea.Orders, ModuleArea.Inventory, ModuleArea.Insights]);
         var user = TestDataSeeder.AddUser(db, role, "bundle-cashier@test.local", branchId: branch.Id);
         return new Ctx(db, branch, cement, sealant, bundle, _factory.CreateAuthenticatedClient(user));
     }
@@ -123,15 +129,16 @@ public class Module8BundleTests : IAsyncLifetime
         var second = await ctx.Client.PostAsJsonAsync("/api/pos/orders", BundleCheckout(ctx.Branch.Id, ctx.Bundle.Id, 2m, 2250m));
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
 
-        var report = await ctx.Client.GetAsync("/api/catalog/bundles/sales-report");
+        // Phase 5: superseded api/catalog/bundles/sales-report (dead code, no frontend call site) —
+        // the report now lives under api/insights/reports, alongside every other report.
+        var report = await ctx.Client.GetAsync("/api/insights/reports/bundle-sales");
         Assert.Equal(HttpStatusCode.OK, report.StatusCode);
         var rows = await report.Content.ReadFromJsonAsync<JsonElement>();
         var row = rows.EnumerateArray().Single(r => r.GetProperty("code").GetString() == "BND-WPK");
 
         Assert.Equal(3m, row.GetProperty("unitsSold").GetDecimal());
-        Assert.Equal(2970m, row.GetProperty("revenueAtBundlePrice").GetDecimal());   // 3 × 990 ex VAT
-        Assert.Equal(3300m, row.GetProperty("revenueAtIndividualPrice").GetDecimal()); // 3 × 1100
-        Assert.Equal(330m, row.GetProperty("discountGiven").GetDecimal());
+        Assert.Equal(2970m, row.GetProperty("revenue").GetDecimal());   // 3 × 990 ex VAT
+        Assert.Equal(330m, row.GetProperty("savings").GetDecimal());    // 3 × (1100 − 990)
         Assert.Equal("ProductSystem", row.GetProperty("type").GetString());
     }
 }
