@@ -335,11 +335,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
                           className={`flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13px] transition ${
                             isActive
                               ? "bg-white text-brand shadow-sm"
-                              : "text-white/85 hover:bg-white/5 hover:text-white"
+                              : "text-white hover:bg-white/5"
                           }`}
                         >
                           <Icon className="h-4 w-4 flex-none" />
-                          <span className="font-semibold">{m.label}</span>
+                          <span className="font-bold uppercase tracking-wide">{m.label}</span>
                         </Link>
                       </li>
                     );
@@ -352,13 +352,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 <button
                   type="button"
                   onClick={() => setOpen(isOpen ? {} : { [g.name]: true })}
-                  className="flex w-full items-center justify-between px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/40 hover:text-white/70"
+                  className="flex w-full items-center justify-between px-3 py-1.5 text-[13px] font-bold uppercase tracking-wide text-white hover:text-white"
                 >
                   {g.name}
-                  <ChevronDown className={`h-3 w-3 transition ${isOpen ? "" : "-rotate-90"}`} />
+                  <ChevronDown className={`h-3.5 w-3.5 transition ${isOpen ? "" : "-rotate-90"}`} />
                 </button>
                 {isOpen && (
-                  <ul className="mt-1 space-y-0.5">
+                  <ul className="mt-0.5 space-y-0.5 pl-1.5">
                     {g.items.map((m) => {
                       const Icon = m.icon;
                       const isActive = pathname === m.to;
@@ -366,13 +366,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
                         <li key={m.to}>
                           <Link
                             to={m.to}
-                            className={`flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13px] transition ${
+                            className={`flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-[11.5px] transition ${
                               isActive
-                                ? "bg-white text-brand shadow-sm"
-                                : "text-white/75 hover:bg-white/5 hover:text-white"
+                                ? "bg-white font-semibold text-brand shadow-sm"
+                                : "text-white/70 hover:bg-white/5 hover:text-white"
                             }`}
                           >
-                            <Icon className="h-4 w-4 flex-none" />
+                            <Icon className="h-3.5 w-3.5 flex-none" />
                             <span className="font-medium">{m.label}</span>
                           </Link>
                         </li>
