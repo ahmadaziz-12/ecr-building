@@ -500,6 +500,14 @@ export function FlowDialog({
     return merged;
   }
 
+  // A hideUnless field (e.g. Minimum Cut Charge) is only relevant once its controlling sibling
+  // (Cut-to-size mode) actually differs from the "off" value — otherwise it's confusing clutter on
+  // a product that isn't cut-to-size at all.
+  function isFieldVisible(f: Field): boolean {
+    if (!f.hideUnless) return true;
+    return (values[f.hideUnless.field] ?? "") !== f.hideUnless.notEquals;
+  }
+
   function summarizeLineItems(field: Field, raw: string): string {
     const rows = parseRows(raw);
     if (!rows.length) return "";
@@ -532,13 +540,15 @@ export function FlowDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [steps, values, fieldOverrides]);
 
-  // Setting a field's value cascades to the two kinds of field that depend on it, because both
-  // can be left holding a selection their own option list no longer offers:
+  // Setting a field's value cascades to the three kinds of field that depend on it, because all
+  // three can be left holding a value that no longer makes sense:
   //  • excludeValueOf — e.g. changing Stock Transfer's "from" to whatever "to" already held would
   //    leave "to" showing a value it now excludes.
   //  • dependsOn — e.g. Subcategory is narrowed by Category, so changing Category strands a
   //    subcategory that doesn't belong under the new parent.
-  // Both sweep every step, not just the current one, since a dependent field can live further on.
+  //  • hideUnless — e.g. switching Cut-to-size back to "Not cut-to-size" should drop whatever
+  //    Minimum Cut Charge was typed, or it'd silently resubmit on a product it no longer applies to.
+  // All three sweep every step, not just the current one, since a dependent field can live further on.
   function handleFieldChange(fieldName: string, v: string) {
     setValues((s) => {
       const next = { ...s, [fieldName]: v };
@@ -546,6 +556,7 @@ export function FlowDialog({
         for (const field of step.fields) {
           if (field.excludeValueOf === fieldName && next[field.name] === v) next[field.name] = "";
           if (field.dependsOn === fieldName) next[field.name] = "";
+          if (field.hideUnless?.field === fieldName && v === field.hideUnless.notEquals) next[field.name] = "";
         }
       }
       return next;
@@ -568,7 +579,7 @@ export function FlowDialog({
   // fields or a lineItems field carrying zero rows. This makes it real: a lineItems field counts
   // as satisfied only once at least one row has some cell filled in.
   function isFieldSatisfied(f: Field): boolean {
-    if (!f.required) return true;
+    if (!f.required || !isFieldVisible(f)) return true;
     const val = values[f.name] ?? f.default;
     if (f.type === "lineItems") {
       return parseRows(val ?? "").some((row) => Object.values(row).some((v) => v != null && String(v).trim() !== ""));
@@ -753,6 +764,7 @@ export function FlowDialog({
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   {current?.fields.map((rawF) => {
                     const f = resolveField(rawF);
+                    if (!isFieldVisible(f)) return null;
                     const locked = f.requiresCeiling ? !(user?.posCeilings[f.requiresCeiling] ?? false) : false;
                     return (
                       <div key={f.name} className={f.full ? "md:col-span-2" : ""}>
