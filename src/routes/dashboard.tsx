@@ -710,13 +710,16 @@ function OverviewPage() {
     <div className="space-y-5">
       <DashboardHeader subtitle="Monitor today's sales, transactions, stock risks, deliveries, and active shifts across your building-material branches." />
 
-      {/* Global filter bar */}
-      <div className="bp-fade sticky top-16 z-[5] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/85 backdrop-blur">
+      {/* Global filter bar — scrolls away with the page. Pinned under the header it held a large
+          band of the viewport open on every tab, and it isn't something you adjust while reading rows. */}
+      <div className="bp-fade">
         <FilterBar />
       </div>
 
+      {/* The tab strip stays pinned — it's navigation — and now sits directly under the app header
+          rather than below the filter bar that used to be stuck above it. */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <div className="sticky top-[7.5rem] z-[4] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/85 backdrop-blur">
+        <div className="sticky top-16 z-[4] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/85 backdrop-blur">
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-xl border border-black/5 bg-white p-1 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
             {tabs.map((t) => {
               const Icon = t.icon;

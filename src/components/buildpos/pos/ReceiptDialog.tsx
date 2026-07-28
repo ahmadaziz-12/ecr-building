@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
-import { Loader2, Printer, X } from "lucide-react";
+import { Loader2, Printer } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { OrderDto } from "@/lib/api/pos";
@@ -60,11 +60,9 @@ export function ReceiptDialog({ order, terminalId, onClose }: { order: OrderDto 
   return (
     <Dialog open={!!order} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-sm p-0">
-        <div className="flex items-center justify-between border-b border-black/5 px-4 py-3">
+        {/* Close button comes from DialogContent — see the note in FlowDialog. */}
+        <div className="flex items-center justify-between border-b border-black/5 py-3 ps-4 pe-12">
           <DialogTitle className="text-sm font-semibold text-foreground">Receipt · {order.orderNo}</DialogTitle>
-          <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-black/5">
-            <X className="h-4 w-4" />
-          </button>
         </div>
 
         <div className="max-h-[60vh] overflow-y-auto px-5 py-4 font-mono text-xs text-foreground">

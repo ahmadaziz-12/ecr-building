@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Barcode, Check, ChevronLeft, ChevronRight, ImageOff, Loader2, Lock, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { Barcode, Check, ChevronLeft, ChevronRight, ImageOff, Loader2, Lock, Plus, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -701,7 +701,11 @@ export function FlowDialog({
 
           {/* Content */}
           <div className="relative flex max-h-[80vh] flex-col">
-            <div className="flex items-start justify-between gap-3 border-b border-black/5 px-6 py-4">
+            {/* No close button here — DialogContent renders one at top-right for every dialog, so a
+                second one beside the heading showed as two crosses. Both went through
+                onOpenChange={handleClose}, so removing this one changes nothing but the duplicate.
+                pe-12 keeps the heading clear of the built-in button. */}
+            <div className="flex items-start justify-between gap-3 border-b border-black/5 py-4 ps-6 pe-12">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-brand">
                   Step {Math.min(step + 1, total)} of {total}
@@ -713,12 +717,6 @@ export function FlowDialog({
                   <p className="mt-0.5 text-xs text-muted-foreground">{current.desc}</p>
                 )}
               </div>
-              <button
-                onClick={() => handleClose(false)}
-                className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5 hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
-              </button>
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
