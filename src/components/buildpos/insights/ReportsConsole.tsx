@@ -11,16 +11,23 @@ import {
   EMPTY_FILTER_STATE, ReportFilterBar, toReportQuery,
   type ReportFilterState,
 } from "./ReportFilterBar";
-import { ReportTable, type ReportColumn, type ReportDetail } from "./ReportTable";
+import { ReportTable } from "./ReportTable";
+import type { ReportColumn, ReportDetail } from "./report-columns";
+import {
+  ExportMenu, KPI_PANEL_COLUMNS, runExport, type ExportRequest, type KpiRow, type ReportPanel,
+} from "./report-export";
 import { REPORTS, REPORT_BY_KEY, REPORT_GROUPS, type ReportDef, type ReportGroup, type ReportKey } from "./report-registry";
 import {
   useCashierPerformanceReport, useCategoryPerformanceReport, useContractorAgingReport,
-  useCustomerReturnsReport, useDamagedItemsReport, useDiscountUtilizationReport, useEmployeeAuditReport,
+  useCustomerReturnsReport, useDamagedItemsReport, useDeliveryReport, useDiscountUtilizationReport,
+  useDriverPerformanceReport, useEmployeeAuditReport,
   useEmployeeReport, useExpiryReport, useInventoryReport, useItemReport, useLowStockReport,
   usePaymentMethodsReport, useProfitMarginReport, usePurchaseOrderReport, useRefundMethodsReport,
   useReportFilterOptions, useRestockingFeesReport, useReturnsAnalysisReport, useSalesSummaryReport,
-  useSlowMovingReport, useStockCountVarianceReport, useSupplierPerformanceReport,
-  useSupplierReturnsReport, useTopProductsReport, useVatReport,
+  useShiftReport, useSlowMovingReport, useStockCountVarianceReport, useSupplierPerformanceReport,
+  useSupplierReturnsReport, useSurplusReturnsReport, useTopProductsReport, useVatReport,
+  type SalesByBranchRow, type SalesByCashierRow, type SalesByCategoryRow, type SalesByDayRow,
+  type SalesByMethodRow, type VatByRateRow,
 } from "@/lib/api/reports";
 
 // Module 12 (BRD §7/§11): the operational reports console. The report catalogue, its filters and
@@ -29,6 +36,72 @@ import {
 
 const money = (n: number) => `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
 const int = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+
+type Kpi = { label: string; value: string; sub?: string; tone?: "critical" | "warning" | "success" | "info" | "muted" };
+
+// ————— Aggregate-report panels —————
+//
+// The aggregate reports (Sales Summary, the VAT return, Discount Utilization) aren't a row list, so
+// their columns are declared here rather than inline on each ReportTable: the export builds its
+// sheets and PDF sections from these same definitions, which is what keeps an exported figure
+// identical to the one on screen instead of separately formatted.
+
+const c = <T,>(key: string, label: string, format?: ReportColumn<T>["format"]): ReportColumn<T> => ({ key, label, format });
+
+const PANEL_COLUMNS = {
+  byMethod: [
+    c<SalesByMethodRow>("method", "Method"), c<SalesByMethodRow>("count", "Txns", "int"),
+    c<SalesByMethodRow>("amount", "Collected", "money"), c<SalesByMethodRow>("sharePct", "Share", "pct"),
+    c<SalesByMethodRow>("refunded", "Refunded", "money"), c<SalesByMethodRow>("net", "Net", "money"),
+  ] as ReportColumn<SalesByMethodRow>[],
+  byCashier: [
+    c("cashier", "Cashier"), c("branch", "Branch"), c("orders", "Orders", "int"),
+    c("amount", "Net Takings", "money"), c("discounts", "Discounts", "money"),
+    c("avgBasket", "Avg Basket", "money"), c("voids", "Voids", "int"),
+  ] as ReportColumn<SalesByCashierRow>[],
+  byBranch: [
+    c("branch", "Branch"), c("orders", "Orders", "int"), c("gross", "Gross", "money"),
+    c("discounts", "Discounts", "money"), c("vat", "VAT", "money"), c("net", "Net", "money"),
+    c("cogs", "COGS", "money"), c("grossProfit", "Gross Profit", "money"),
+    c("marginPct", "Margin", "pct"), c("avgBasket", "Avg Basket", "money"),
+  ] as ReportColumn<SalesByBranchRow>[],
+  byCategory: [
+    c("category", "Category"), c("units", "Units", "qty"), c("revenue", "Revenue", "money"),
+    c("sharePct", "Share", "pct"), c("cogs", "COGS", "money"),
+    c("grossProfit", "Gross Profit", "money"), c("marginPct", "Margin", "pct"),
+  ] as ReportColumn<SalesByCategoryRow>[],
+  byDay: [
+    c("date", "Date", "date"), c("orders", "Orders", "int"), c("gross", "Gross", "money"),
+    c("discounts", "Discounts", "money"), c("net", "Net Takings", "money"),
+    c("grossProfit", "Gross Profit", "money"),
+  ] as ReportColumn<SalesByDayRow>[],
+  vatByRate: [
+    c("rateLabel", "Rate"), c("orders", "Invoices", "int"), c("taxableAmount", "Taxable Amount", "money"),
+    c("vatCollected", "VAT Collected", "money"), c("vatReversed", "VAT Reversed", "money"),
+    c("netVat", "Net VAT", "money"), c("sharePct", "Share of Turnover", "pct"),
+  ] as ReportColumn<VatByRateRow>[],
+};
+
+/** A KPI block is still a report — this is the only exportable shape it has. */
+function kpiPanel(name: string, kpis: Kpi[]): ReportPanel<KpiRow> {
+  return {
+    name,
+    columns: KPI_PANEL_COLUMNS,
+    rows: kpis.map((k) => ({ metric: k.label, value: k.value, detail: k.sub })),
+  };
+}
+
+/** Export for the reports whose shape is several panels rather than one table. */
+function AggregateExport({ request, disabled }: { request: ExportRequest; disabled?: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-black/5 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
+      <p className="text-[11px] text-muted-foreground">
+        Exports every panel on this report — one sheet per panel in Excel, one section per panel in PDF.
+      </p>
+      <ExportMenu disabled={disabled} onExport={(format) => runExport(format, request)} label="Export report" />
+    </div>
+  );
+}
 
 function initialState(key: ReportKey): ReportFilterState {
   const def = REPORT_BY_KEY[key];
@@ -81,6 +154,7 @@ export function ReportsConsole() {
   const restockingFees = useRestockingFeesReport(query, on("restocking-fees"));
   const customerReturns = useCustomerReturnsReport(query, on("customer-returns"));
   const damagedItems = useDamagedItemsReport(query, on("damaged-items"));
+  const surplusReturns = useSurplusReturnsReport(query, on("surplus-returns"));
 
   const itemReport = useItemReport(query, on("item-report"));
   const inventoryReport = useInventoryReport(query, on("inventory-report"));
@@ -93,8 +167,12 @@ export function ReportsConsole() {
   const supplierReturns = useSupplierReturnsReport(query, on("supplier-returns"));
   const supplierPerf = useSupplierPerformanceReport(query, on("supplier-performance"));
 
+  const deliveryOrders = useDeliveryReport(query, on("delivery-orders"));
+  const driverPerf = useDriverPerformanceReport(query, on("driver-performance"));
+
   const vat = useVatReport(query, on("vat"));
   const contractorAging = useContractorAgingReport(query, on("contractor-aging"));
+  const shiftReport = useShiftReport(query, on("shift-report"));
   const employeeReport = useEmployeeReport(query, on("employee-report"));
   const employeeAudit = useEmployeeAuditReport(query, on("employee-audit"));
 
@@ -111,6 +189,7 @@ export function ReportsConsole() {
     "restocking-fees": restockingFees,
     "customer-returns": customerReturns,
     "damaged-items": damagedItems,
+    "surplus-returns": surplusReturns,
     "item-report": itemReport,
     "inventory-report": inventoryReport,
     "low-stock": lowStock,
@@ -120,7 +199,10 @@ export function ReportsConsole() {
     "purchase-orders": purchaseOrders,
     "supplier-returns": supplierReturns,
     "supplier-performance": supplierPerf,
+    "delivery-orders": deliveryOrders,
+    "driver-performance": driverPerf,
     "contractor-aging": contractorAging,
+    "shift-report": shiftReport,
     "employee-report": employeeReport,
     "employee-audit": employeeAudit,
   };
@@ -135,6 +217,43 @@ export function ReportsConsole() {
 
   const table = active ? TABLE_DATA[active] : undefined;
   const rows = (table?.data ?? []) as never[];
+
+  // The aggregate reports' KPI blocks, built once and used twice: rendered as tiles, and exported as
+  // a Metric/Value panel. Building them inline in the JSX is what left these reports unexportable.
+  const s = salesSummary.data;
+  const salesKpis: Kpi[] = [
+    { label: "Gross Sales", value: s ? money(s.grossSales) : "…", sub: rangeLabel, tone: "success" },
+    { label: "Discounts", value: s ? money(s.discounts) : "…", sub: "Given away", tone: "warning" },
+    { label: "VAT Collected", value: s ? money(s.vat) : "…", sub: "Output VAT", tone: "info" },
+    { label: "Service Fees", value: s ? money(s.fees) : "…", sub: "Delivery & surcharges", tone: "info" },
+    { label: "Net Takings", value: s ? money(s.netSales) : "…", sub: "Incl. VAT & fees", tone: "success" },
+    { label: "COGS", value: s ? money(s.cogs) : "…", sub: "At cost price", tone: "muted" },
+    { label: "Gross Profit", value: s ? money(s.grossProfit) : "…", sub: "Net revenue − COGS", tone: "success" },
+    { label: "Margin", value: s ? `${s.marginPct.toFixed(1)}%` : "…", sub: "On ex-VAT revenue", tone: s && s.marginPct < 10 ? "critical" : "info" },
+    { label: "Orders", value: s ? int(s.orderCount) : "…", sub: "Completed, non-voided", tone: "muted" },
+    { label: "Items Sold", value: s ? int(s.itemsSold) : "…", sub: "Stock UOM units", tone: "muted" },
+    { label: "Avg Basket", value: s ? money(s.avgBasket) : "…", sub: "Per order, incl. VAT", tone: "info" },
+    { label: "Customers", value: s ? int(s.uniqueCustomers) : "…", sub: "Identified accounts", tone: "muted" },
+    { label: "Returns", value: s ? int(s.returnCount) : "…", sub: "Approved in period", tone: "warning" },
+    { label: "Refunds Paid", value: s ? money(s.refundValue) : "…", sub: "Net cashback out", tone: "warning" },
+    { label: "Net After Returns", value: s ? money(s.netAfterReturns) : "…", sub: "Takings − refunds", tone: "success" },
+    { label: "Voided Orders", value: s ? int(s.voidedOrders) : "…", sub: "Excluded from revenue", tone: s && s.voidedOrders > 0 ? "critical" : "muted" },
+  ];
+
+  const d = discountUtil.data;
+  const discountKpis: Kpi[] = [
+    { label: "Total Discounts", value: d ? money(d.totalDiscounts) : "…", sub: rangeLabel, tone: "warning" },
+    { label: "Discounted Orders", value: d ? int(d.discountedOrders) : "…", sub: `of ${d ? int(d.totalOrders) : "…"} orders`, tone: "info" },
+    { label: "Discount Rate", value: d ? `${d.discountRatePct.toFixed(1)}%` : "…", sub: "Of gross sales", tone: d && d.discountRatePct > 30 ? "critical" : "muted" },
+  ];
+
+  const v = vat.data;
+  const vatKpis: Kpi[] = [
+    { label: "Taxable Sales", value: v ? money(v.taxableSales) : "…", sub: "Ex-VAT, after discount", tone: "info" },
+    { label: "VAT Collected", value: v ? money(v.totalCollected) : "…", sub: rangeLabel, tone: "info" },
+    { label: "VAT Reversed", value: v ? money(v.totalReversed) : "…", sub: "Credit notes on returns", tone: "warning" },
+    { label: "Net VAT Position", value: v ? money(v.netVat) : "…", sub: "Payable to ZATCA", tone: "success" },
+  ];
 
   // The catalogue is a page of its own rather than a column beside the report — a 24-entry list in
   // a sidebar is what made the picker run far past the fold on every single report.
@@ -158,38 +277,28 @@ export function ReportsConsole() {
         {/* ————— Sales Summary (aggregate) ————— */}
         {active === "sales-summary" && (
           <>
-            <KpiGrid
-              items={[
-                { label: "Gross Sales", value: salesSummary.data ? money(salesSummary.data.grossSales) : "…", sub: rangeLabel, tone: "success" },
-                { label: "Discounts", value: salesSummary.data ? money(salesSummary.data.discounts) : "…", sub: "Given away", tone: "warning" },
-                { label: "VAT Collected", value: salesSummary.data ? money(salesSummary.data.vat) : "…", sub: "Output VAT", tone: "info" },
-                { label: "Service Fees", value: salesSummary.data ? money(salesSummary.data.fees) : "…", sub: "Delivery & surcharges", tone: "info" },
-                { label: "Net Takings", value: salesSummary.data ? money(salesSummary.data.netSales) : "…", sub: "Incl. VAT & fees", tone: "success" },
-                { label: "COGS", value: salesSummary.data ? money(salesSummary.data.cogs) : "…", sub: "At cost price", tone: "muted" },
-                { label: "Gross Profit", value: salesSummary.data ? money(salesSummary.data.grossProfit) : "…", sub: "Net revenue − COGS", tone: "success" },
-                { label: "Margin", value: salesSummary.data ? `${salesSummary.data.marginPct.toFixed(1)}%` : "…", sub: "On ex-VAT revenue", tone: salesSummary.data && salesSummary.data.marginPct < 10 ? "critical" : "info" },
-                { label: "Orders", value: salesSummary.data ? int(salesSummary.data.orderCount) : "…", sub: "Completed, non-voided", tone: "muted" },
-                { label: "Items Sold", value: salesSummary.data ? int(salesSummary.data.itemsSold) : "…", sub: "Stock UOM units", tone: "muted" },
-                { label: "Avg Basket", value: salesSummary.data ? money(salesSummary.data.avgBasket) : "…", sub: "Per order, incl. VAT", tone: "info" },
-                { label: "Customers", value: salesSummary.data ? int(salesSummary.data.uniqueCustomers) : "…", sub: "Identified accounts", tone: "muted" },
-                { label: "Returns", value: salesSummary.data ? int(salesSummary.data.returnCount) : "…", sub: "Approved in period", tone: "warning" },
-                { label: "Refunds Paid", value: salesSummary.data ? money(salesSummary.data.refundValue) : "…", sub: "Net cashback out", tone: "warning" },
-                { label: "Net After Returns", value: salesSummary.data ? money(salesSummary.data.netAfterReturns) : "…", sub: "Takings − refunds", tone: "success" },
-                { label: "Voided Orders", value: salesSummary.data ? int(salesSummary.data.voidedOrders) : "…", sub: "Excluded from revenue", tone: salesSummary.data && salesSummary.data.voidedOrders > 0 ? "critical" : "muted" },
-              ]}
+            <AggregateExport
+              disabled={!salesSummary.data}
+              request={{
+                exportName: "sales-summary",
+                title: "Sales Summary",
+                subtitle: rangeLabel,
+                panels: [
+                  kpiPanel("Summary", salesKpis),
+                  { name: "By Payment Method", columns: PANEL_COLUMNS.byMethod, rows: salesSummary.data?.byMethod ?? [] },
+                  { name: "By Cashier", columns: PANEL_COLUMNS.byCashier, rows: salesSummary.data?.byCashier ?? [] },
+                  { name: "By Branch", columns: PANEL_COLUMNS.byBranch, rows: salesSummary.data?.byBranch ?? [] },
+                  { name: "By Category", columns: PANEL_COLUMNS.byCategory, rows: salesSummary.data?.byCategory ?? [] },
+                  { name: "Day by Day", columns: PANEL_COLUMNS.byDay, rows: salesSummary.data?.byDay ?? [] },
+                ],
+              }}
             />
+            <KpiGrid items={salesKpis} />
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <ReportTable
                 title="By Payment Method"
                 desc="Collected, refunded and net per rail"
-                columns={[
-                  { key: "method", label: "Method" },
-                  { key: "count", label: "Txns", format: "int" },
-                  { key: "amount", label: "Collected", format: "money" },
-                  { key: "sharePct", label: "Share", format: "pct" },
-                  { key: "refunded", label: "Refunded", format: "money" },
-                  { key: "net", label: "Net", format: "money" },
-                ]}
+                columns={PANEL_COLUMNS.byMethod}
                 rows={salesSummary.data?.byMethod ?? []}
                 loading={salesSummary.isLoading}
                 search={state.search}
@@ -198,15 +307,7 @@ export function ReportsConsole() {
               <ReportTable
                 title="By Cashier"
                 desc="Who rang what, and how much they discounted"
-                columns={[
-                  { key: "cashier", label: "Cashier" },
-                  { key: "branch", label: "Branch" },
-                  { key: "orders", label: "Orders", format: "int" },
-                  { key: "amount", label: "Net Takings", format: "money" },
-                  { key: "discounts", label: "Discounts", format: "money" },
-                  { key: "avgBasket", label: "Avg Basket", format: "money" },
-                  { key: "voids", label: "Voids", format: "int" },
-                ]}
+                columns={PANEL_COLUMNS.byCashier}
                 rows={salesSummary.data?.byCashier ?? []}
                 loading={salesSummary.isLoading}
                 search={state.search}
@@ -215,18 +316,7 @@ export function ReportsConsole() {
               <ReportTable
                 title="By Branch"
                 desc="Revenue and margin per location"
-                columns={[
-                  { key: "branch", label: "Branch" },
-                  { key: "orders", label: "Orders", format: "int" },
-                  { key: "gross", label: "Gross", format: "money" },
-                  { key: "discounts", label: "Discounts", format: "money" },
-                  { key: "vat", label: "VAT", format: "money" },
-                  { key: "net", label: "Net", format: "money" },
-                  { key: "cogs", label: "COGS", format: "money" },
-                  { key: "grossProfit", label: "Gross Profit", format: "money" },
-                  { key: "marginPct", label: "Margin", format: "pct" },
-                  { key: "avgBasket", label: "Avg Basket", format: "money" },
-                ]}
+                columns={PANEL_COLUMNS.byBranch}
                 rows={salesSummary.data?.byBranch ?? []}
                 loading={salesSummary.isLoading}
                 search={state.search}
@@ -235,15 +325,7 @@ export function ReportsConsole() {
               <ReportTable
                 title="By Category"
                 desc="Where the revenue and the margin actually came from"
-                columns={[
-                  { key: "category", label: "Category" },
-                  { key: "units", label: "Units", format: "qty" },
-                  { key: "revenue", label: "Revenue", format: "money" },
-                  { key: "sharePct", label: "Share", format: "pct" },
-                  { key: "cogs", label: "COGS", format: "money" },
-                  { key: "grossProfit", label: "Gross Profit", format: "money" },
-                  { key: "marginPct", label: "Margin", format: "pct" },
-                ]}
+                columns={PANEL_COLUMNS.byCategory}
                 rows={salesSummary.data?.byCategory ?? []}
                 loading={salesSummary.isLoading}
                 search={state.search}
@@ -253,14 +335,7 @@ export function ReportsConsole() {
             <ReportTable
               title="Day by Day"
               desc="Trend across the selected period"
-              columns={[
-                { key: "date", label: "Date", format: "date" },
-                { key: "orders", label: "Orders", format: "int" },
-                { key: "gross", label: "Gross", format: "money" },
-                { key: "discounts", label: "Discounts", format: "money" },
-                { key: "net", label: "Net Takings", format: "money" },
-                { key: "grossProfit", label: "Gross Profit", format: "money" },
-              ]}
+              columns={PANEL_COLUMNS.byDay}
               rows={salesSummary.data?.byDay ?? []}
               loading={salesSummary.isLoading}
               search={state.search}
@@ -272,13 +347,16 @@ export function ReportsConsole() {
         {/* ————— Discount Utilization (aggregate) ————— */}
         {active === "discount-utilization" && (
           <>
-            <KpiGrid
-              items={[
-                { label: "Total Discounts", value: discountUtil.data ? money(discountUtil.data.totalDiscounts) : "…", sub: rangeLabel, tone: "warning" },
-                { label: "Discounted Orders", value: discountUtil.data ? int(discountUtil.data.discountedOrders) : "…", sub: `of ${discountUtil.data ? int(discountUtil.data.totalOrders) : "…"} orders`, tone: "info" },
-                { label: "Discount Rate", value: discountUtil.data ? `${discountUtil.data.discountRatePct.toFixed(1)}%` : "…", sub: "Of gross sales", tone: discountUtil.data && discountUtil.data.discountRatePct > 30 ? "critical" : "muted" },
-              ]}
+            <AggregateExport
+              disabled={!discountUtil.data}
+              request={{
+                exportName: "discount-utilization",
+                title: "Discount Utilization",
+                subtitle: rangeLabel,
+                panels: [kpiPanel("Discount Utilization", discountKpis)],
+              }}
             />
+            <KpiGrid items={discountKpis} />
             <SectionCard title="Reading This Report" desc="BRD §6.2 — discount authorization tiers">
               <p className="px-1 text-sm leading-relaxed text-muted-foreground">
                 A rising discount rate means margin is leaking through manual discounts. Ceilings per role (Cashier 5% /
@@ -293,25 +371,28 @@ export function ReportsConsole() {
         {/* ————— VAT (aggregate) ————— */}
         {active === "vat" && (
           <>
-            <KpiGrid
-              items={[
-                { label: "VAT Collected", value: vat.data ? money(vat.data.totalCollected) : "…", sub: rangeLabel, tone: "info" },
-                { label: "VAT Reversed", value: vat.data ? money(vat.data.totalReversed) : "…", sub: "Returns / credit notes", tone: "warning" },
-                { label: "Net VAT Position", value: vat.data ? money(vat.data.netVat) : "…", sub: "Payable to ZATCA", tone: "success" },
-              ]}
+            <AggregateExport
+              disabled={!vat.data}
+              request={{
+                exportName: "vat-report",
+                title: "VAT Report",
+                subtitle: rangeLabel,
+                panels: [
+                  kpiPanel("VAT Return", vatKpis),
+                  { name: "By Rate", columns: PANEL_COLUMNS.vatByRate, rows: vat.data?.collected ?? [] },
+                ],
+              }}
             />
+            <KpiGrid items={vatKpis} />
             <ReportTable
               title="Output VAT by Rate"
-              desc="Excludes voided orders; reversals from approved returns"
-              columns={[
-                { key: "rate", label: "Rate", format: "pct" },
-                { key: "taxableAmount", label: "Taxable Amount", format: "money" },
-                { key: "vatCollected", label: "VAT Collected", format: "money" },
-              ]}
+              desc="Zero-rated turnover is listed as its own rate — a VAT return declares it explicitly. Excludes voided orders; reversals come from approved returns."
+              columns={PANEL_COLUMNS.vatByRate}
               rows={vat.data?.collected ?? []}
               loading={vat.isLoading}
               search={state.search}
-              exportName="vat-report"
+              exportName="vat-by-rate"
+              emptyLabel="No taxable sales in the selected period."
             />
           </>
         )}
@@ -381,6 +462,7 @@ const GROUP_TONE: Record<ReportGroup, { tile: string; hover: string }> = {
   Sales: { tile: "bg-brand/10 text-brand", hover: "hover:border-brand/35" },
   Inventory: { tile: "bg-info/10 text-[oklch(0.35_0.12_235)]", hover: "hover:border-info/40" },
   Procurement: { tile: "bg-success/15 text-[oklch(0.35_0.1_155)]", hover: "hover:border-success/45" },
+  Delivery: { tile: "bg-brand/10 text-brand", hover: "hover:border-brand/35" },
   "Returns & Quality": { tile: "bg-warning/20 text-[oklch(0.4_0.13_70)]", hover: "hover:border-warning/50" },
   "Tax & B2B": { tile: "bg-critical/10 text-critical", hover: "hover:border-critical/35" },
   "People & Audit": { tile: "bg-black/5 text-foreground/70", hover: "hover:border-black/20" },
@@ -534,8 +616,6 @@ function ReportHeader({
   );
 }
 
-type Kpi = { label: string; value: string; sub?: string; tone?: "critical" | "warning" | "success" | "info" | "muted" };
-
 const sum = (rows: never[], key: string) =>
   rows.reduce((s, r) => s + (Number((r as Record<string, unknown>)[key]) || 0), 0);
 
@@ -599,6 +679,69 @@ const KPI_BUILDERS: Partial<Record<ReportKey, (rows: never[]) => Kpi[]>> = {
     { label: "Units Lost", value: int(sum(rows, "qty")), sub: "Quarantined", tone: "warning" },
     { label: "Loss Value", value: money(sum(rows, "lossValue")), sub: "At cost", tone: "critical" },
     { label: "Pending Approval", value: int(rows.filter((r) => (r as { status: string }).status === "PendingApproval").length), sub: "Awaiting sign-off", tone: "warning" },
+  ],
+  "surplus-returns": (rows) => [
+    { label: "Surplus Lines", value: int(rows.length), sub: "In period", tone: "info" },
+    { label: "Units Back", value: int(sum(rows, "qty")), sub: "Into sellable stock", tone: "info" },
+    { label: "Value Restocked", value: money(sum(rows, "restockValue")), sub: "At cost", tone: "success" },
+    { label: "Refunded", value: money(sum(rows, "refundAmount")), sub: "At price paid", tone: "warning" },
+    { label: "Fees Withheld", value: money(sum(rows, "restockingFee")), sub: "Recovered on restocking", tone: "success" },
+    { label: "Net Cashback", value: money(sum(rows, "netCashback")), sub: "Paid back out", tone: "critical" },
+  ],
+  "delivery-orders": (rows) => [
+    { label: "Deliveries", value: int(rows.length), sub: "In period", tone: "info" },
+    { label: "Delivered", value: int(rows.filter((r) => (r as { deliveredAt: string | null }).deliveredAt !== null).length), sub: "Signed off", tone: "success" },
+    {
+      label: "On Time",
+      value: (() => {
+        const done = rows.filter((r) => (r as { deliveredAt: string | null }).deliveredAt !== null);
+        if (done.length === 0) return "—";
+        const onTime = done.filter((r) => (r as { punctuality: string }).punctuality === "On Time").length;
+        return `${((onTime / done.length) * 100).toFixed(1)}%`;
+      })(),
+      sub: "Of completed runs",
+      tone: "success",
+    },
+    { label: "Overdue", value: int(rows.filter((r) => (r as { punctuality: string }).punctuality === "Overdue").length), sub: "Past promise, not delivered", tone: rows.some((r) => (r as { punctuality: string }).punctuality === "Overdue") ? "critical" : "muted" },
+    { label: "Failed", value: int(rows.filter((r) => (r as { punctuality: string }).punctuality === "Failed").length), sub: "Returned to branch", tone: "warning" },
+    { label: "Tonnage", value: `${sum(rows, "weightTons").toLocaleString("en-US", { maximumFractionDigits: 2 })} t`, sub: "Booked out", tone: "info" },
+    { label: "Goods Value", value: money(sum(rows, "amount")), sub: "On dispatch tickets", tone: "info" },
+    { label: "Charge Revenue", value: money(sum(rows, "totalCharges")), sub: "Fees, handling, heavy, VAT", tone: "success" },
+  ],
+  "driver-performance": (rows) => [
+    { label: "Drivers", value: int(rows.length), sub: "With assignments", tone: "info" },
+    { label: "Delivered", value: int(sum(rows, "delivered")), sub: `of ${int(sum(rows, "deliveries"))} assigned`, tone: "success" },
+    {
+      label: "Fleet On Time",
+      value: (() => {
+        const delivered = sum(rows, "delivered");
+        if (delivered === 0) return "—";
+        // Weighted by each driver's completed runs — averaging the per-driver percentages would let a
+        // driver with one delivery pull the fleet figure as hard as one with forty.
+        const onTime = rows.reduce((s, r) => {
+          const row = r as { delivered: number; onTimePct: number };
+          return s + (row.delivered * row.onTimePct) / 100;
+        }, 0);
+        return `${((onTime / delivered) * 100).toFixed(1)}%`;
+      })(),
+      sub: "Weighted by runs",
+      tone: "success",
+    },
+    { label: "In Flight", value: int(sum(rows, "inFlight")), sub: "On the road now", tone: "info" },
+    { label: "Failed", value: int(sum(rows, "failed")), sub: "Could not deliver", tone: sum(rows, "failed") > 0 ? "critical" : "muted" },
+    { label: "Tonnage", value: `${sum(rows, "tonnageDelivered").toLocaleString("en-US", { maximumFractionDigits: 2 })} t`, sub: "Delivered", tone: "info" },
+    { label: "Missing Units", value: int(sum(rows, "qtyMissing")), sub: "Short on arrival", tone: sum(rows, "qtyMissing") > 0 ? "warning" : "muted" },
+    { label: "Damaged Units", value: int(sum(rows, "qtyDamaged")), sub: "Damaged in transit", tone: sum(rows, "qtyDamaged") > 0 ? "critical" : "muted" },
+  ],
+  "shift-report": (rows) => [
+    { label: "Shifts", value: int(rows.length), sub: "Opened in period", tone: "info" },
+    { label: "Open Now", value: int(rows.filter((r) => (r as { status: string }).status === "Open").length), sub: "Still trading", tone: "info" },
+    { label: "Net Takings", value: money(sum(rows, "netTakings")), sub: "Across all tills", tone: "success" },
+    { label: "Cash Sales", value: money(sum(rows, "cashSales")), sub: "Into the drawer", tone: "info" },
+    { label: "Expected Drawer", value: money(sum(rows, "expectedCash")), sub: "Float + cash − drops", tone: "info" },
+    { label: "Net Variance", value: money(sum(rows, "variance")), sub: "Counted − expected", tone: sum(rows, "variance") !== 0 ? "critical" : "success" },
+    { label: "Shortages", value: int(rows.filter((r) => (r as { cashResult: string }).cashResult === "Shortage").length), sub: "Drawers short", tone: rows.some((r) => (r as { cashResult: string }).cashResult === "Shortage") ? "critical" : "muted" },
+    { label: "Uncounted", value: int(rows.filter((r) => (r as { cashResult: string }).cashResult === "Uncounted").length), sub: "Never reconciled", tone: rows.some((r) => (r as { cashResult: string }).cashResult === "Uncounted") ? "warning" : "muted" },
   ],
   "expiry-report": (rows) => [
     { label: "Batches", value: int(rows.length), sub: "Matching filters", tone: "info" },

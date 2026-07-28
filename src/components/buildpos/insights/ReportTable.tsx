@@ -1,82 +1,24 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ChevronsUpDown, Download } from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Pill, SectionCard } from "@/components/buildpos/sections";
-import { exportToCsv } from "@/components/buildpos/pos/shared";
-import type { Severity } from "@/lib/buildpos/format";
+import {
+  NUMERIC_FORMATS, alignOf, formatCell, rawValue, statusTone,
+  type ReportColumn, type ReportDetail,
+} from "./report-columns";
+import { ExportMenu, runExport, type ExportFormat } from "./report-export";
 
 // The one table every list-shaped report renders through: sorting, client-side row search,
-// pagination, CSV export of exactly what's on screen, and click-a-row drill-down into the line
-// items that make the row up. Reports declare columns; none of them re-implement any of this.
+// pagination, export of exactly what's on screen, and click-a-row drill-down into the line items that
+// make the row up. Reports declare columns; none of them re-implement any of this.
+//
+// Column definitions and cell formatting live in report-columns.ts and the export plumbing in
+// report-export.tsx, so the aggregate reports — which render KPI blocks rather than a row list — can
+// export through the same code path instead of having no export button at all.
 
-export type CellFormat = "text" | "mono" | "money" | "qty" | "int" | "pct" | "date" | "datetime" | "status" | "days";
-
-export type ReportColumn<T> = {
-  key: string;
-  label: string;
-  /** Defaults to row[key]; supply for computed or nested values. */
-  value?: (row: T) => string | number | null | undefined;
-  format?: CellFormat;
-  align?: "left" | "right" | "center";
-  /** Hidden in the table but still exported — for long free-text fields. */
-  exportOnly?: boolean;
-};
-
-export type ReportDetail<T> = {
-  title: (row: T) => string;
-  subtitle?: (row: T) => string;
-  /** Header key/value pairs shown above the line table. */
-  fields?: (row: T) => { label: string; value: string }[];
-  itemsLabel?: string;
-  items: (row: T) => unknown[];
-  columns: ReportColumn<never>[];
-};
-
-const money = (n: number) => `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
-const int = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 0 });
-const qty = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
-
-function statusTone(status: string): Severity {
-  const k = status.toLowerCase();
-  if (/critical|failed|overdue|rejected|expired|shortage|cancelled|out/.test(k)) return "critical";
-  if (/low|pending|warn|quarantine|delayed|draft|expiring|monitor|partial|awaiting|uncounted|overage/.test(k)) return "warning";
-  if (/inactive|disabled|discontinued/.test(k)) return "muted";
-  if (/healthy|completed|received|matched|approved|active|credit ?received|info/.test(k)) return "success";
-  return "info";
-}
-
-export function formatCell(value: unknown, format: CellFormat = "text"): string {
-  if (value === null || value === undefined || value === "") return "—";
-  switch (format) {
-    case "money":
-      return money(Number(value));
-    case "qty":
-      return qty(Number(value));
-    case "int":
-      return int(Number(value));
-    case "pct":
-      return `${Number(value).toFixed(1)}%`;
-    case "days":
-      return `${int(Number(value))}d`;
-    case "date":
-      return new Date(String(value)).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-    case "datetime":
-      return new Date(String(value)).toLocaleString("en-GB", {
-        day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-      });
-    default:
-      return String(value);
-  }
-}
-
-const NUMERIC_FORMATS: CellFormat[] = ["money", "qty", "int", "pct", "days"];
-
-function rawValue<T>(row: T, col: ReportColumn<T>): string | number | null | undefined {
-  return col.value ? col.value(row) : (row as Record<string, unknown>)[col.key] as string | number | null | undefined;
-}
+export { formatCell } from "./report-columns";
+export type { CellFormat, ReportColumn, ReportDetail } from "./report-columns";
 
 const PAGE_SIZE = 25;
 
@@ -143,14 +85,16 @@ export function ReportTable<T>({
     setSort((s) => (s?.key !== key ? { key, dir: "desc" } : s.dir === "desc" ? { key, dir: "asc" } : null));
   }
 
-  // Exports what the user is actually looking at — search and sort applied, pagination ignored.
-  function handleExport() {
-    exportToCsv(
-      `${exportName}.csv`,
-      columns.map((c) => c.label),
-      sorted.map((row) => columns.map((c) => formatCell(rawValue(row, c), c.format))),
-    );
-    toast.success(`Exported ${sorted.length} rows`);
+  // Every export writes what the user is actually looking at — search and sort applied, pagination
+  // ignored, export-only columns included. Exporting the current page instead would make "Export"
+  // mean something different depending on where you happened to be paginated to.
+  function handleExport(format: ExportFormat) {
+    runExport(format, {
+      exportName,
+      title,
+      subtitle: desc,
+      panels: [{ name: title, columns, rows: sorted }],
+    });
   }
 
   return (
@@ -158,11 +102,7 @@ export function ReportTable<T>({
       <SectionCard
         title={title}
         desc={desc ?? `${sorted.length}${sorted.length !== rows.length ? ` of ${rows.length}` : ""} rows`}
-        action={
-          <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={handleExport} disabled={sorted.length === 0}>
-            <Download className="h-3.5 w-3.5" /> Export
-          </Button>
-        }
+        action={<ExportMenu disabled={sorted.length === 0} onExport={handleExport} />}
       >
         <div className="overflow-x-auto">
           <Table>
@@ -293,6 +233,21 @@ function ReportDetailSheet<T>({
   const items = row ? detail.items(row) : [];
   const fields = row ? detail.fields?.(row) ?? [] : [];
 
+  function handleExport(format: ExportFormat) {
+    runExport(format, {
+      exportName: `${exportName}-detail`,
+      title: row ? detail.title(row) : (detail.itemsLabel ?? "Items"),
+      subtitle: row ? detail.subtitle?.(row) : undefined,
+      panels: [{
+        name: detail.itemsLabel ?? "Items",
+        // A ReportDetail's line columns are declared as ReportColumn<never> — the registry has no
+        // named type for the nested line shape — so the panel is widened to match its own rows.
+        columns: detail.columns as ReportColumn<unknown>[],
+        rows: items,
+      }],
+    });
+  }
+
   return (
     <Sheet open={row !== null} onOpenChange={(open) => !open && onClose()}>
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
@@ -320,29 +275,7 @@ function ReportDetailSheet<T>({
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     {detail.itemsLabel ?? "Items"} ({items.length})
                   </p>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 gap-1.5 text-xs"
-                    disabled={items.length === 0}
-                    onClick={() => {
-                      exportToCsv(
-                        `${exportName}-detail.csv`,
-                        detail.columns.map((c) => c.label),
-                        items.map((item) =>
-                          detail.columns.map((c) =>
-                            formatCell(
-                              c.value ? c.value(item as never) : (item as Record<string, unknown>)[c.key],
-                              c.format,
-                            ),
-                          ),
-                        ),
-                      );
-                      toast.success("Exported line items");
-                    }}
-                  >
-                    <Download className="h-3 w-3" /> Export
-                  </Button>
+                  <ExportMenu compact disabled={items.length === 0} onExport={handleExport} />
                 </div>
                 <div className="overflow-x-auto rounded-lg border border-black/5">
                   <Table>
