@@ -288,8 +288,142 @@ public class StockCountAndReportFilterTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task Employee_report_scores_register_activity_without_reading_any_hr_data()
+    {
+        using var db = _factory.CreateDbContext();
+        var branch = TestDataSeeder.AddBranch(db);
+        var category = TestDataSeeder.AddCategory(db);
+        var product = TestDataSeeder.AddProduct(db, category);
+        var role = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos]);
+        var cashier = TestDataSeeder.AddUser(db, role, "cashier@test.local", "Sara Ali", branch.Id);
+
+        // Two completed sales and one void. The void must never reach a revenue figure, but must be
+        // counted and priced on its own so misuse is visible.
+        db.Orders.AddRange(
+            new Order
+            {
+                OrderNo = "SO-1", BranchId = branch.Id, CashierUserId = cashier.Id, Status = OrderStatus.Completed,
+                SubTotal = 1000m, DiscountTotal = 100m, VatTotal = 135m, GrandTotal = 1035m,
+                Lines = [new OrderLine { ProductId = product.Id, Qty = 10, StockQty = 10, UnitPrice = 100m, LineTotal = 1000m }],
+            },
+            new Order
+            {
+                OrderNo = "SO-2", BranchId = branch.Id, CashierUserId = cashier.Id, Status = OrderStatus.Delivered,
+                SubTotal = 500m, DiscountTotal = 0m, VatTotal = 75m, GrandTotal = 575m,
+                Lines = [new OrderLine { ProductId = product.Id, Qty = 5, StockQty = 5, UnitPrice = 100m, LineTotal = 500m }],
+            },
+            new Order
+            {
+                OrderNo = "SO-3", BranchId = branch.Id, CashierUserId = cashier.Id, Status = OrderStatus.Voided,
+                SubTotal = 200m, DiscountTotal = 0m, VatTotal = 30m, GrandTotal = 230m,
+            });
+        db.SaveChanges();
+        var client = InventoryClient(db, branch);
+
+        var today = DateTime.UtcNow.Date;
+        var rows = await client.GetFromJsonAsync<List<EmployeeReportTestRow>>(
+            $"/api/insights/reports/employee-report?from={today.AddDays(-7):yyyy-MM-dd}&to={today:yyyy-MM-dd}");
+
+        Assert.NotNull(rows);
+        var row = Assert.Single(rows!, r => r.Name == "Sara Ali");
+        Assert.Equal("Cashier", row.Role);
+        // Delivered counts as revenue alongside Completed — filtering on Completed alone is what
+        // made the dashboard and Sales Summary disagree once an order moved past the register.
+        Assert.Equal(2, row.Orders);
+        Assert.Equal(1500m, row.GrossSales);
+        Assert.Equal(1610m, row.NetSales);
+        Assert.Equal(100m, row.Discounts);
+        Assert.Equal(1, row.VoidedOrders);
+        Assert.Equal(230m, row.VoidedValue);
+        // The drill-down carries both sales and the void, newest first.
+        Assert.Equal(3, row.Items.Count);
+        Assert.Contains(row.Items, i => i.Kind == "Void");
+
+        // Role is a real constraint, and an unknown one matches nothing rather than everything.
+        var noMatch = await client.GetFromJsonAsync<List<EmployeeReportTestRow>>(
+            $"/api/insights/reports/employee-report?from={today.AddDays(-7):yyyy-MM-dd}&to={today:yyyy-MM-dd}&roleId=9999");
+        Assert.Empty(noMatch!);
+    }
+
+    [Fact]
+    public async Task Low_stock_branch_filter_returns_branch_stock_not_the_branches_warehouses()
+    {
+        using var db = _factory.CreateDbContext();
+        var branch = TestDataSeeder.AddBranch(db);
+        var warehouse = TestDataSeeder.AddWarehouse(db, branch);
+        var category = TestDataSeeder.AddCategory(db);
+        var product = TestDataSeeder.AddProduct(db, category, sku: "CEM-001");
+        product.ReorderLevel = 100;
+        db.SaveChanges();
+        AddWarehouseStock(db, product, warehouse, 5m);
+        TestDataSeeder.AddBranchStock(db, product, branch, 5m);
+        var client = InventoryClient(db, branch);
+
+        // No filter: both grains, because that is genuinely all the low stock there is.
+        var all = await client.GetFromJsonAsync<List<LowStockReportRow>>("/api/insights/reports/low-stock");
+        Assert.Equal(2, all!.Count);
+
+        // Branch filter: the branch's own stock only. Rolling its warehouses in too listed the same
+        // SKU twice under two different location names, both labelled with the branch.
+        var branchOnly = await client.GetFromJsonAsync<List<LowStockReportRow>>(
+            $"/api/insights/reports/low-stock?branchId={branch.Id}");
+        var row = Assert.Single(branchOnly!);
+        Assert.Equal("Branch", row.LocationType);
+
+        // Warehouse stock for that branch is still reachable by asking for it explicitly.
+        var withWarehouses = await client.GetFromJsonAsync<List<LowStockReportRow>>(
+            $"/api/insights/reports/low-stock?branchId={branch.Id}&locationType=Warehouse");
+        Assert.Equal("Warehouse", Assert.Single(withWarehouses!).LocationType);
+    }
+
+    [Fact]
+    public async Task Report_windows_follow_the_callers_calendar_day_not_utcs()
+    {
+        using var db = _factory.CreateDbContext();
+        var branch = TestDataSeeder.AddBranch(db);
+        var category = TestDataSeeder.AddCategory(db);
+        var product = TestDataSeeder.AddProduct(db, category);
+        var role = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos]);
+        var cashier = TestDataSeeder.AddUser(db, role, "night@test.local", "Night Cashier", branch.Id);
+
+        // A sale at 01:00 Riyadh time on the 15th is 22:00 UTC on the 14th. Windowing the picked
+        // calendar day as a UTC day dropped it out of "the 15th" entirely.
+        var localDay = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc);
+        var order = new Order
+        {
+            OrderNo = "SO-NIGHT", BranchId = branch.Id, CashierUserId = cashier.Id,
+            Status = OrderStatus.Completed, SubTotal = 100m, VatTotal = 15m, GrandTotal = 115m,
+            Lines = [new OrderLine { ProductId = product.Id, Qty = 1, StockQty = 1, UnitPrice = 100m, LineTotal = 100m }],
+        };
+        db.Orders.Add(order);
+        db.SaveChanges();
+        // CreatedAt is set by the base entity, so force it onto the boundary instant under test.
+        order.CreatedAt = localDay.AddHours(-2);
+        db.SaveChanges();
+
+        var client = InventoryClient(db, branch);
+        var url = "/api/insights/reports/sales-summary?from=2026-03-15&to=2026-03-15";
+
+        // No offset header: the old behaviour, UTC days. The 22:00-on-the-14th sale is outside.
+        var utcDay = await client.GetFromJsonAsync<SalesSummaryTestDto>(url);
+        Assert.Equal(0, utcDay!.OrderCount);
+
+        // UTC+3 sends getTimezoneOffset() = -180, and the sale is inside the local 15th.
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Add("X-Tz-Offset", "-180");
+        var localDayResult = await (await client.SendAsync(request)).Content.ReadFromJsonAsync<SalesSummaryTestDto>();
+        Assert.Equal(1, localDayResult!.OrderCount);
+        Assert.Equal(115m, localDayResult.NetSales);
+    }
+
     // Local mirrors of the report row shapes — the API records live in the Api project, which the
     // test project doesn't reference; only the fields asserted on are declared.
+    private record SalesSummaryTestDto(int OrderCount, decimal NetSales, decimal GrossSales);
     private record SupplierReturnRow(string RtsNo, DateTime Date, string Supplier, decimal Qty, decimal Value);
     private record LowStockReportRow(string Sku, string LocationType, string Location, string Branch, decimal Available, string Status);
+    private record EmployeeActivityTestRow(DateTime Date, string Kind, string Reference);
+    private record EmployeeReportTestRow(
+        string Name, string Role, int Orders, decimal GrossSales, decimal NetSales, decimal Discounts,
+        int VoidedOrders, decimal VoidedValue, IReadOnlyList<EmployeeActivityTestRow> Items);
 }

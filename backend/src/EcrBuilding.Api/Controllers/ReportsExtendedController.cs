@@ -24,13 +24,24 @@ namespace EcrBuilding.Api.Controllers;
 
 public static class ReportFilters
 {
-    // Inclusive `from` day, exclusive `to`-plus-one-day. Never compare a timestamp column with
-    // `<= to` when `to` came off a date picker.
-    public static (DateTime From, DateTime ToExclusive) Range(DateTime? from, DateTime? to, int defaultDays = 30)
+    /// <summary>
+    /// Inclusive `from` day, exclusive `to`-plus-one-day. Never compare a timestamp column with
+    /// `&lt;= to` when `to` came off a date picker.
+    ///
+    /// <paramref name="tzOffsetMinutes"/> is the caller's JavaScript getTimezoneOffset() — minutes to
+    /// ADD to local time to reach UTC, so UTC+3 sends -180. Timestamps are stored as UTC instants,
+    /// but "today" means the viewer's local day: in Riyadh a 01:00 sale is 22:00 UTC the day before,
+    /// so treating the picked calendar day as a UTC day dropped it out of "today" entirely, and the
+    /// dashboard (which filters on local instants client-side) disagreed with every report at the
+    /// day boundary. Shifting the window by the offset makes both screens describe the same hours.
+    /// Defaults to 0, which is the old UTC-day behaviour, so a caller that sends no offset is
+    /// unaffected.
+    /// </summary>
+    public static (DateTime From, DateTime ToExclusive) Range(DateTime? from, DateTime? to, int defaultDays = 30, int tzOffsetMinutes = 0)
     {
-        var today = DateTime.UtcNow.Date;
-        var f = (from ?? today.AddDays(-defaultDays)).Date;
-        var t = (to ?? today).Date.AddDays(1);
+        var today = DateTime.UtcNow.AddMinutes(-tzOffsetMinutes).Date;
+        var f = (from ?? today.AddDays(-defaultDays)).Date.AddMinutes(tzOffsetMinutes);
+        var t = (to ?? today).Date.AddDays(1).AddMinutes(tzOffsetMinutes);
         if (t <= f) t = f.AddDays(1);
         return (f, t);
     }
@@ -49,6 +60,44 @@ public static class ReportFilters
 
     public static bool Matches(string[]? filter, string? value) =>
         !Any(filter) || (value is not null && filter!.Any(f => string.Equals(f, value, StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>
+    /// Which location grains a stock report should emit (warehouse rows, branch rows, or both).
+    ///
+    /// A Branch filter on its own means "that branch's own stock". Folding in the warehouses that
+    /// belong to the branch as well returned the same SKU twice — once as "Main Yard", once as
+    /// "Riyadh Main" — which reads as duplicate rows with the branch name attached to both.
+    /// Warehouse stock is still one click away: tick Location Type = Warehouse, or name a
+    /// warehouse, and the warehouse grain comes back (narrowed to those branches).
+    /// </summary>
+    public static (bool Warehouse, bool Branch) LocationGrains(string[]? locationType, int[]? branchId, int[]? warehouseId)
+    {
+        // An explicit Location Type is the user speaking directly — honour it verbatim.
+        if (Any(locationType))
+            return (locationType!.Any(l => string.Equals(l, "Warehouse", StringComparison.OrdinalIgnoreCase)),
+                    locationType!.Any(l => string.Equals(l, "Branch", StringComparison.OrdinalIgnoreCase)));
+        var branchOnly = Any(branchId) && !Any(warehouseId);
+        return (!branchOnly, true);
+    }
+}
+
+/// <summary>
+/// Shared base for the report controllers: gives every endpoint the caller's timezone offset so
+/// date windows land on the viewer's calendar day rather than UTC's. The offset rides on a header
+/// rather than a query param so adding it didn't mean editing 20-odd endpoint signatures, and an
+/// absent header is simply UTC.
+/// </summary>
+public abstract class ReportControllerBase : ControllerBase
+{
+    // Clamped to ±14h, the real-world range of UTC offsets — a malformed or hostile header can
+    // shift the window by at most a day, never into an unbounded scan.
+    protected int TzOffsetMinutes =>
+        int.TryParse(Request.Headers["X-Tz-Offset"].FirstOrDefault(), out var minutes)
+            ? Math.Clamp(minutes, -840, 840)
+            : 0;
+
+    protected (DateTime From, DateTime ToExclusive) Window(DateTime? from, DateTime? to, int defaultDays = 30) =>
+        ReportFilters.Range(from, to, defaultDays, TzOffsetMinutes);
 }
 
 // ————————————————————————— Filter options —————————————————————————
@@ -58,10 +107,12 @@ public record ReportFilterOptionsDto(
     IReadOnlyList<FilterOption> Branches, IReadOnlyList<FilterOption> Warehouses, IReadOnlyList<FilterOption> Categories,
     IReadOnlyList<FilterOption> Products, IReadOnlyList<FilterOption> Suppliers, IReadOnlyList<FilterOption> Customers,
     IReadOnlyList<FilterOption> Users, IReadOnlyList<FilterOption> Employees,
+    IReadOnlyList<FilterOption> Roles,
     IReadOnlyList<string> PurchaseOrderStatuses, IReadOnlyList<string> RtsStatuses, IReadOnlyList<string> ReturnTypes,
     IReadOnlyList<string> ReturnStatuses, IReadOnlyList<string> RefundMethods, IReadOnlyList<string> DamageReasons,
     IReadOnlyList<string> StockCountStatuses, IReadOnlyList<string> PaymentMethods, IReadOnlyList<string> AuditModules,
-    IReadOnlyList<string> AuditEvents, IReadOnlyList<string> Brands, IReadOnlyList<string> StockStatuses);
+    IReadOnlyList<string> AuditEvents, IReadOnlyList<string> Brands, IReadOnlyList<string> StockStatuses,
+    IReadOnlyList<string> SupplierTypes);
 
 // One round-trip that populates every multi-select in the reports console, so each report doesn't
 // re-fetch its own copy of the branch/category/product lists.
@@ -90,8 +141,14 @@ public class ReportFilterOptionsController(AppDbContext db) : ControllerBase
             .Select(u => new FilterOption(u.Id.ToString(), u.Name, u.Email)).ToListAsync(ct);
         var employees = await db.Employees.Include(e => e.Branch).OrderBy(e => e.FirstName)
             .Select(e => new FilterOption(e.Id.ToString(), e.FirstName + " " + e.LastName, e.Designation)).ToListAsync(ct);
+        // Roles, not HR departments: the Employee Report is sourced from login accounts and
+        // transactions so it keeps working with the HR module absent.
+        var roles = await db.Roles.OrderBy(r => r.Name)
+            .Select(r => new FilterOption(r.Id.ToString(), r.Name, null)).ToListAsync(ct);
         var brands = await db.Products.Where(p => p.Brand != null && p.Brand != "")
             .Select(p => p.Brand!).Distinct().OrderBy(b => b).ToListAsync(ct);
+        var supplierTypes = await db.Suppliers.Where(s => s.Type != "")
+            .Select(s => s.Type).Distinct().OrderBy(x => x).ToListAsync(ct);
         // Audit modules/events come from the data rather than an enum — the audit trail is
         // free-text by design, so the only honest option list is what's actually been logged.
         var auditModules = await db.AuditLogs.Select(a => a.Module).Distinct().OrderBy(m => m).ToListAsync(ct);
@@ -99,11 +156,14 @@ public class ReportFilterOptionsController(AppDbContext db) : ControllerBase
         var refundMethods = await db.Returns.Select(r => r.RefundMethod).Distinct().OrderBy(m => m).ToListAsync(ct);
 
         return Ok(new ReportFilterOptionsDto(
-            branches, warehouses, categories, products, suppliers, customers, users, employees,
+            branches, warehouses, categories, products, suppliers, customers, users, employees, roles,
             Names<PurchaseOrderStatus>(), Names<ReturnToSupplierStatus>(), Names<ReturnType>(), Names<ReturnStatus>(),
             refundMethods, Names<DamageReasonCode>(), Names<StockCountStatus>(), Names<PaymentMethod>(),
             auditModules, auditEvents, brands,
-            ["Healthy", "Low", "Critical"]));
+            ["Healthy", "Low", "Critical"],
+            // Supplier.Type is free text, not an enum, so the only honest option list is what has
+            // actually been entered — same treatment as Brand.
+            supplierTypes));
     }
 
     private static List<string> Names<T>() where T : struct, Enum => Enum.GetNames<T>().ToList();
@@ -146,7 +206,7 @@ public record ExpiryReportRow(
 [Route("api/insights/reports")]
 [Authorize]
 [RequireModule(ModuleArea.Insights, AccessLevel.View)]
-public class InventoryReportsController(AppDbContext db) : ControllerBase
+public class InventoryReportsController(AppDbContext db) : ReportControllerBase
 {
     // Item Report — the catalog master joined to stock, sales and returns for the window, so one
     // row answers "what is this SKU, what have we got, and how is it performing".
@@ -157,7 +217,7 @@ public class InventoryReportsController(AppDbContext db) : ControllerBase
         [FromQuery] int[]? productId, [FromQuery] int[]? supplierId, [FromQuery] string[]? brand,
         [FromQuery] string[]? status, [FromQuery] string[]? stockStatus, CancellationToken ct = default)
     {
-        var (f, t) = ReportFilters.Range(from, to);
+        var (f, t) = Window(from, to);
 
         var products = await db.Products.Include(p => p.Category).Include(p => p.Supplier).ToListAsync(ct);
         products = products.Where(p =>
@@ -252,8 +312,9 @@ public class InventoryReportsController(AppDbContext db) : ControllerBase
             .Select(g => new { g.Key.ProductId, g.Key.BranchId, At = g.Max(m => m.CreatedAt) })
             .ToListAsync(ct);
         var lastByBranch = lastMovement.ToDictionary(x => (x.ProductId, x.BranchId), x => (DateTime?)x.At);
+        var grain = ReportFilters.LocationGrains(locationType, branchId, warehouseId);
 
-        if (!ReportFilters.Any(locationType) || locationType!.Any(l => l.Equals("Warehouse", StringComparison.OrdinalIgnoreCase)))
+        if (grain.Warehouse)
         {
             var levels = await db.StockLevels.Include(s => s.Product).ThenInclude(p => p!.Category)
                 .Include(s => s.Warehouse).ThenInclude(w => w!.Branch).ToListAsync(ct);
@@ -272,7 +333,7 @@ public class InventoryReportsController(AppDbContext db) : ControllerBase
                     s.Available <= 0 ? "Critical" : s.Available <= s.Product.ReorderLevel ? "Low" : "Healthy")));
         }
 
-        if (!ReportFilters.Any(locationType) || locationType!.Any(l => l.Equals("Branch", StringComparison.OrdinalIgnoreCase)))
+        if (grain.Branch)
         {
             var levels = await db.BranchStockLevels.Include(s => s.Product).ThenInclude(p => p!.Category)
                 .Include(s => s.Branch).ToListAsync(ct);
@@ -323,7 +384,9 @@ public class InventoryReportsController(AppDbContext db) : ControllerBase
                 available <= 0 ? "Critical" : "Low");
         }
 
-        if (!ReportFilters.Any(locationType) || locationType!.Any(l => l.Equals("Warehouse", StringComparison.OrdinalIgnoreCase)))
+        var grain = ReportFilters.LocationGrains(locationType, branchId, warehouseId);
+
+        if (grain.Warehouse)
         {
             var levels = await db.StockLevels.Include(s => s.Product).ThenInclude(p => p!.Category)
                 .Include(s => s.Product).ThenInclude(p => p!.Supplier)
@@ -339,7 +402,7 @@ public class InventoryReportsController(AppDbContext db) : ControllerBase
                     s.Warehouse?.Branch?.NameEn ?? "", s.OnHand, s.Reserved, s.Available)));
         }
 
-        if (!ReportFilters.Any(locationType) || locationType!.Any(l => l.Equals("Branch", StringComparison.OrdinalIgnoreCase)))
+        if (grain.Branch)
         {
             var levels = await db.BranchStockLevels.Include(s => s.Product).ThenInclude(p => p!.Category)
                 .Include(s => s.Product).ThenInclude(p => p!.Supplier)
@@ -368,7 +431,7 @@ public class InventoryReportsController(AppDbContext db) : ControllerBase
         [FromQuery] int[]? productId, [FromQuery] string[]? status, [FromQuery] string[]? scope,
         [FromQuery] bool varianceOnly = false, CancellationToken ct = default)
     {
-        var (f, t) = ReportFilters.Range(from, to, 90);
+        var (f, t) = Window(from, to, 90);
         var counts = await db.StockCounts
             .Include(c => c.Warehouse).ThenInclude(w => w!.Branch)
             .Include(c => c.Category)
@@ -478,7 +541,7 @@ public record SupplierPerformanceRow(
 [Route("api/insights/reports")]
 [Authorize]
 [RequireModule(ModuleArea.Insights, AccessLevel.View)]
-public class ProcurementReportsController(AppDbContext db) : ControllerBase
+public class ProcurementReportsController(AppDbContext db) : ReportControllerBase
 {
     [HttpGet("purchase-orders")]
     public async Task<ActionResult<List<PurchaseOrderReportRow>>> PurchaseOrders(
@@ -487,7 +550,7 @@ public class ProcurementReportsController(AppDbContext db) : ControllerBase
         [FromQuery] int[]? productId, [FromQuery] int[]? categoryId, [FromQuery] string[]? status,
         CancellationToken ct = default)
     {
-        var (f, t) = ReportFilters.Range(from, to, 90);
+        var (f, t) = Window(from, to, 90);
         var orders = await db.PurchaseOrders
             .Include(p => p.Supplier)
             .Include(p => p.Lines).ThenInclude(l => l.Product).ThenInclude(pr => pr!.Category)
@@ -550,7 +613,7 @@ public class ProcurementReportsController(AppDbContext db) : ControllerBase
         [FromQuery] int[]? productId, [FromQuery] int[]? categoryId, [FromQuery] string[]? status,
         [FromQuery] string[]? reason, CancellationToken ct = default)
     {
-        var (f, t) = ReportFilters.Range(from, to, 90);
+        var (f, t) = Window(from, to, 90);
         var returns = await db.ReturnToSuppliers
             .Include(r => r.Supplier).Include(r => r.Branch).Include(r => r.Warehouse).Include(r => r.PurchaseOrder)
             .Include(r => r.Lines).ThenInclude(l => l.Product).ThenInclude(p => p!.Category)
@@ -586,17 +649,27 @@ public class ProcurementReportsController(AppDbContext db) : ControllerBase
     [HttpGet("supplier-performance")]
     public async Task<ActionResult<List<SupplierPerformanceRow>>> SupplierPerformance(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int[]? supplierId,
+        [FromQuery] int[]? branchId, [FromQuery] string[]? supplierType,
         CancellationToken ct = default)
     {
-        var (f, t) = ReportFilters.Range(from, to, 180);
+        var (f, t) = Window(from, to, 180);
         var suppliers = await db.Suppliers.ToListAsync(ct);
-        suppliers = suppliers.Where(s => ReportFilters.Matches(supplierId, s.Id)).ToList();
+        suppliers = suppliers.Where(s => ReportFilters.Matches(supplierId, s.Id)
+            && ReportFilters.Matches(supplierType, s.Type.ToString())).ToList();
         var ids = suppliers.Select(s => s.Id).ToHashSet();
 
         var orders = await db.PurchaseOrders.Include(p => p.Lines)
             .Where(p => p.CreatedAt >= f && p.CreatedAt < t && ids.Contains(p.SupplierId)).ToListAsync(ct);
         var returns = await db.ReturnToSuppliers.Include(r => r.Lines)
             .Where(r => r.Date >= f && r.Date < t && ids.Contains(r.SupplierId)).ToListAsync(ct);
+
+        // A branch filter on a supplier scorecard means "the POs this branch raised" — the PO's
+        // branch lives on its lines, so an order counts if any line was destined for that branch.
+        if (ReportFilters.Any(branchId))
+        {
+            orders = orders.Where(o => o.Lines.Any(l => ReportFilters.Matches(branchId, l.BranchId))).ToList();
+            returns = returns.Where(r => ReportFilters.Matches(branchId, r.BranchId)).ToList();
+        }
 
         var byOrder = orders.GroupBy(o => o.SupplierId).ToDictionary(g => g.Key, g => g.ToList());
         var byReturn = returns.GroupBy(r => r.SupplierId).ToDictionary(g => g.Key, g => g.ToList());
@@ -669,7 +742,7 @@ public record CategoryPerformanceRow(
 [Route("api/insights/reports")]
 [Authorize]
 [RequireModule(ModuleArea.Insights, AccessLevel.View)]
-public class OperationsReportsController(AppDbContext db) : ControllerBase
+public class OperationsReportsController(AppDbContext db) : ReportControllerBase
 {
     [HttpGet("customer-returns")]
     public async Task<ActionResult<List<CustomerReturnReportRow>>> CustomerReturns(
@@ -678,7 +751,7 @@ public class OperationsReportsController(AppDbContext db) : ControllerBase
         [FromQuery] int[]? categoryId, [FromQuery] string[]? type, [FromQuery] string[]? status,
         [FromQuery] string[]? refundMethod, CancellationToken ct = default)
     {
-        var (f, t) = ReportFilters.Range(from, to, 90);
+        var (f, t) = Window(from, to, 90);
         var returns = await db.Returns
             .Include(r => r.Order).ThenInclude(o => o!.Branch)
             .Include(r => r.Customer).Include(r => r.ApprovedBy)
@@ -725,7 +798,7 @@ public class OperationsReportsController(AppDbContext db) : ControllerBase
         [FromQuery] int[]? branchId, [FromQuery] int[]? productId, [FromQuery] int[]? categoryId,
         [FromQuery] string[]? damageReason, [FromQuery] string[]? status, CancellationToken ct = default)
     {
-        var (f, t) = ReportFilters.Range(from, to, 90);
+        var (f, t) = Window(from, to, 90);
         var returns = await db.Returns
             .Include(r => r.Order).ThenInclude(o => o!.Branch)
             .Include(r => r.Customer).Include(r => r.ApprovedBy)
@@ -765,7 +838,7 @@ public class OperationsReportsController(AppDbContext db) : ControllerBase
         [FromQuery] string[]? module, [FromQuery] string[]? @event, [FromQuery] string[]? severity,
         [FromQuery] string? search, [FromQuery] int take = 1000, CancellationToken ct = default)
     {
-        var (f, t) = ReportFilters.Range(from, to);
+        var (f, t) = Window(from, to);
         var query = db.AuditLogs.Where(a => a.CreatedAt >= f && a.CreatedAt < t);
         if (ReportFilters.Any(userId))
         {
@@ -844,7 +917,7 @@ public class OperationsReportsController(AppDbContext db) : ControllerBase
         [FromQuery] DateTime? from, [FromQuery] DateTime? to,
         [FromQuery] int[]? branchId, [FromQuery] int[]? userId, CancellationToken ct = default)
     {
-        var (f, t) = ReportFilters.Range(from, to);
+        var (f, t) = Window(from, to);
         var orders = await db.Orders.Include(o => o.Lines).Include(o => o.Cashier).Include(o => o.Branch)
             .Where(o => o.CreatedAt >= f && o.CreatedAt < t).ToListAsync(ct);
         orders = orders.Where(o => ReportFilters.Matches(branchId, o.BranchId)
@@ -879,7 +952,7 @@ public class OperationsReportsController(AppDbContext db) : ControllerBase
         [FromQuery] int[]? branchId, [FromQuery] int[]? categoryId, [FromQuery] int[]? productId,
         [FromQuery] string groupBy = "product", CancellationToken ct = default)
     {
-        var (f, t) = ReportFilters.Range(from, to);
+        var (f, t) = Window(from, to);
         var lines = await db.OrderLines.Include(l => l.Order)
             .Include(l => l.Product).ThenInclude(p => p!.Category)
             .Where(l => l.Order!.Status != OrderStatus.Voided && l.Order.CreatedAt >= f && l.Order.CreatedAt < t)
@@ -929,7 +1002,7 @@ public class OperationsReportsController(AppDbContext db) : ControllerBase
         [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int[]? branchId,
         [FromQuery] string[]? method, CancellationToken ct = default)
     {
-        var (f, t) = ReportFilters.Range(from, to);
+        var (f, t) = Window(from, to);
         var orders = await db.Orders.Include(o => o.Payments)
             .Where(o => o.Status != OrderStatus.Voided && o.CreatedAt >= f && o.CreatedAt < t).ToListAsync(ct);
         orders = orders.Where(o => ReportFilters.Matches(branchId, o.BranchId)).ToList();
@@ -962,7 +1035,7 @@ public class OperationsReportsController(AppDbContext db) : ControllerBase
         [FromQuery] DateTime? from, [FromQuery] DateTime? to,
         [FromQuery] int[]? branchId, [FromQuery] int[]? categoryId, CancellationToken ct = default)
     {
-        var (f, t) = ReportFilters.Range(from, to);
+        var (f, t) = Window(from, to);
         var categories = await db.Categories.ToListAsync(ct);
         categories = categories.Where(c => ReportFilters.Matches(categoryId, c.Id)).ToList();
         var catIds = categories.Select(c => c.Id).ToHashSet();

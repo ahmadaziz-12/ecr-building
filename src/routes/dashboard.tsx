@@ -192,7 +192,9 @@ function OverviewPage() {
   const discountsTotal = revenueOrders.reduce((s, o) => s + o.discountTotal, 0);
   const grandTotalSum = revenueOrders.reduce((s, o) => s + o.grandTotal, 0);
   const txCount = revenueOrders.length;
-  const avgBasket = txCount ? Math.round(grandTotalSum / txCount) : 0;
+  // Two decimals, matching Sales Summary's avgBasket. Rounding to whole riyals here made the two
+  // screens disagree by up to half a riyal on the same set of orders.
+  const avgBasket = txCount ? Math.round((grandTotalSum / txCount) * 100) / 100 : 0;
 
   const lowStockCount = stockLevelsList.filter((s) => s.status === "Low").length;
   const criticalStockCount = stockLevelsList.filter((s) => s.status === "Critical").length;

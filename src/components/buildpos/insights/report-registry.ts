@@ -1,7 +1,7 @@
 import {
   AlertTriangle, BadgePercent, Banknote, Boxes, CalendarClock, ClipboardCheck, Clock, FileBarChart2,
   Gauge, HeartPulse, Layers, PackageSearch, Receipt, RotateCcw, Scale, ShieldCheck, ShoppingCart,
-  TrendingUp, Truck, Undo2, UserCog, Users, Wallet,
+  TrendingUp, Truck, Undo2, UserCheck, UserCog, Users, Wallet,
 } from "lucide-react";
 import type { ReportFilterSpec, ReportKnobSpec } from "./ReportFilterBar";
 import type { ReportColumn, ReportDetail } from "./ReportTable";
@@ -18,7 +18,7 @@ export type ReportKey =
   | "returns-analysis" | "refund-methods" | "restocking-fees" | "customer-returns" | "damaged-items"
   | "item-report" | "inventory-report" | "low-stock" | "stock-count-variance" | "slow-moving" | "expiry-report"
   | "purchase-orders" | "supplier-returns" | "supplier-performance"
-  | "vat" | "contractor-aging" | "employee-audit";
+  | "vat" | "contractor-aging" | "employee-report" | "employee-audit";
 
 export type ReportGroup = "Sales" | "Returns & Quality" | "Inventory" | "Procurement" | "Tax & B2B" | "People & Audit";
 
@@ -57,7 +57,11 @@ const F = {
   customer: { key: "customerId", label: "Customer", allLabel: "Customers", options: (o: ReportFilterOptionsDto) => o.customers },
   user: { key: "userId", label: "User", allLabel: "Users", options: (o: ReportFilterOptionsDto) => o.users },
   employee: { key: "employeeId", label: "Employee", allLabel: "Employees", options: (o: ReportFilterOptionsDto) => o.employees },
+  role: { key: "roleId", label: "Role", allLabel: "Roles", options: (o: ReportFilterOptionsDto) => o.roles },
+  userStatus: { key: "status", label: "Account", allLabel: "Account Statuses", options: () => opt(["Active", "Suspended", "Inactive"]) },
+  orderType: { key: "orderType", label: "Order Type", allLabel: "Order Types", options: () => opt(["Retail", "Contractor", "Quotation", "Delivery"]) },
   brand: { key: "brand", label: "Brand", allLabel: "Brands", options: (o: ReportFilterOptionsDto) => opt(o.brands) },
+  supplierType: { key: "supplierType", label: "Supplier Type", allLabel: "Supplier Types", options: (o: ReportFilterOptionsDto) => opt(o.supplierTypes) },
   stockStatus: { key: "stockStatus", label: "Stock Status", allLabel: "Stock Status", options: (o: ReportFilterOptionsDto) => opt(o.stockStatuses) },
   entityStatus: { key: "status", label: "Status", allLabel: "Statuses", options: () => opt(["Active", "Inactive"]) },
   locationType: { key: "locationType", label: "Location", allLabel: "Locations", options: () => opt(["Warehouse", "Branch"]) },
@@ -87,27 +91,37 @@ export const REPORTS: ReportDef[] = [
   {
     key: "sales-summary",
     label: "Sales Summary",
-    desc: "Gross, discounts, VAT and net — by payment method and cashier.",
+    desc: "Takings and margin for the period, cut by payment method, cashier, branch, day and category.",
     group: "Sales",
     icon: TrendingUp,
     dated: true,
-    filters: [F.branch],
+    // Order-level attributes only — see the endpoint comment: a product filter on a whole-order
+    // summary would leave Gross Sales counting entire baskets and stop it reconciling.
+    filters: [F.branch, F.user, F.customer, F.orderType, F.paymentMethod],
   },
   {
     key: "top-products",
     label: "Top Products",
-    desc: "Best sellers by revenue in the period.",
+    desc: "Best sellers by revenue, with margin, discounting, return rate and stock cover behind each.",
     group: "Sales",
     icon: FileBarChart2,
     dated: true,
-    filters: [F.branch, F.category],
-    knobs: [{ key: "take", label: "Top", kind: "number", min: 1, max: 100 }],
+    filters: [F.branch, F.category, F.item, F.supplier, F.brand],
+    knobs: [{ key: "take", label: "Top", kind: "number", min: 1, max: 200 }],
     defaultKnobs: { take: 20 },
     tableTitle: "Top Products by Revenue",
     columns: [
-      c("sku", "SKU", "mono"), c("name", "Product"),
-      c("units", "Units", "qty"), c("revenue", "Revenue", "money"),
+      c("sku", "SKU", "mono"), c("name", "Product"), c("category", "Category"), c("brand", "Brand"),
+      c("supplier", "Supplier"), c("uom", "UOM"),
+      c("orders", "Orders", "int"), c("units", "Units", "qty"),
+      c("grossRevenue", "Gross", "money"), c("discounts", "Discounts", "money"),
+      c("revenue", "Revenue", "money"), c("sharePct", "Share", "pct"),
+      c("cogs", "COGS", "money"), c("grossProfit", "Gross Profit", "money"), c("marginPct", "Margin", "pct"),
+      c("avgSellingPrice", "Avg Price", "money"),
+      c("returnedUnits", "Returned", "qty"), c("returnRatePct", "Return Rate", "pct"),
+      c("onHand", "On Hand", "qty"), c("lastSoldAt", "Last Sold", "date"),
     ],
+    emptyLabel: "No sales in the selected period for these filters.",
   },
   {
     key: "profit-margin",
@@ -185,7 +199,7 @@ export const REPORTS: ReportDef[] = [
     group: "Sales",
     icon: BadgePercent,
     dated: true,
-    filters: [F.branch],
+    filters: [F.branch, F.user, F.orderType],
   },
 
   // ————————————— Inventory —————————————
@@ -300,11 +314,11 @@ export const REPORTS: ReportDef[] = [
   {
     key: "slow-moving",
     label: "Slow-Moving Stock",
-    desc: "On-hand items with no sales in the chosen window.",
+    desc: "On-hand items with no sales in the chosen window, and the capital tied up in them.",
     group: "Inventory",
     icon: Clock,
     dated: false,
-    filters: [F.branch, F.category, F.item],
+    filters: [F.branch, F.category, F.item, F.supplier, F.brand],
     knobs: [{
       key: "days", label: "No sales in", kind: "choice",
       choices: [{ value: "30", label: "30 days" }, { value: "60", label: "60 days" }, { value: "90", label: "90 days" }, { value: "180", label: "180 days" }],
@@ -312,7 +326,14 @@ export const REPORTS: ReportDef[] = [
     defaultKnobs: { days: "30" },
     tableTitle: "Slow-Moving SKUs",
     columns: [
-      c("sku", "SKU", "mono"), c("name", "Product"), c("onHand", "On Hand", "qty"), c("lastSoldAt", "Last Sold", "date"),
+      c("sku", "SKU", "mono"), c("name", "Product"), c("category", "Category"), c("brand", "Brand"),
+      c("supplier", "Supplier"), c("uom", "UOM"),
+      c("onHand", "On Hand", "qty"), c("costPrice", "Cost", "money"), c("stockValue", "Stock Value", "money"),
+      c("sellingPrice", "Price", "money"), c("retailValue", "Retail Value", "money"),
+      c("reorderLevel", "Reorder", "int"),
+      c("unitsSoldInWindow", "Sold In Window", "qty"),
+      c("lastSoldAt", "Last Sold", "date"), c("daysSinceLastSale", "Days Idle", "int"),
+      c("status", "Status", "status"),
     ],
     emptyLabel: "Nothing slow-moving — every stocked SKU sold recently.",
   },
@@ -430,7 +451,7 @@ export const REPORTS: ReportDef[] = [
     group: "Procurement",
     icon: Truck,
     dated: true,
-    filters: [F.supplier],
+    filters: [F.supplier, F.branch, F.supplierType],
     tableTitle: "Supplier Scorecard",
     columns: [
       c("supplier", "Supplier"), c("type", "Type"), c("terms", "Terms"),
@@ -517,7 +538,7 @@ export const REPORTS: ReportDef[] = [
     group: "Returns & Quality",
     icon: Scale,
     dated: true,
-    filters: [F.branch],
+    filters: [F.branch, F.customer, F.returnType, F.returnStatus],
     tableTitle: "Returns by Type",
     columns: [
       c("type", "Type"), c("count", "Tickets", "int"), c("grossRefund", "Gross Refund", "money"),
@@ -533,7 +554,7 @@ export const REPORTS: ReportDef[] = [
     group: "Returns & Quality",
     icon: Banknote,
     dated: true,
-    filters: [F.branch],
+    filters: [F.branch, F.customer, F.refundMethod, F.returnType],
     tableTitle: "Refunds by Method",
     columns: [c("method", "Method"), c("count", "Refunds", "int"), c("amount", "Amount", "money")],
     emptyLabel: "No approved refunds in the selected period.",
@@ -583,6 +604,61 @@ export const REPORTS: ReportDef[] = [
   },
 
   // ————————————— People & Audit —————————————
+  {
+    key: "employee-report",
+    label: "Employee Report",
+    desc: "Per-staff register performance, voids, refunds approved, shift cash variance and audit footprint.",
+    group: "People & Audit",
+    icon: UserCheck,
+    dated: true,
+    filters: [F.user, F.branch, F.role, F.userStatus],
+    tableTitle: "Staff Activity & Performance",
+    columns: [
+      c("name", "Employee"), c("role", "Role"), c("branch", "Branch"),
+      c("orders", "Orders", "int"), c("grossSales", "Gross", "money"),
+      c("discounts", "Discounts", "money"), c("discountRatePct", "Discount Rate", "pct"),
+      c("vat", "VAT", "money"), c("netSales", "Net Sales", "money"),
+      c("avgBasket", "Avg Basket", "money"), c("itemsPerOrder", "Items/Order", "qty"),
+      c("voidedOrders", "Voids", "int"), c("voidedValue", "Voided Value", "money"),
+      c("refundsApproved", "Refunds Approved", "int"), c("refundValue", "Refund Value", "money"),
+      c("shifts", "Shifts", "int"), c("cashVariance", "Cash Variance", "money"),
+      c("auditEvents", "Audit Events", "int"), c("criticalEvents", "Critical", "int"),
+      c("lastActivityAt", "Last Activity", "datetime"), c("status", "Account", "status"),
+      { key: "email", label: "Email", exportOnly: true },
+      { key: "lastLoginAt", label: "Last Login", format: "datetime", exportOnly: true },
+    ],
+    detail: {
+      title: (r: never) => (r as { name: string }).name,
+      subtitle: (r: never) => {
+        const row = r as { role: string; branch: string };
+        return `${row.role} · ${row.branch}`;
+      },
+      fields: (r: never) => {
+        const row = r as {
+          email: string; status: string; lastLoginAt: string | null; orders: number;
+          netSales: number; discountRatePct: number; voidedOrders: number; cashVariance: number;
+        };
+        return [
+          { label: "Email", value: row.email },
+          { label: "Account", value: row.status },
+          { label: "Last Login", value: row.lastLoginAt ? new Date(row.lastLoginAt).toLocaleString("en-GB") : "Never" },
+          { label: "Orders", value: String(row.orders) },
+          { label: "Net Sales", value: `${row.netSales.toFixed(2)} ر.س` },
+          { label: "Discount Rate", value: `${row.discountRatePct.toFixed(1)}%` },
+          { label: "Voids", value: String(row.voidedOrders) },
+          { label: "Cash Variance", value: `${row.cashVariance.toFixed(2)} ر.س` },
+        ];
+      },
+      itemsLabel: "Activity trail",
+      items: (r: never) => (r as { items: unknown[] }).items,
+      columns: [
+        c("date", "When", "datetime"), c("kind", "Type"), c("reference", "Reference", "mono"),
+        c("detail", "Detail"), c("amount", "Amount", "money"), c("branch", "Branch"),
+        c("severity", "Severity", "status"),
+      ],
+    },
+    emptyLabel: "No staff accounts match these filters.",
+  },
   {
     key: "employee-audit",
     label: "Employee Audit Report",

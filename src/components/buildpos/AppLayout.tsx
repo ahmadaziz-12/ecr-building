@@ -273,7 +273,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
       {hasAccess("Delivery") && <DeliverySync />}
       {hasAccess("Hr") && <HrSync />}
       {/* Sidebar */}
-      <aside className="sticky top-0 hidden h-screen w-64 flex-none flex-col border-r border-black/5 bg-sidebar-bg text-sidebar-fg lg:flex relative">
+      {/* Narrower than the usual 16rem: the reports console renders 20-plus-column tables, and the
+          reclaimed 2rem is what keeps them inside their own scroller instead of pushing the page
+          itself sideways. */}
+      <aside className="sticky top-0 hidden h-screen w-56 flex-none flex-col border-r border-black/5 bg-sidebar-bg text-sidebar-fg lg:flex relative">
         <div className="pointer-events-none absolute inset-0 blueprint-grid-dark opacity-60" />
         <div className="relative flex h-16 items-center border-b border-white/10 px-4">
           <div className="flex h-10 w-full items-center justify-center rounded-xl bg-white/95 px-3 shadow-sm">
@@ -520,7 +523,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </span>
         </div>
 
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+        {/* min-w-0 lets a wide child (a report table) shrink to the column and scroll inside its own
+            overflow-x-auto box; without it the flex item sizes to its content and the whole page
+            gains a horizontal scrollbar. */}
+        <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
 
         <footer className="border-t border-black/5 bg-white px-4 py-3 text-center text-xs text-muted-foreground md:px-6">
           BuildPOS · Al Binaa Building Materials Trading · Data source: POS transactions, inventory, cashier shifts, delivery orders, and ZATCA invoice records.

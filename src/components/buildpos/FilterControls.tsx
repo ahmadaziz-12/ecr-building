@@ -32,6 +32,9 @@ export function MultiSelectFilter({
   triggerClassName?: string;
 }) {
   const [query, setQuery] = useState("");
+  // Clearing is a "done here" gesture — the panel it lives in has nothing left to show, so it
+  // closes rather than leaving an empty popover covering the results you just widened.
+  const [open, setOpen] = useState(false);
   const display = (o: string) => labels?.[o] ?? o;
   const filteredOptions = useMemo(
     () => (query.trim() ? options.filter((o) => display(o).toLowerCase().includes(query.trim().toLowerCase())) : options),
@@ -58,7 +61,7 @@ export function MultiSelectFilter({
     selected.length === 0 ? allLabel : selected.length === 1 ? display(selected[0]) : `${selected.length} selected`;
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -79,7 +82,11 @@ export function MultiSelectFilter({
           {selected.length > 0 && (
             <button
               type="button"
-              onClick={() => onChange([])}
+              onClick={() => {
+                onChange([]);
+                setQuery("");
+                setOpen(false);
+              }}
               className="text-xs font-medium text-brand hover:underline"
             >
               Clear
@@ -184,6 +191,7 @@ export function DateRangeFilter({
   onChange: (next: DateRangeValue) => void;
   triggerClassName?: string;
 }) {
+  const [open, setOpen] = useState(false);
   const triggerLabel = !value.preset
     ? "All Time"
     : value.preset === "Custom Range"
@@ -193,7 +201,7 @@ export function DateRangeFilter({
       : value.preset;
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -214,7 +222,10 @@ export function DateRangeFilter({
           {value.preset && (
             <button
               type="button"
-              onClick={() => onChange({ preset: "" })}
+              onClick={() => {
+                onChange({ preset: "" });
+                setOpen(false);
+              }}
               className="text-xs font-medium text-brand hover:underline"
             >
               Clear

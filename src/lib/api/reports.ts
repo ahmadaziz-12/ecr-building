@@ -12,22 +12,48 @@ import { apiGet } from "./client";
 //  • Multi-selects serialise as repeated params (?branchId=1&branchId=2). An omitted/empty array
 //    means "no constraint", never "match nothing".
 
-export type SalesByMethodRow = { method: string; amount: number; count: number };
-export type SalesByCashierRow = { cashier: string; amount: number; orders: number };
+export type SalesByMethodRow = { method: string; amount: number; count: number; sharePct: number; refunded: number; net: number };
+export type SalesByCashierRow = { cashier: string; branch: string; amount: number; orders: number; discounts: number; avgBasket: number; voids: number };
+export type SalesByBranchRow = {
+  branch: string; orders: number; gross: number; discounts: number; vat: number; net: number;
+  cogs: number; grossProfit: number; marginPct: number; avgBasket: number;
+};
+export type SalesByDayRow = { date: string; orders: number; gross: number; discounts: number; net: number; grossProfit: number };
+export type SalesByCategoryRow = { category: string; units: number; revenue: number; cogs: number; grossProfit: number; marginPct: number; sharePct: number };
 export type SalesSummaryDto = {
   grossSales: number;
   discounts: number;
   vat: number;
+  fees: number;
   netSales: number;
   orderCount: number;
+  itemsSold: number;
+  avgBasket: number;
+  cogs: number;
+  grossProfit: number;
+  marginPct: number;
+  returnCount: number;
+  refundValue: number;
+  netAfterReturns: number;
+  uniqueCustomers: number;
+  voidedOrders: number;
   byMethod: SalesByMethodRow[];
   byCashier: SalesByCashierRow[];
+  byBranch: SalesByBranchRow[];
+  byDay: SalesByDayRow[];
+  byCategory: SalesByCategoryRow[];
 };
 export type ReturnsAnalysisRow = { type: string; count: number; grossRefund: number; vatReversed: number; restockingFees: number; netCashback: number };
 export type RefundMethodRow = { method: string; count: number; amount: number };
 export type VatByRateRow = { rate: number; taxableAmount: number; vatCollected: number };
 export type VatReportDto = { collected: VatByRateRow[]; totalCollected: number; totalReversed: number; netVat: number };
-export type TopProductRow = { sku: string; name: string; units: number; revenue: number };
+export type TopProductRow = {
+  productId: number; sku: string; name: string; category: string; brand: string | null;
+  supplier: string | null; uom: string; orders: number; units: number; grossRevenue: number;
+  discounts: number; revenue: number; cogs: number; grossProfit: number; marginPct: number;
+  avgSellingPrice: number; sharePct: number; returnedUnits: number; returnRatePct: number;
+  onHand: number; lastSoldAt: string | null;
+};
 export type SlowMovingRow = { sku: string; name: string; onHand: number; lastSoldAt: string | null };
 export type ContractorAgingRow = { customer: string; creditLimit: number; outstanding: number; lastPurchaseAt: string | null; daysSinceLastPurchase: number };
 export type RestockingFeeRow = { month: string; returns: number; feesCollected: number };
@@ -108,6 +134,18 @@ export type EmployeeAuditRow = {
   designation: string | null; branch: string | null; module: string; event: string; recordId: string | null;
   oldValue: string | null; newValue: string | null; reason: string | null; severity: string; device: string | null;
 };
+export type EmployeeActivityRow = {
+  date: string; kind: string; reference: string; detail: string; amount: number | null;
+  branch: string | null; severity: string;
+};
+export type EmployeeReportRow = {
+  userId: number; name: string; email: string; role: string; branch: string; status: string;
+  lastLoginAt: string | null; lastActivityAt: string | null; orders: number; grossSales: number;
+  discounts: number; vat: number; netSales: number; avgBasket: number; itemsPerOrder: number;
+  discountRatePct: number; voidedOrders: number; voidedValue: number; refundsApproved: number;
+  refundValue: number; shifts: number; cashVariance: number; auditEvents: number;
+  criticalEvents: number; items: EmployeeActivityRow[];
+};
 export type CashierPerformanceRow = {
   userId: number; cashier: string; branch: string; orders: number; gross: number; discounts: number; vat: number;
   net: number; avgBasket: number; itemsPerOrder: number; voidedOrders: number; discountRatePct: number;
@@ -135,6 +173,7 @@ export type ReportFilterOptionsDto = {
   customers: FilterOption[];
   users: FilterOption[];
   employees: FilterOption[];
+  roles: FilterOption[];
   purchaseOrderStatuses: string[];
   rtsStatuses: string[];
   returnTypes: string[];
@@ -147,6 +186,7 @@ export type ReportFilterOptionsDto = {
   auditEvents: string[];
   brands: string[];
   stockStatuses: string[];
+  supplierTypes: string[];
 };
 
 export type ReportDateRange = { from?: string; to?: string };
@@ -230,6 +270,8 @@ export const useDamagedItemsReport = (query: ReportQuery, enabled = true) =>
   useReport<DamagedItemReportRow[]>("damaged-items", query, enabled);
 export const useEmployeeAuditReport = (query: ReportQuery, enabled = true) =>
   useReport<EmployeeAuditRow[]>("employee-audit", query, enabled);
+export const useEmployeeReport = (query: ReportQuery, enabled = true) =>
+  useReport<EmployeeReportRow[]>("employee-report", query, enabled);
 export const useCashierPerformanceReport = (query: ReportQuery, enabled = true) =>
   useReport<CashierPerformanceRow[]>("cashier-performance", query, enabled);
 export const useProfitMarginReport = (query: ReportQuery, enabled = true) =>
