@@ -26,7 +26,13 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
             AddColumnIfNotExists(migrationBuilder, "CanEdit", "tinyint(1) NOT NULL DEFAULT FALSE");
             AddColumnIfNotExists(migrationBuilder, "CanExport", "tinyint(1) NOT NULL DEFAULT FALSE");
             AddColumnIfNotExists(migrationBuilder, "CanView", "tinyint(1) NOT NULL DEFAULT FALSE");
-            AddColumnIfNotExists(migrationBuilder, "ModuleKey", "varchar(100) CHARACTER SET utf8mb4 NOT NULL DEFAULT ''");
+            // DEFAULT '''' (4 quotes), not '' (2): this string is embedded inside a single-quoted SQL
+            // literal that itself becomes the dynamic PREPARE statement text (see AddColumnIfNotExists
+            // below) — two levels of string nesting. MySQL's `''`-escaping collapses one level, so it
+            // takes 4 source quotes to leave a literal `''` (empty-string default) in the SQL PREPARE
+            // actually executes. The previous 2-quote version left the PREPAREd ALTER TABLE with an
+            // unterminated string literal, which is exactly the "near '''" syntax error this fixes.
+            AddColumnIfNotExists(migrationBuilder, "ModuleKey", "varchar(100) CHARACTER SET utf8mb4 NOT NULL DEFAULT ''''");
 
             // Every existing row just got (or already has) ModuleKey = '' and Module/Level are being
             // dropped below, so every pre-existing RolePermission row is now indistinguishable
