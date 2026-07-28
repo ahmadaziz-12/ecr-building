@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { toast } from "sonner";
+import { Printer, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/buildpos/sections";
-import { statusTone } from "./shared";
+import { statusTone, exportToCsv } from "./shared";
 import { useCustomerLedger, useCustomerStatement, useRecordCustomerPayment } from "@/lib/api/pos";
 
 function fmtSar(n: number): string {
@@ -99,6 +100,18 @@ export function CustomerStatementDialog({
     tab === "ledger" && customerId !== null ? customerId : undefined,
   );
 
+  function handleExport() {
+    if (!statement) return;
+    if (tab === "ledger") {
+      exportToCsv(`${statement.customerName}-ledger.csv`, ["Date", "Reference", "Description", "Charged", "Paid/Credited"],
+        (ledger ?? []).map((l) => [l.date, l.reference, l.description, l.debit, l.credit]));
+    } else {
+      exportToCsv(`${statement.customerName}-orders.csv`, ["Order #", "Date", "Amount", "Payment", "Status"],
+        statement.orders.map((o) => [o.orderNo, o.createdAt, o.grandTotal, o.paymentStatus, o.status]));
+    }
+    toast.success("Exported CSV");
+  }
+
   return (
     <Dialog
       open={customerId !== null}
@@ -149,11 +162,19 @@ export function CustomerStatementDialog({
                   </button>
                 ))}
               </div>
-              {tab === "ledger" && isAccountCustomer && (
-                <Button size="sm" variant="outline" onClick={() => setShowPaymentForm((v) => !v)}>
-                  {showPaymentForm ? "Cancel" : "Record Payment"}
+              <div className="flex items-center gap-1.5">
+                <Button size="sm" variant="ghost" className="gap-1.5" onClick={handleExport}>
+                  <Download className="h-3.5 w-3.5" /> Export
                 </Button>
-              )}
+                <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => window.print()}>
+                  <Printer className="h-3.5 w-3.5" /> Print
+                </Button>
+                {tab === "ledger" && isAccountCustomer && (
+                  <Button size="sm" variant="outline" onClick={() => setShowPaymentForm((v) => !v)}>
+                    {showPaymentForm ? "Cancel" : "Record Payment"}
+                  </Button>
+                )}
+              </div>
             </div>
 
             {tab === "ledger" && showPaymentForm && isAccountCustomer && (

@@ -123,7 +123,10 @@ public class SuppliersController(AppDbContext db, IAuditService audit, IGlPostin
         await audit.LogAsync("suppliers", "SUPPLIER_PAYMENT_RECORDED", id.ToString(), userId: userId, newValue: request, cancellationToken: ct);
 
         await gl.PostAsync(paymentNo, $"Payment to {supplier.NameEn}",
-            [new GlLine("2000", request.Amount, 0), new GlLine("1000", 0, request.Amount)], ct);
+            [
+                new GlLine("2000", request.Amount, 0, $"Reduces amount owed to {supplier.NameEn}"),
+                new GlLine("1000", 0, request.Amount, $"{request.Method} payment paid out"),
+            ], ct);
 
         return Ok(Map(supplier));
     }
@@ -396,7 +399,10 @@ public class PurchaseOrdersController(AppDbContext db, IAuditService audit, ISto
         if (receivedValue > 0)
         {
             await gl.PostAsync(po.PoNo, $"Goods received from {po.Supplier?.NameEn}",
-                [new GlLine("1200", receivedValue, 0), new GlLine("2000", 0, receivedValue)], ct);
+                [
+                    new GlLine("1200", receivedValue, 0, "Inventory received into stock"),
+                    new GlLine("2000", 0, receivedValue, $"Payable to {po.Supplier?.NameEn}"),
+                ], ct);
         }
         return Ok(Map(po));
     }
@@ -562,7 +568,10 @@ public class ReturnToSupplierController(AppDbContext db, IAuditService audit, IS
         if (value > 0)
         {
             await gl.PostAsync(rts.RtsNo, $"Credit note from {rts.Supplier?.NameEn} for return {rts.RtsNo}",
-                [new GlLine("2000", value, 0), new GlLine("1200", 0, value)], ct);
+                [
+                    new GlLine("2000", value, 0, $"Credit note reduces payable to {rts.Supplier?.NameEn}"),
+                    new GlLine("1200", 0, value, "Inventory value removed (returned to supplier)"),
+                ], ct);
         }
         return Ok(Map(rts));
     }

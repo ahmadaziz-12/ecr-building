@@ -946,139 +946,20 @@ function OverviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, visibleTabs.map((t) => t.value).join(",")]);
 
-  const csvExportForActiveTab = useMemo(() => {
-    switch (activeTab) {
-      case "overview":
-        return {
-          filename: "dashboard-overview.csv",
-          columns: ["Metric", "Value", "Detail"],
-          rows: overviewKpisReal.map((k) => [k.title, k.value, k.sub]),
-        };
-      case "sales":
-        return {
-          filename: "dashboard-sales-performance.csv",
-          columns: ["Order", "Customer", "Type", "Value", "Status", "Payment", "Invoice"],
-          rows: recentOrdersReal.map((o) => [
-            o.id,
-            o.customer,
-            o.type,
-            o.value,
-            o.status,
-            o.payment,
-            o.invoice,
-          ]),
-        };
-      case "inventory":
-        return {
-          filename: "dashboard-inventory-health.csv",
-          columns: [
-            "SKU",
-            "Product",
-            "Category",
-            "Branch",
-            "Qty",
-            "Reorder Level",
-            "Supplier",
-            "Status",
-          ],
-          rows: inventoryRowsReal.map((r) => [
-            r.sku,
-            r.name,
-            r.cat,
-            r.branch,
-            r.qty,
-            r.reorder,
-            r.supplier,
-            r.status,
-          ]),
-        };
-      case "delivery":
-        return {
-          filename: "dashboard-delivery-dispatch.csv",
-          columns: [
-            "Delivery No",
-            "Order",
-            "Customer",
-            "Materials",
-            "Qty",
-            "Driver",
-            "Vehicle",
-            "Status",
-            "Amount",
-          ],
-          rows: deliveryDetailReal.map((d) => [
-            d.no,
-            d.order,
-            d.customer,
-            d.materials,
-            d.qty,
-            d.driver,
-            d.vehicle,
-            d.status,
-            d.amount,
-          ]),
-        };
-      case "cashier":
-        return {
-          filename: "dashboard-cashier-terminal.csv",
-          columns: ["Terminal", "Cashier", "Shift", "Started", "Tx", "Sales", "Expected", "Status"],
-          rows: terminalDetailReal.map((t) => [
-            t.term,
-            t.cashier,
-            t.shift,
-            t.started,
-            t.tx,
-            t.sales,
-            t.expected,
-            t.status,
-          ]),
-        };
-      case "payments":
-        return {
-          filename: "dashboard-payments-returns.csv",
-          columns: ["Section", "Label", "Value", "Tx"],
-          rows: [
-            ...paymentBreakdownReal.map((p) => [
-              "Payment Method",
-              p.method,
-              p.amount,
-              String(p.tx),
-            ]),
-            ...returnBreakdownReal.map((r) => ["Returns", r.label, r.value, ""]),
-          ],
-        };
-      case "compliance":
-        return {
-          filename: "dashboard-compliance-alerts.csv",
-          columns: ["Severity", "Module", "Message", "Age"],
-          rows: alertsReal.map((a) => [a.severity, a.module, a.msg, a.age]),
-        };
-      default:
-        return null;
-    }
-  }, [
-    activeTab,
-    overviewKpisReal,
-    recentOrdersReal,
-    inventoryRowsReal,
-    deliveryDetailReal,
-    terminalDetailReal,
-    paymentBreakdownReal,
-    returnBreakdownReal,
-    alertsReal,
-  ]);
-
   return (
     <div className="space-y-5">
       <DashboardHeader subtitle="Monitor today's sales, transactions, stock risks, deliveries, and active shifts across your building-material branches." />
 
-      {/* Global filter bar */}
-      <div className="bp-fade sticky top-16 z-[5] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/85 backdrop-blur">
-        <FilterBar exportData={csvExportForActiveTab} />
+      {/* Global filter bar — scrolls away with the page. Pinned under the header it held a large
+          band of the viewport open on every tab, and it isn't something you adjust while reading rows. */}
+      <div className="bp-fade">
+        <FilterBar />
       </div>
 
+      {/* The tab strip stays pinned — it's navigation — and now sits directly under the app header
+          rather than below the filter bar that used to be stuck above it. */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <div className="sticky top-[7.5rem] z-[4] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/85 backdrop-blur">
+        <div className="sticky top-16 z-[4] -mx-4 px-4 py-2 md:-mx-6 md:px-6 bg-canvas/85 backdrop-blur">
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-xl border border-black/5 bg-white p-1 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
             {visibleTabs.map((t) => {
               const Icon = t.icon;

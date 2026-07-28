@@ -68,6 +68,8 @@ function baseOrder(overrides: Partial<OrderDto> = {}): OrderDto {
     deliveryOrderId: null,
     deliveryOrderNo: null,
     deliveryStage: null,
+    poReference: null,
+    projectCode: null,
     ...overrides,
   };
 }

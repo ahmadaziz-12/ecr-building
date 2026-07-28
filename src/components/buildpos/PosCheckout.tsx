@@ -190,6 +190,12 @@ type CartLine = {
   lengthM?: number;
   widthM?: number;
   heightM?: number;
+  // BRD §2.3 enhancement: the cashier optionally records the source piece/roll size this cut-to-size
+  // line was cut from — omitted entirely (the default) behaves exactly as before: the exact measured
+  // cut is deducted from stock, no remnant tracked. When set and larger than the measured cut,
+  // remnantAction says whether the leftover goes back to sellable stock or is scrapped as waste.
+  sourceQty?: number;
+  remnantAction?: "Restock" | "Scrap";
   // Real product photo (base64 data URL or absent) — falls back to the static demo map, then an icon.
   imageUrl?: string | null;
   // BRD §3.5: cashier flags this line for delivery instead of counter pickup — a sale can mix
@@ -336,7 +342,9 @@ export function PosCheckout() {
   const createQuotation = useCreateQuotation();
 
   const effectiveBranchId = user?.branchId ?? selectedBranchId ?? branches?.[0]?.id ?? null;
-  const { data: liveProducts } = useProducts(true, effectiveBranchId ?? undefined);
+  // Polled so a sale rung up on another terminal at this branch (or a hold/quote reserving stock)
+  // shows up in this cashier's available-qty without a manual reload.
+  const { data: liveProducts } = useProducts(true, effectiveBranchId ?? undefined, 20_000);
   const { data: categories } = useCategories();
   const topLevelCategories = useMemo(
     () => (categories ?? []).filter((c) => c.parentId == null),
@@ -495,6 +503,7 @@ export function PosCheckout() {
         conversions: p.uomConversions ?? [],
         isCutToSize: p.isCutToSize ?? false,
         cutToSizeUnit: p.cutToSizeUnit ?? "Area",
+        minCutQty: p.minCutQty ?? null,
         weight: p.weight,
         imageUrl: p.imageUrl,
         // Carried through so lineDiscountPct can tell whether THIS line actually got a distinct list
@@ -763,6 +772,28 @@ export function PosCheckout() {
 
   function removeLine(sku: string) {
     setCart((c) => c.filter((l) => l.sku !== sku));
+  }
+
+  // BRD §2.3 enhancement: the cashier optionally records the source piece/roll size a cut-to-size
+  // line was cut from — leaving it blank is a no-op (exactly today's behavior). Clearing sourceQty
+  // also clears any remnantAction, since it's meaningless without a source to compare against.
+  function setSourceQty(sku: string, raw: string) {
+    const value = raw === "" ? undefined : Math.max(0, Number(raw) || 0);
+    setCart((c) =>
+      c.map((l) =>
+        l.sku === sku
+          ? {
+              ...l,
+              sourceQty: value,
+              remnantAction: value === undefined ? undefined : l.remnantAction,
+            }
+          : l,
+      ),
+    );
+  }
+
+  function setRemnantAction(sku: string, action: "Restock" | "Scrap") {
+    setCart((c) => c.map((l) => (l.sku === sku ? { ...l, remnantAction: action } : l)));
   }
 
   // BRD §2.3: per-line note the cashier attaches to a specific cart entry — pure client state until
@@ -1484,6 +1515,20 @@ export function PosCheckout() {
         "Delivery contact name, mobile, city and promised date are required for the flagged line(s).",
       );
     }
+    // BRD §2.3 enhancement: a cut-to-size line with a tracked source size and a leftover remnant
+    // must say what happens to it before the sale can complete — same client-side pre-check pattern
+    // as the delivery-details guard above (the server enforces this too either way).
+    const unresolvedRemnant = cart.find(
+      (l) =>
+        l.sourceQty !== undefined &&
+        Math.max(0, Math.round((l.sourceQty - l.qty) * 1000) / 1000) > 0 &&
+        !l.remnantAction,
+    );
+    if (unresolvedRemnant) {
+      throw new Error(
+        `Choose Restock or Scrap for ${unresolvedRemnant.name}'s remnant before charging.`,
+      );
+    }
     const delivery: DeliveryDetailsInput | null = hasDeliveryLines
       ? {
           addressType: deliveryAddressType,
@@ -1521,6 +1566,8 @@ export function PosCheckout() {
               notes: l.notes?.trim() || null,
               manualDiscountPct: l.manualDiscountPct ?? null,
               manualUnitPrice: l.manualUnitPrice ?? null,
+              sourceQty: l.sourceQty ?? null,
+              remnantAction: l.sourceQty ? (l.remnantAction ?? null) : null,
             }
           : {
               productId: l.productId,
@@ -2621,89 +2668,146 @@ export function PosCheckout() {
                 // the computed length/area/volume (per the product's cut-to-size unit) becomes the
                 // billed quantity at the per-stock-UOM price. Length needs just one input, Area two,
                 // Volume three.
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1 text-xs">
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      value={l.lengthM ?? ""}
-                      aria-label={`${l.sku} length (m)`}
-                      onChange={(e) => changeDimension(l.sku, "lengthM", e.target.value)}
-                      className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
-                    />
-                    {l.cutToSizeUnit !== "Length" && (
-                      <>
-                        <span className="text-muted-foreground">×</span>
-                        <input
-                          type="number"
-                          min="0.01"
-                          step="0.01"
-                          value={l.widthM ?? ""}
-                          aria-label={`${l.sku} width (m)`}
-                          onChange={(e) => changeDimension(l.sku, "widthM", e.target.value)}
-                          className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
-                        />
-                      </>
-                    )}
-                    {l.cutToSizeUnit === "Volume" && (
-                      <>
-                        <span className="text-muted-foreground">×</span>
-                        <input
-                          type="number"
-                          min="0.01"
-                          step="0.01"
-                          value={l.heightM ?? ""}
-                          aria-label={`${l.sku} height (m)`}
-                          onChange={(e) => changeDimension(l.sku, "heightM", e.target.value)}
-                          className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
-                        />
-                      </>
-                    )}
-                    <span className="ml-1 font-medium text-muted-foreground">
-                      m = {l.qty} {l.stockUom}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {/* BRD §2.3/§6.2: cashier-entered per-line discount %, gated by the same
+                <>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1 text-xs">
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={l.lengthM ?? ""}
+                        aria-label={`${l.sku} length (m)`}
+                        onChange={(e) => changeDimension(l.sku, "lengthM", e.target.value)}
+                        className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
+                      />
+                      {l.cutToSizeUnit !== "Length" && (
+                        <>
+                          <span className="text-muted-foreground">×</span>
+                          <input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={l.widthM ?? ""}
+                            aria-label={`${l.sku} width (m)`}
+                            onChange={(e) => changeDimension(l.sku, "widthM", e.target.value)}
+                            className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
+                          />
+                        </>
+                      )}
+                      {l.cutToSizeUnit === "Volume" && (
+                        <>
+                          <span className="text-muted-foreground">×</span>
+                          <input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={l.heightM ?? ""}
+                            aria-label={`${l.sku} height (m)`}
+                            onChange={(e) => changeDimension(l.sku, "heightM", e.target.value)}
+                            className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
+                          />
+                        </>
+                      )}
+                      <span className="ml-1 font-medium text-muted-foreground">
+                        m = {l.qty} {l.stockUom}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {/* BRD §2.3/§6.2: cashier-entered per-line discount %, gated by the same
                         authorization ceiling as the order-level manual discount. */}
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.5"
-                      value={l.manualDiscountPct ?? ""}
-                      placeholder="0%"
-                      aria-label={`${l.sku} discount percent`}
-                      title="Per-line discount %"
-                      onChange={(e) => setLineDiscountPct(l.sku, e.target.value)}
-                      className="h-7 w-12 rounded-md border border-black/10 bg-white px-1 text-center text-xs outline-none focus:border-brand"
-                    />
-                    {l.manualUnitPrice != null ? (
-                      <div className="text-right">
-                        <p className="font-mono text-[10px] text-muted-foreground line-through">
-                          {money(l.price * l.qty)}
-                        </p>
-                        <p className="font-mono text-sm font-semibold text-brand">
-                          {money(l.manualUnitPrice * l.qty)}
-                        </p>
-                      </div>
-                    ) : lineChargeTotal(l) !== l.price * l.qty ? (
-                      <div className="text-right">
-                        <p className="font-mono text-[10px] text-muted-foreground line-through">
-                          {money(l.price * l.qty)}
-                        </p>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        value={l.manualDiscountPct ?? ""}
+                        placeholder="0%"
+                        aria-label={`${l.sku} discount percent`}
+                        title="Per-line discount %"
+                        onChange={(e) => setLineDiscountPct(l.sku, e.target.value)}
+                        className="h-7 w-12 rounded-md border border-black/10 bg-white px-1 text-center text-xs outline-none focus:border-brand"
+                      />
+                      {l.manualUnitPrice != null ? (
+                        <div className="text-right">
+                          <p className="font-mono text-[10px] text-muted-foreground line-through">
+                            {money(l.price * l.qty)}
+                          </p>
+                          <p className="font-mono text-sm font-semibold text-brand">
+                            {money(l.manualUnitPrice * l.qty)}
+                          </p>
+                        </div>
+                      ) : lineChargeTotal(l) !== l.price * l.qty ? (
+                        <div className="text-right">
+                          <p className="font-mono text-[10px] text-muted-foreground line-through">
+                            {money(l.price * l.qty)}
+                          </p>
+                          <p className="font-mono text-sm font-semibold text-foreground">
+                            {money(lineChargeTotal(l))}
+                          </p>
+                        </div>
+                      ) : (
                         <p className="font-mono text-sm font-semibold text-foreground">
-                          {money(lineChargeTotal(l))}
+                          {money(l.price * l.qty)}
                         </p>
-                      </div>
-                    ) : (
-                      <p className="font-mono text-sm font-semibold text-foreground">
-                        {money(l.price * l.qty)}
-                      </p>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
+                  {(() => {
+                    // BRD §2.3 enhancement: minimum billable qty — the exact measured cut is always
+                    // what's shown/edited above; this is purely a "you'll actually be billed at least
+                    // X" notice, matching what OrdersController.Checkout will compute server-side.
+                    const minCutQty = products.find((p) => p.sku === l.sku)?.minCutQty ?? null;
+                    const belowMinimum = minCutQty != null && l.qty > 0 && l.qty < minCutQty;
+                    // Remnant tracking: only meaningful once a source size is entered and it's larger
+                    // than the measured cut — otherwise there's nothing left over to decide about.
+                    const remnant =
+                      l.sourceQty !== undefined
+                        ? Math.max(0, Math.round((l.sourceQty - l.qty) * 1000) / 1000)
+                        : 0;
+                    return (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                        {belowMinimum && (
+                          <span className="font-medium text-warning">
+                            Billed at minimum {minCutQty} {l.stockUom} (measured {l.qty})
+                          </span>
+                        )}
+                        <label className="flex items-center gap-1 text-muted-foreground">
+                          Cutting from a larger piece?
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={l.sourceQty ?? ""}
+                            placeholder={`size (${l.stockUom})`}
+                            aria-label={`${l.sku} source size`}
+                            onChange={(e) => setSourceQty(l.sku, e.target.value)}
+                            className="h-6 w-20 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
+                          />
+                        </label>
+                        {remnant > 0 && (
+                          <span className="flex items-center gap-1.5">
+                            <span className="font-medium text-foreground">
+                              Remnant: {remnant} {l.stockUom} —
+                            </span>
+                            <button
+                              onClick={() => setRemnantAction(l.sku, "Restock")}
+                              className={`rounded-md border px-1.5 py-0.5 font-medium transition ${l.remnantAction === "Restock" ? "border-brand bg-brand/10 text-brand" : "border-black/10 text-muted-foreground hover:bg-black/5"}`}
+                            >
+                              Restock
+                            </button>
+                            <button
+                              onClick={() => setRemnantAction(l.sku, "Scrap")}
+                              className={`rounded-md border px-1.5 py-0.5 font-medium transition ${l.remnantAction === "Scrap" ? "border-critical bg-critical/10 text-critical" : "border-black/10 text-muted-foreground hover:bg-black/5"}`}
+                            >
+                              Scrap
+                            </button>
+                            {!l.remnantAction && <span className="text-critical">choose one</span>}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </>
               ) : (
                 <div className="mt-2 flex items-center justify-between">
                   <div className="flex items-center gap-1.5">

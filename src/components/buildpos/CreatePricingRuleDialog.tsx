@@ -465,7 +465,8 @@ export function CreatePricingRuleDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-2xl overflow-hidden p-0 sm:rounded-2xl">
         <div className="flex max-h-[85vh] flex-col">
-          <div className="flex items-start justify-between gap-3 border-b border-black/5 px-6 py-4">
+          {/* Close button comes from DialogContent — see the note in FlowDialog. */}
+          <div className="flex items-start justify-between gap-3 border-b border-black/5 py-4 ps-6 pe-12">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-brand">
                 Finance · Pricing
@@ -479,12 +480,6 @@ export function CreatePricingRuleDialog({
                   : "Pick what kind of discount this is — the form adjusts to match."}
               </p>
             </div>
-            <button
-              onClick={() => handleClose(false)}
-              className="grid h-8 w-8 flex-none place-items-center rounded-md text-muted-foreground hover:bg-black/5 hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </button>
           </div>
 
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">

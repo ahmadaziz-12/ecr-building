@@ -183,17 +183,23 @@ export function useDeleteWarehouseBin() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["inventory", "warehouses"] }),
   });
 }
+// Polled rather than pushed (no SignalR/WebSocket infra in this app — see useNotifications, which
+// polls the same way) so a sale rung up on another terminal, or another branch's stock, shows up
+// here without a manual reload.
+const STOCK_REFETCH_INTERVAL_MS = 20_000;
 export const useStockLevels = (enabled = true) =>
   useQuery({
     queryKey: ["inventory", "stock-levels"],
     queryFn: () => apiGet<StockLevelDto[]>("/api/inventory/stock-levels"),
     enabled,
+    refetchInterval: STOCK_REFETCH_INTERVAL_MS,
   });
 export const useBranchStockLevels = (enabled = true) =>
   useQuery({
     queryKey: ["inventory", "branch-stock-levels"],
     queryFn: () => apiGet<BranchStockLevelDto[]>("/api/inventory/branch-stock-levels"),
     enabled,
+    refetchInterval: STOCK_REFETCH_INTERVAL_MS,
   });
 export const useStockBatches = (enabled = true) =>
   useQuery({

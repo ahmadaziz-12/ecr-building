@@ -702,6 +702,11 @@ export function useRowDetails(
       case "/finance/returns": {
         const ret = customerReturns?.find((r) => r.id === id);
         if (!ret) return null;
+        // Exchange returns settle against a real replacement Order (ExchangeOrderId/No) and carry
+        // their own priced replacement lines (exchangeLines) — ApproveExchangeDialog already shows
+        // both sides when approving; this read-only detail view previously only showed the
+        // returned-item side, same as a plain Standard/Damaged/Surplus return.
+        const isExchange = ret.type === "Exchange";
         return {
           title: `Return ${ret.returnNo}`,
           subtitle: ret.customerName,
@@ -716,15 +721,33 @@ export function useRowDetails(
                 { label: "Approved By", value: ret.approvedByName ?? "—" },
                 { label: "Total Refund", value: `${ret.totalAmount.toFixed(2)} ر.س` },
                 { label: "Created", value: fmtDate(ret.createdAt) },
+                ...(isExchange
+                  ? [
+                      { label: "Replacement Order", value: ret.exchangeOrderNo ?? "Not yet created — pending approval" },
+                      {
+                        label: ret.exchangeNetPayable == null ? "Net Settlement" : ret.exchangeNetPayable > 0 ? "Customer Owes" : ret.exchangeNetPayable < 0 ? "Owed Back to Customer" : "Net Settlement",
+                        value: ret.exchangeNetPayable == null ? "—" : `${Math.abs(ret.exchangeNetPayable).toFixed(2)} ر.س`,
+                      },
+                    ]
+                  : []),
               ],
             },
           ],
           tables: [
             {
-              heading: "Lines",
+              heading: isExchange ? "Returned Item(s)" : "Lines",
               columns: ["SKU", "Product", "Qty", "Refund Amount"],
               rows: ret.lines.map((l) => [l.sku, l.productName, l.qty, l.amount.toFixed(2)]),
             },
+            ...(isExchange && ret.exchangeLines.length > 0
+              ? [
+                  {
+                    heading: "Replacement Item(s)",
+                    columns: ["SKU", "Product", "Qty", "Unit Price", "Line Total"],
+                    rows: ret.exchangeLines.map((l) => [l.sku, l.productName, l.qty, l.unitPrice.toFixed(2), l.lineTotal.toFixed(2)]),
+                  },
+                ]
+              : []),
           ],
         };
       }

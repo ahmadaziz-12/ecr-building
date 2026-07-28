@@ -95,6 +95,11 @@ export type Field = {
    *  mirrors the same server-side gate enforced in CatalogController, so a user without it never
    *  gets to type a value the save request will 403 on. */
   requiresCeiling?: keyof PosCeilings;
+  /** Hides this field entirely unless the named sibling field's current value differs from
+   *  `notEquals` — e.g. Minimum Cut Charge is meaningless (and confusing to show) until the
+   *  product is actually marked cut-to-size. FlowDialog also clears the hidden field's value
+   *  when it hides, same as the dependsOn cascade-clear, so a stale value never gets submitted. */
+  hideUnless?: { field: string; notEquals: string };
 };
 
 export type FlowStep = {
@@ -358,6 +363,13 @@ export const flows: Record<string, Flow> = {
             default: "Not cut-to-size",
             hint: "The POS will ask for length / length×width / length×width×height at checkout and bill the computed quantity — e.g. cable by the metre, glass by the m², sand by the m³.",
           },
+          {
+            name: "minCutQty",
+            label: "Minimum Cut Charge (stock UOM)",
+            type: "number",
+            hint: "Leave blank for no minimum. A cut smaller than this is still billed as if it were this size — covers handling/setup cost on a tiny cut (e.g. a minimum 0.5 m² glass charge even for a 0.2 m² piece).",
+            hideUnless: { field: "cutToSizeMode", notEquals: "Not cut-to-size" },
+          },
           { name: "weight", label: "Weight (kg)", type: "number" },
           { name: "returnable", label: "Returnable", type: "toggle" },
         ],
@@ -465,6 +477,13 @@ export const flows: Record<string, Flow> = {
             type: "select",
             options: ["Not cut-to-size", "Length (linear m)", "Area (m²)", "Volume (m³)"],
             hint: "The POS will ask for length / length×width / length×width×height at checkout and bill the computed quantity — e.g. cable by the metre, glass by the m², sand by the m³.",
+          },
+          {
+            name: "minCutQty",
+            label: "Minimum Cut Charge (stock UOM)",
+            type: "number",
+            hint: "Leave blank for no minimum. A cut smaller than this is still billed as if it were this size — covers handling/setup cost on a tiny cut (e.g. a minimum 0.5 m² glass charge even for a 0.2 m² piece).",
+            hideUnless: { field: "cutToSizeMode", notEquals: "Not cut-to-size" },
           },
           { name: "weight", label: "Weight (kg)", type: "number" },
           { name: "returnable", label: "Returnable", type: "toggle" },

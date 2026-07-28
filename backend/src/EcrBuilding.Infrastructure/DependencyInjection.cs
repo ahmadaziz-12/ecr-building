@@ -27,6 +27,7 @@ public static class DependencyInjection
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IAuditService, AuditService>();
         services.AddScoped<IStockMovementService, StockMovementService>();
+        services.AddScoped<IStockReservationService, StockReservationService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IPermissionResolver, PermissionResolver>();
         services.AddScoped<IPaymentGateway, MockPaymentGateway>();

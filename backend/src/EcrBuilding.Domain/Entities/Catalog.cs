@@ -62,6 +62,11 @@ public class Product : BaseEntity
     // that was this flag's only behavior before Volume/Length existed.
     public bool IsCutToSize { get; set; }
     public string CutToSizeUnit { get; set; } = "Area";
+    // BRD §2.3 enhancement: minimum billable quantity (in stock UOM) for a cut-to-size line — a
+    // glass cutter still charges a minimum 0.5 m² even for a 0.2 m² cut, covering handling/setup
+    // cost. Null = no minimum, billed qty is the exact measured dimension (pre-existing behavior).
+    // Meaningless when IsCutToSize is false.
+    public decimal? MinCutQty { get; set; }
     // BRD §2.2: supplier link and physical bin/aisle reference, surfaced at the POS.
     public int? SupplierId { get; set; }
     public Supplier? Supplier { get; set; }

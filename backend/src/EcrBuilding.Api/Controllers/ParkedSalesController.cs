@@ -15,7 +15,7 @@ namespace EcrBuilding.Api.Controllers;
 [Route("api/pos/parked-sales")]
 [Authorize]
 [RequireModule("/operate/pos-checkout", PermissionAction.View)]
-public class ParkedSalesController(AppDbContext db, IAuditService audit) : ControllerBase
+public class ParkedSalesController(AppDbContext db, IAuditService audit, IStockReservationService reservations) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<ParkedSaleDto>>> List([FromQuery] int? branchId, CancellationToken ct)
@@ -39,14 +39,29 @@ public class ParkedSalesController(AppDbContext db, IAuditService audit) : Contr
             BranchId = request.BranchId, TerminalId = request.TerminalId, CashierUserId = cashierId,
             CustomerId = request.CustomerId, Notes = request.Notes,
         };
+        var products = new Dictionary<int, Product>();
         foreach (var line in request.Lines)
         {
-            if (!await db.Products.AnyAsync(p => p.Id == line.ProductId, ct)) return BadRequest(new { error = $"Unknown product {line.ProductId}." });
+            var product = await db.Products.FindAsync([line.ProductId], ct);
+            if (product is null) return BadRequest(new { error = $"Unknown product {line.ProductId}." });
+            products[line.ProductId] = product;
             parked.Lines.Add(new ParkedSaleLine { ProductId = line.ProductId, Qty = line.Qty });
+        }
+
+        // A held cart reserves its stock too — otherwise another cashier could sell the exact items
+        // sitting in this hold out from under it before the customer comes back to pay.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var failedProductId = await reservations.ReserveAsync(request.BranchId, parked.Lines.Select(l => (l.ProductId, l.Qty)), ct);
+        if (failedProductId is not null)
+        {
+            await tx.RollbackAsync(ct);
+            var sku = products.TryGetValue(failedProductId.Value, out var p) ? p.Sku : failedProductId.ToString();
+            return BadRequest(new { error = $"Insufficient stock for {sku} to hold this cart." });
         }
 
         db.ParkedSales.Add(parked);
         await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
         await audit.LogAsync("pos", "SALE_HELD", parked.Id.ToString(), userId: cashierId, branchId: request.BranchId, cancellationToken: ct);
 
         var created = await Query().FirstAsync(p => p.Id == parked.Id, ct);
@@ -57,10 +72,16 @@ public class ParkedSalesController(AppDbContext db, IAuditService audit) : Contr
     [RequireModule("/operate/pos-checkout", PermissionAction.Delete)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var parked = await db.ParkedSales.FindAsync([id], ct);
+        var parked = await Query().FirstOrDefaultAsync(p => p.Id == id, ct);
         if (parked is null) return NotFound();
+
+        // Releases the hold whether the ticket is being resumed (the cart goes back through the
+        // normal checkout stock check) or simply discarded.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await reservations.ReleaseAsync(parked.BranchId, parked.Lines.Select(l => (l.ProductId, l.Qty)), ct);
         db.ParkedSales.Remove(parked);
         await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
         await audit.LogAsync("pos", "SALE_RESUMED", id.ToString(), cancellationToken: ct);
         return NoContent();
     }

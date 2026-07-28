@@ -379,6 +379,7 @@ export function useRowActions(
                   stockUom: product.stockUom,
                   uomConversions: formatUomConversions(product.uomConversions),
                   cutToSizeMode: formatCutToSizeMode(product.isCutToSize, product.cutToSizeUnit),
+                  minCutQty: product.minCutQty != null ? String(product.minCutQty) : "",
                   weight: String(product.weight),
                   returnable: product.returnable ? "on" : "",
                   cost: String(product.costPrice),
@@ -439,6 +440,7 @@ export function useRowActions(
                       uomConversions: conversions,
                       isCutToSize,
                       cutToSizeUnit,
+                      minCutQty: values.minCutQty ? Number(values.minCutQty) : null,
                       attributes: parseAttributes(values.attributes),
                     },
                   });

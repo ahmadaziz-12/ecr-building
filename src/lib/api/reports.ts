@@ -90,12 +90,22 @@ export type ReturnsAnalysisRow = {
   netCashback: number;
 };
 export type RefundMethodRow = { method: string; count: number; amount: number };
-export type VatByRateRow = { rate: number; taxableAmount: number; vatCollected: number };
+export type VatByRateRow = {
+  rate: number;
+  rateLabel: string;
+  orders: number;
+  taxableAmount: number;
+  vatCollected: number;
+  vatReversed: number;
+  netVat: number;
+  sharePct: number;
+};
 export type VatReportDto = {
-  collected: VatByRateRow[];
+  taxableSales: number;
   totalCollected: number;
   totalReversed: number;
   netVat: number;
+  collected: VatByRateRow[];
 };
 export type TopProductRow = {
   productId: number;
@@ -132,6 +142,11 @@ export type ContractorAgingRow = {
   outstanding: number;
   lastPurchaseAt: string | null;
   daysSinceLastPurchase: number;
+  // BRD §4.2 payment terms: due date derived from lastPurchaseAt + creditTermDays; null when the
+  // account has no configured terms. daysOverdue is 0 whenever there's no due date or it hasn't passed.
+  creditTermDays: number | null;
+  dueDate: string | null;
+  daysOverdue: number;
 };
 export type RestockingFeeRow = { month: string; returns: number; feesCollected: number };
 export type DiscountUtilizationDto = {
@@ -496,6 +511,152 @@ export type CategoryPerformanceRow = {
   onHand: number;
   stockValue: number;
 };
+export type SurplusReturnReportRow = {
+  returnId: number;
+  returnNo: string;
+  date: string;
+  orderNo: string | null;
+  soldAt: string | null;
+  daysHeld: number | null;
+  sku: string;
+  product: string;
+  category: string;
+  uom: string;
+  branch: string;
+  customer: string | null;
+  qty: number;
+  unitPricePaid: number;
+  refundAmount: number;
+  unitCost: number;
+  restockValue: number;
+  restockingFeePct: number;
+  restockingFee: number;
+  netCashback: number;
+  refundMethod: string;
+  reason: string;
+  approvedBy: string | null;
+  status: string;
+};
+export type DeliveryReportLine = {
+  sku: string;
+  product: string;
+  category: string;
+  uom: string;
+  ordered: number;
+  loaded: number;
+  delivered: number;
+  missing: number;
+  damaged: number;
+  unitWeight: number;
+};
+export type DeliveryReportRow = {
+  id: number;
+  deliveryNo: string;
+  date: string;
+  orderNo: string | null;
+  branch: string;
+  customer: string | null;
+  project: string | null;
+  poRef: string | null;
+  area: string;
+  city: string;
+  priority: string;
+  stage: string;
+  paymentStatus: string;
+  driver: string | null;
+  vehicle: string | null;
+  promisedDate: string;
+  promisedTime: string;
+  timeSlot: string | null;
+  dispatchedAt: string | null;
+  deliveredAt: string | null;
+  cycleHours: number | null;
+  daysLate: number;
+  punctuality: string;
+  weightTons: number;
+  itemCount: number;
+  qtyOrdered: number;
+  qtyLoaded: number;
+  qtyDelivered: number;
+  qtyMissing: number;
+  qtyDamaged: number;
+  fulfilledPct: number;
+  amount: number;
+  deliveryFee: number;
+  handlingCharge: number;
+  heavyCharge: number;
+  discountCharge: number;
+  vatCharge: number;
+  totalCharges: number;
+  receivedBy: string | null;
+  proof: string | null;
+  failureReason: string | null;
+  notes: string | null;
+  items: DeliveryReportLine[];
+};
+export type DriverPerformanceRow = {
+  driverId: number;
+  driver: string;
+  branch: string;
+  vehicle: string | null;
+  status: string;
+  licenseExpiry: string;
+  deliveries: number;
+  delivered: number;
+  failed: number;
+  cancelled: number;
+  inFlight: number;
+  onTimePct: number;
+  avgCycleHours: number;
+  avgDaysLate: number;
+  tonnageDelivered: number;
+  deliveredValue: number;
+  feeRevenue: number;
+  qtyDelivered: number;
+  qtyMissing: number;
+  qtyDamaged: number;
+  fulfilmentPct: number;
+  lastDeliveryAt: string | null;
+};
+export type ShiftCashMovementRow = {
+  at: string;
+  direction: string;
+  amount: number;
+  reason: string;
+  by: string | null;
+};
+export type ShiftReportRow = {
+  id: number;
+  openedAt: string;
+  closedAt: string | null;
+  durationHours: number;
+  terminal: string;
+  branch: string;
+  cashier: string;
+  status: string;
+  openingFloat: number;
+  cashSales: number;
+  cashIn: number;
+  cashOut: number;
+  expectedCash: number;
+  countedCash: number | null;
+  variance: number;
+  cashResult: string;
+  orders: number;
+  grossSales: number;
+  discounts: number;
+  vat: number;
+  netTakings: number;
+  nonCashTakings: number;
+  itemsSold: number;
+  avgBasket: number;
+  voidedOrders: number;
+  voidedValue: number;
+  refunds: number;
+  refundValue: number;
+  cashMovements: number;
+  items: ShiftCashMovementRow[];
+};
 
 export type FilterOption = { id: string; label: string; sub: string | null };
 export type ReportFilterOptionsDto = {
@@ -521,6 +682,14 @@ export type ReportFilterOptionsDto = {
   brands: string[];
   stockStatuses: string[];
   supplierTypes: string[];
+  terminals: FilterOption[];
+  drivers: FilterOption[];
+  vehicles: FilterOption[];
+  /** Option ids are zone NAMES — DeliveryOrder.Area stores the name, not the zone id. */
+  deliveryZones: FilterOption[];
+  deliveryStages: string[];
+  deliveryPriorities: string[];
+  shiftStatuses: string[];
 };
 
 export type ReportDateRange = { from?: string; to?: string };
@@ -615,6 +784,14 @@ export const usePaymentMethodsReport = (query: ReportQuery, enabled = true) =>
   useReport<PaymentMethodReportRow[]>("payment-methods", query, enabled);
 export const useCategoryPerformanceReport = (query: ReportQuery, enabled = true) =>
   useReport<CategoryPerformanceRow[]>("category-performance", query, enabled);
+export const useSurplusReturnsReport = (query: ReportQuery, enabled = true) =>
+  useReport<SurplusReturnReportRow[]>("surplus-returns", query, enabled);
+export const useDeliveryReport = (query: ReportQuery, enabled = true) =>
+  useReport<DeliveryReportRow[]>("delivery-orders", query, enabled);
+export const useDriverPerformanceReport = (query: ReportQuery, enabled = true) =>
+  useReport<DriverPerformanceRow[]>("driver-performance", query, enabled);
+export const useShiftReport = (query: ReportQuery, enabled = true) =>
+  useReport<ShiftReportRow[]>("shift-report", query, enabled);
 
 // Phase 5 (BRD §5.8 Analytics & Reporting) — bundle-engine reports, served from
 // BundleReportsController (same api/insights/reports base, same Window()/ReportFilters

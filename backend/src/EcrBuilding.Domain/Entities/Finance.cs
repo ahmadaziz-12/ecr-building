@@ -35,6 +35,11 @@ public class JournalLine
     public Account? Account { get; set; }
     public decimal Debit { get; set; }
     public decimal Credit { get; set; }
+    // Plain-language reason THIS line exists (e.g. "VAT reversal", "Restocking fee retained") —
+    // the entry-level Description says what happened overall, this says what each individual
+    // debit/credit is FOR, so the General Ledger journal reads without needing to reverse-engineer
+    // intent from an account name and which side of the line it landed on.
+    public string? Memo { get; set; }
 }
 
 public enum ExpenseStatus { Pending, Approved, Rejected }
