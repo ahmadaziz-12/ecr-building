@@ -45,7 +45,10 @@ public record OrderDto(
     // BRD §3.5: when this sale had at least one delivery-flagged line, the DeliveryOrder auto-created
     // at checkout — null when the sale has no delivery component. Lets POS screens show live delivery
     // status without a trip to the separate Delivery module.
-    int? DeliveryOrderId = null, string? DeliveryOrderNo = null, string? DeliveryStage = null);
+    int? DeliveryOrderId = null, string? DeliveryOrderNo = null, string? DeliveryStage = null,
+    // BRD §4.2/§7.4 (Module 11): B2B purchase-order reference and project code — captured at checkout
+    // but previously never surfaced past the DB, so Orders list/detail had no way to show or filter by it.
+    string? PoReference = null, string? ProjectCode = null);
 
 // Uom: selling UOM for this line (null/empty = the product's stock UOM). LengthM/WidthM/HeightM:
 // cut-to-size dimension entry (BRD §2.3 items 5-6) — when LengthM is set on an IsCutToSize product,

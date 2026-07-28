@@ -56,7 +56,10 @@ public class ExpensesController(AppDbContext db, IAuditService audit, IGlPosting
         if (expense.Status == ExpenseStatus.Approved)
         {
             await gl.PostAsync(expense.ExpenseNo, $"Expense: {expense.Description}",
-                [new GlLine("5100", expense.Amount + expense.Vat, 0), new GlLine("1000", 0, expense.Amount + expense.Vat)], ct);
+                [
+                    new GlLine("5100", expense.Amount + expense.Vat, 0, $"{expense.Category} expense, incl. VAT"),
+                    new GlLine("1000", 0, expense.Amount + expense.Vat, "Cash paid out"),
+                ], ct);
         }
         return Ok(Map(expense));
     }
@@ -705,12 +708,20 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
             // AccountCredit/StoreCredit refunds to a B2B/Contractor account never pay cash out — they
             // reduce what the customer owes, so the credit side lands on Accounts Receivable (1100),
             // not Cash & Bank (1000). Every other refund is a real payout, still 1000.
-            var creditAccount = refundMethod is "StoreCredit" or "AccountCredit" && isAccountLedgerCustomer ? "1100" : "1000";
-            var lines = new List<GlLine> { new("4000", revenuePortion, 0), new("2100", vatPortion, 0), new(creditAccount, 0, totalAmount) };
+            var creditAccountIsAr = refundMethod is "StoreCredit" or "AccountCredit" && isAccountLedgerCustomer;
+            var creditAccount = creditAccountIsAr ? "1100" : "1000";
+            var lines = new List<GlLine>
+            {
+                new("4000", revenuePortion, 0, $"Revenue reversal — {ret.Type} return, ex-VAT"),
+                new("2100", vatPortion, 0, "VAT reversal — reduces VAT payable"),
+                new(creditAccount, 0, totalAmount, creditAccountIsAr
+                    ? $"Refund credited to {ret.Customer?.NameEn ?? "customer"}'s account balance"
+                    : "Refund paid out"),
+            };
             if (ret.RestockingFeeAmount > 0)
             {
                 // The fee stays with the store: cash out = revenue + VAT − fee, so credit it back to revenue.
-                lines.Add(new GlLine("4000", 0, ret.RestockingFeeAmount));
+                lines.Add(new GlLine("4000", 0, ret.RestockingFeeAmount, $"Restocking fee retained ({ret.RestockingFeePct}%)"));
             }
             await gl.PostAsync(ret.ReturnNo, $"{ret.Type} return refund to {ret.Customer?.NameEn ?? "Walk-in Customer"}", lines, ct);
             // BRD §3.2.1 Exchange: the actual cash movement is netted against the replacement sale
@@ -734,9 +745,13 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
             var exchangeRevenue = exchangeLinesTotal - exchangeVat;
             var exchangeAccountCreditAmt = (request.Payments ?? []).Where(p => p.Method.Equals("AccountCredit", StringComparison.OrdinalIgnoreCase)).Sum(p => p.Amount);
             var exchangeCashPortion = exchangeLinesTotal - exchangeAccountCreditAmt;
-            var exchangeSaleLines = new List<GlLine> { new("4000", 0, exchangeRevenue), new("2100", 0, exchangeVat) };
-            if (exchangeCashPortion > 0) exchangeSaleLines.Add(new GlLine("1000", exchangeCashPortion, 0));
-            if (exchangeAccountCreditAmt > 0) exchangeSaleLines.Add(new GlLine("1100", exchangeAccountCreditAmt, 0));
+            var exchangeSaleLines = new List<GlLine>
+            {
+                new("4000", 0, exchangeRevenue, "Replacement item(s) revenue, ex-VAT"),
+                new("2100", 0, exchangeVat, "VAT on replacement item(s)"),
+            };
+            if (exchangeCashPortion > 0) exchangeSaleLines.Add(new GlLine("1000", exchangeCashPortion, 0, "Customer payment for replacement item(s)"));
+            if (exchangeAccountCreditAmt > 0) exchangeSaleLines.Add(new GlLine("1100", exchangeAccountCreditAmt, 0, $"Charged to {ret.Customer?.NameEn ?? "customer"}'s account balance"));
             await gl.PostAsync(exchangeOrder.OrderNo, $"Exchange replacement sale for {ret.ReturnNo}", exchangeSaleLines, ct);
 
             var netSettlement = exchangeLinesTotal - totalAmount; // > 0 = customer owed more, < 0 = customer is owed the difference
@@ -1080,6 +1095,6 @@ public class JournalController(AppDbContext db) : ControllerBase
         var entries = await db.JournalEntries.Include(e => e.Lines).ThenInclude(l => l.Account).OrderByDescending(e => e.Date).Take(200).ToListAsync(ct);
         return Ok(entries.Select(e => new JournalEntryDto(
             e.Id, e.Date, e.Reference, e.Description,
-            e.Lines.Select(l => new JournalLineDto(l.Account?.Code ?? "", l.Account?.Name ?? "", l.Debit, l.Credit)).ToList())).ToList());
+            e.Lines.Select(l => new JournalLineDto(l.Account?.Code ?? "", l.Account?.Name ?? "", l.Debit, l.Credit, l.Memo)).ToList())).ToList());
     }
 }

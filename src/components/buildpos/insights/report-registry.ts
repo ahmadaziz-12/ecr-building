@@ -732,6 +732,7 @@ export const REPORTS: ReportDef[] = [
         return row.creditLimit > 0 ? (row.outstanding / row.creditLimit) * 100 : 0;
       } },
       c("lastPurchaseAt", "Last Purchase", "date"), c("daysSinceLastPurchase", "Inactive", "days"),
+      c("creditTermDays", "Payment Terms", "days"), c("dueDate", "Due Date", "date"), c("daysOverdue", "Overdue", "days"),
     ],
     emptyLabel: "No B2B accounts carry an outstanding balance.",
   },

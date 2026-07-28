@@ -42,7 +42,12 @@ public record SlowMovingRow(
     int ProductId, string Sku, string Name, string Category, string? Brand, string? Supplier, string Uom,
     decimal OnHand, decimal CostPrice, decimal StockValue, decimal SellingPrice, decimal RetailValue,
     int ReorderLevel, DateTime? LastSoldAt, int? DaysSinceLastSale, decimal UnitsSoldInWindow, string Status);
-public record ContractorAgingRow(string Customer, decimal CreditLimit, decimal Outstanding, DateTime? LastPurchaseAt, int DaysSinceLastPurchase);
+// DueDate/DaysOverdue (BRD §4.2 payment terms): Outstanding is one running account balance, not
+// per-invoice, so the due date is derived off the account's last purchase + its CreditTermDays — the
+// same simplification the aging bucket itself already made with DaysSinceLastPurchase. Null CreditTermDays
+// (no terms configured) means no due date can be derived, so DaysOverdue stays 0.
+public record ContractorAgingRow(string Customer, decimal CreditLimit, decimal Outstanding, DateTime? LastPurchaseAt, int DaysSinceLastPurchase,
+    int? CreditTermDays, DateTime? DueDate, int DaysOverdue);
 public record RestockingFeeRow(string Month, int Returns, decimal FeesCollected);
 public record DiscountUtilizationDto(decimal TotalDiscounts, int DiscountedOrders, int TotalOrders, decimal DiscountRatePct);
 
@@ -487,9 +492,16 @@ public class ReportsController(AppDbContext db) : ReportControllerBase
         customers = customers.Where(c => ReportFilters.Matches(customerId, c.Id)
             && ReportFilters.Matches(customerType, c.Type.ToString())).ToList();
         var now = DateTime.UtcNow;
-        return Ok(customers.Select(c => new ContractorAgingRow(
-            c.NameEn, c.CreditLimit, c.Outstanding, c.LastPurchaseAt,
-            c.LastPurchaseAt is null ? -1 : (int)(now - c.LastPurchaseAt.Value).TotalDays)).ToList());
+        return Ok(customers.Select(c =>
+        {
+            DateTime? dueDate = c.LastPurchaseAt is not null && c.CreditTermDays is not null
+                ? c.LastPurchaseAt.Value.AddDays(c.CreditTermDays.Value) : null;
+            var daysOverdue = dueDate is not null && now > dueDate.Value ? (int)(now - dueDate.Value).TotalDays : 0;
+            return new ContractorAgingRow(
+                c.NameEn, c.CreditLimit, c.Outstanding, c.LastPurchaseAt,
+                c.LastPurchaseAt is null ? -1 : (int)(now - c.LastPurchaseAt.Value).TotalDays,
+                c.CreditTermDays, dueDate, daysOverdue);
+        }).ToList());
     }
 
     // BRD §11.2: restocking fee revenue by month.

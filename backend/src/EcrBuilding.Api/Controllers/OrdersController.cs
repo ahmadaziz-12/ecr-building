@@ -232,9 +232,9 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             var revenue = (order.SubTotal - order.DiscountTotal) + feesTotal;
             await gl.PostAsync(order.OrderNo, $"Payment settled for {(order.Customer?.NameEn ?? "Walk-in Customer")}",
                 [
-                    new GlLine("1000", order.GrandTotal, 0),
-                    new GlLine("4000", 0, revenue),
-                    new GlLine("2100", 0, order.VatTotal),
+                    new GlLine("1000", order.GrandTotal, 0, "Payment received"),
+                    new GlLine("4000", 0, revenue, "Sales revenue, ex-VAT"),
+                    new GlLine("2100", 0, order.VatTotal, "VAT collected"),
                 ], ct);
 
             try
@@ -989,9 +989,13 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             // cash/card figure and making the customer's Outstanding balance traceable in the GL
             // (CustomersController.Ledger reads exactly this account for exactly this reason).
             var cashPortion = order.GrandTotal - accountCreditAmount;
-            var saleLines = new List<GlLine> { new("4000", 0, revenue), new("2100", 0, order.VatTotal) };
-            if (cashPortion > 0) saleLines.Add(new GlLine("1000", cashPortion, 0));
-            if (accountCreditAmount > 0) saleLines.Add(new GlLine("1100", accountCreditAmount, 0));
+            var saleLines = new List<GlLine>
+            {
+                new("4000", 0, revenue, "Sales revenue, ex-VAT"),
+                new("2100", 0, order.VatTotal, "VAT collected"),
+            };
+            if (cashPortion > 0) saleLines.Add(new GlLine("1000", cashPortion, 0, "Payment received"));
+            if (accountCreditAmount > 0) saleLines.Add(new GlLine("1100", accountCreditAmount, 0, $"Charged to {(customer?.NameEn ?? "customer")}'s account balance"));
             await gl.PostAsync(order.OrderNo, $"POS sale to {(customer?.NameEn ?? "Walk-in Customer")}", saleLines, ct);
 
             // ZATCA failures must never fail the sale — left "Pending" for retry via /api/zatca/invoices/{orderId}/submit.
@@ -1038,5 +1042,5 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         o.Payments.Select(p => new OrderPaymentDto(p.Method.ToString(), p.Amount, p.ReferenceNumber, p.Status.ToString(), p.CreatedAt)).ToList(),
         o.Fees.Select(f => new OrderFeeDto(f.Label, f.Amount)).ToList(),
         loyaltyPointsEarned, loyaltyPointsBalance, loyaltyNextTierThreshold, loyaltyPointsRedeemed,
-        deliveryOrderId, deliveryOrderNo, deliveryStage);
+        deliveryOrderId, deliveryOrderNo, deliveryStage, o.PoReference, o.ProjectCode);
 }

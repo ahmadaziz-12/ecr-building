@@ -239,7 +239,9 @@ export function PosCheckout() {
   const createQuotation = useCreateQuotation();
 
   const effectiveBranchId = user?.branchId ?? selectedBranchId ?? branches?.[0]?.id ?? null;
-  const { data: liveProducts } = useProducts(true, effectiveBranchId ?? undefined);
+  // Polled so a sale rung up on another terminal at this branch (or a hold/quote reserving stock)
+  // shows up in this cashier's available-qty without a manual reload.
+  const { data: liveProducts } = useProducts(true, effectiveBranchId ?? undefined, 20_000);
   const { data: categories } = useCategories();
   const topLevelCategories = useMemo(() => (categories ?? []).filter((c) => c.parentId == null), [categories]);
   const childCategoriesOf = useMemo(() => {

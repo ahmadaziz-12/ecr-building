@@ -111,7 +111,10 @@ public class CustomersController(AppDbContext db, IAuditService audit, IGlPostin
         await audit.LogAsync("orders", "CUSTOMER_PAYMENT_RECORDED", id.ToString(), userId: userId, newValue: request, cancellationToken: ct);
 
         await gl.PostAsync(paymentNo, $"Payment received from {customer.NameEn}",
-            [new GlLine("1000", request.Amount, 0), new GlLine("1100", 0, request.Amount)], ct);
+            [
+                new GlLine("1000", request.Amount, 0, $"{request.Method} payment received"),
+                new GlLine("1100", 0, request.Amount, $"Reduces {customer.NameEn}'s outstanding balance"),
+            ], ct);
 
         var expiryMonths = (await db.GetLoyaltyConfigAsync(ct)).PointsExpiryMonths;
         return Ok(Map(customer, expiryMonths));

@@ -61,7 +61,12 @@ export type TopProductRow = {
   onHand: number; lastSoldAt: string | null;
 };
 export type SlowMovingRow = { sku: string; name: string; onHand: number; lastSoldAt: string | null };
-export type ContractorAgingRow = { customer: string; creditLimit: number; outstanding: number; lastPurchaseAt: string | null; daysSinceLastPurchase: number };
+export type ContractorAgingRow = {
+  customer: string; creditLimit: number; outstanding: number; lastPurchaseAt: string | null; daysSinceLastPurchase: number;
+  // BRD §4.2 payment terms: due date derived from lastPurchaseAt + creditTermDays; null when the
+  // account has no configured terms. daysOverdue is 0 whenever there's no due date or it hasn't passed.
+  creditTermDays: number | null; dueDate: string | null; daysOverdue: number;
+};
 export type RestockingFeeRow = { month: string; returns: number; feesCollected: number };
 export type DiscountUtilizationDto = { totalDiscounts: number; discountedOrders: number; totalOrders: number; discountRatePct: number };
 

@@ -257,7 +257,10 @@ public class StockBatchesController(AppDbContext db, IAuditService audit, IStock
             if (value > 0)
             {
                 await gl.PostAsync($"WO-{batch.Id}", $"Stock write-off: {batch.Product?.Sku} batch {batch.BatchNo}",
-                    [new GlLine("5100", value, 0), new GlLine("1200", 0, value)], ct);
+                    [
+                        new GlLine("5100", value, 0, "Write-off expense, at cost"),
+                        new GlLine("1200", 0, value, "Inventory value removed"),
+                    ], ct);
             }
         }
         return Ok(Map(batch));
@@ -366,7 +369,10 @@ public class BranchStockBatchesController(AppDbContext db, IAuditService audit, 
             if (value > 0)
             {
                 await gl.PostAsync($"WO-B{batch.Id}", $"Branch stock write-off: {batch.Product?.Sku} batch {batch.BatchNo}",
-                    [new GlLine("5100", value, 0), new GlLine("1200", 0, value)], ct);
+                    [
+                        new GlLine("5100", value, 0, "Write-off expense, at cost"),
+                        new GlLine("1200", 0, value, "Inventory value removed"),
+                    ], ct);
             }
         }
         return Ok(Map(batch));

@@ -102,6 +102,9 @@ export type OrderDto = {
   deliveryOrderId: number | null;
   deliveryOrderNo: string | null;
   deliveryStage: string | null;
+  // BRD §4.2/§7.4 (Module 11): B2B purchase-order reference + project code carried onto the invoice.
+  poReference: string | null;
+  projectCode: string | null;
 };
 export type CashierShiftDto = {
   id: number;

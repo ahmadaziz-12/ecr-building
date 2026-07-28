@@ -79,11 +79,14 @@ export function resolveParentCategory(
 // branchId scopes totalOnHand/totalAvailable to that branch's own warehouse — pass the
 // cashier's branch in POS checkout so stock badges reflect what's actually there, not a
 // global sum across every branch's warehouses.
-export const useProducts = (enabled = true, branchId?: number) =>
+// refetchIntervalMs is opt-in (undefined = no polling, the prior behavior) — only screens that need
+// live stock while the user is actively working against it (POS checkout) should pay for the poll.
+export const useProducts = (enabled = true, branchId?: number, refetchIntervalMs?: number) =>
   useQuery({
     queryKey: ["catalog", "products", branchId ?? "global"],
     queryFn: () => apiGet<ProductDto[]>(`/api/catalog/products${branchId ? `?branchId=${branchId}` : ""}`),
     enabled,
+    refetchInterval: refetchIntervalMs,
   });
 
 export type CreateProductRequest = {
