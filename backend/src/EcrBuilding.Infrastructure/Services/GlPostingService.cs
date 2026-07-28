@@ -27,7 +27,7 @@ public class GlPostingService(AppDbContext db) : IGlPostingService
             {
                 throw new InvalidOperationException($"Unknown GL account code '{line.AccountCode}'.");
             }
-            entry.Lines.Add(new JournalLine { AccountId = account.Id, Debit = line.Debit, Credit = line.Credit });
+            entry.Lines.Add(new JournalLine { AccountId = account.Id, Debit = line.Debit, Credit = line.Credit, Memo = line.Memo });
         }
 
         db.JournalEntries.Add(entry);

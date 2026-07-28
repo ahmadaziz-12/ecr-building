@@ -532,6 +532,47 @@ public class Module6ReturnWorkflowTests : IAsyncLifetime
         Assert.True(approve.StatusCode == HttpStatusCode.OK, $"Expected OK, got {approve.StatusCode}: {approveBody}");
     }
 
+    // Guards the GL side of BRD §3.2.3's "automatically reverse VAT on returned items": Approve must
+    // post a real, balanced JournalEntry — revenue and VAT both reversed via a DEBIT to 4000/2100
+    // (undoing the sale's original credit), and the payout landing as a CREDIT to Cash & Bank. Also
+    // guards that every line carries a Memo, since a debit/credit pair with only an account name is
+    // not "easy to understand" on the Journal page — the whole point of adding Memo.
+    [Fact]
+    public async Task Approving_a_standard_return_posts_a_balanced_GL_entry_that_reverses_revenue_and_VAT()
+    {
+        var ctx = SeedReturnContext();
+        using var db = ctx.Db;
+        var order = SeedCompletedOrder(ctx, qty: 2m); // 2 × 100 ex-VAT, 15% VAT → 200 refund, 30 VAT, 230 cashback
+
+        var create = await ctx.SupervisorClient.PostAsJsonAsync("/api/finance/returns",
+            ReturnRequest(order.Id, "Standard", [new { orderLineId = order.Lines.First().Id, qty = 2m }]));
+        var created = await create.Content.ReadFromJsonAsync<JsonElement>();
+        var returnNo = created.GetProperty("returnNo").GetString();
+        var returnId = created.GetProperty("id").GetInt32();
+
+        var approve = await ctx.SupervisorClient.PutAsJsonAsync($"/api/finance/returns/{returnId}/approve",
+            new { branchId = ctx.Branch.Id, refundMethod = "Cash" });
+        Assert.Equal(HttpStatusCode.OK, approve.StatusCode);
+
+        var entry = await db.JournalEntries.Include(e => e.Lines).ThenInclude(l => l.Account)
+            .SingleAsync(e => e.Reference == returnNo);
+        Assert.Equal(Math.Round(entry.Lines.Sum(l => l.Debit), 2), Math.Round(entry.Lines.Sum(l => l.Credit), 2));
+
+        var revenueLine = entry.Lines.Single(l => l.Account!.Code == "4000");
+        Assert.Equal(200m, revenueLine.Debit);
+        Assert.Equal(0m, revenueLine.Credit);
+
+        var vatLine = entry.Lines.Single(l => l.Account!.Code == "2100");
+        Assert.Equal(30m, vatLine.Debit);
+        Assert.Contains("VAT reversal", vatLine.Memo);
+
+        var cashLine = entry.Lines.Single(l => l.Account!.Code == "1000");
+        Assert.Equal(230m, cashLine.Credit);
+        Assert.Equal(0m, cashLine.Debit);
+
+        Assert.All(entry.Lines, l => Assert.False(string.IsNullOrWhiteSpace(l.Memo)));
+    }
+
     // BRD §10.1: Role.CanConfigureReturnRulesAndFees now actually gates the return-policy endpoint.
     // Two separate users/clients (not toggling one role after its client/JWT already exists) — JWT
     // claims are minted at token issuance, so mutating a role after CreateAuthenticatedClient wouldn't

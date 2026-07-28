@@ -101,6 +101,7 @@ export type JournalLineDto = {
   accountName: string;
   debit: number;
   credit: number;
+  memo: string | null;
 };
 export type JournalEntryDto = {
   id: number;

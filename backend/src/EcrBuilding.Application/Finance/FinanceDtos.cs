@@ -74,5 +74,5 @@ public record ReturnPreviewDto(
 public record ReturnPolicyConfigDto(decimal DualAuthCashThreshold, int StandardWindowDays, int SurplusWindowDays);
 
 public record AccountDto(int Id, string Code, string Name, string Type, decimal Balance);
-public record JournalLineDto(string AccountCode, string AccountName, decimal Debit, decimal Credit);
+public record JournalLineDto(string AccountCode, string AccountName, decimal Debit, decimal Credit, string? Memo);
 public record JournalEntryDto(int Id, DateTime Date, string Reference, string Description, IReadOnlyList<JournalLineDto> Lines);

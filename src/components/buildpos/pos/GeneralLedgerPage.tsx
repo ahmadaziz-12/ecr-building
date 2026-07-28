@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { CheckCircle2 } from "lucide-react";
 import { PageHeader, KpiGrid } from "@/components/buildpos/PageHeader";
 import { SectionCard } from "@/components/buildpos/sections";
 import {
@@ -11,7 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { exportToCsv } from "./shared";
-import { useAccounts, useJournal, type AccountDto } from "@/lib/api/finance";
+import { useAccounts, useJournal, type AccountDto, type JournalEntryDto } from "@/lib/api/finance";
 
 const TABS = ["Trial Balance", "Journal"] as const;
 type Tab = (typeof TABS)[number];
@@ -120,13 +121,14 @@ export function GeneralLedgerPage() {
     } else {
       exportToCsv(
         "journal.csv",
-        ["Date", "Reference", "Description", "Account", "Debit", "Credit"],
+        ["Date", "Reference", "Description", "Account", "Memo", "Debit", "Credit"],
         (journal ?? []).flatMap((e) =>
           e.lines.map((l) => [
             e.date,
             e.reference,
             e.description,
             `${l.accountCode} · ${l.accountName}`,
+            l.memo ?? "",
             l.debit,
             l.credit,
           ]),
@@ -201,9 +203,12 @@ export function GeneralLedgerPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(journal ?? []).flatMap((e) =>
-                  e.lines.map((l, i) => (
-                    <TableRow key={`${e.id}-${i}`}>
+                {(journal ?? []).flatMap((e: JournalEntryDto) => {
+                  const totalDebit = e.lines.reduce((s, l) => s + l.debit, 0);
+                  const totalCredit = e.lines.reduce((s, l) => s + l.credit, 0);
+                  const balanced = Math.round((totalDebit - totalCredit) * 100) === 0;
+                  return e.lines.map((l, i) => (
+                    <TableRow key={`${e.id}-${i}`} className={i === e.lines.length - 1 ? "border-b-2 border-black/10" : ""}>
                       {i === 0 ? (
                         <>
                           <TableCell
@@ -216,11 +221,16 @@ export function GeneralLedgerPage() {
                               year: "numeric",
                             })}
                           </TableCell>
-                          <TableCell
-                            rowSpan={e.lines.length}
-                            className="align-top font-mono text-xs"
-                          >
-                            {e.reference}
+                          <TableCell rowSpan={e.lines.length} className="align-top">
+                            <span className="font-mono text-xs">{e.reference}</span>
+                            {balanced && (
+                              <span
+                                title="Total debits equal total credits"
+                                className="mt-1 flex items-center gap-1 text-[10px] font-medium text-success"
+                              >
+                                <CheckCircle2 className="h-3 w-3" /> Balanced
+                              </span>
+                            )}
                           </TableCell>
                           <TableCell rowSpan={e.lines.length} className="align-top">
                             {e.description}
@@ -228,10 +238,15 @@ export function GeneralLedgerPage() {
                         </>
                       ) : null}
                       <TableCell>
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {l.accountCode}
-                        </span>{" "}
-                        <span>{l.accountName}</span>
+                        <div>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {l.accountCode}
+                          </span>{" "}
+                          <span>{l.accountName}</span>
+                        </div>
+                        {l.memo && (
+                          <p className="mt-0.5 text-[11px] italic text-muted-foreground">{l.memo}</p>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         {l.debit > 0 ? fmtSar(l.debit) : "—"}
@@ -240,8 +255,8 @@ export function GeneralLedgerPage() {
                         {l.credit > 0 ? fmtSar(l.credit) : "—"}
                       </TableCell>
                     </TableRow>
-                  )),
-                )}
+                  ));
+                })}
                 {(journal ?? []).length === 0 && (
                   <TableRow>
                     <TableCell
