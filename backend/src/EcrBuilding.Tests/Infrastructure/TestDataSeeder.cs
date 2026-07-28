@@ -104,7 +104,8 @@ public static class TestDataSeeder
         decimal vatRate = 0.15m,
         string stockUom = "Bag",
         bool isCutToSize = false,
-        string cutToSizeUnit = "Area")
+        string cutToSizeUnit = "Area",
+        decimal? minCutQty = null)
     {
         var product = new Product
         {
@@ -116,6 +117,7 @@ public static class TestDataSeeder
             StockUom = stockUom,
             IsCutToSize = isCutToSize,
             CutToSizeUnit = cutToSizeUnit,
+            MinCutQty = minCutQty,
             Status = EntityStatus.Active,
         };
         db.Products.Add(product);

@@ -202,6 +202,7 @@ export function useFlowSubmitHandlers(): Record<
         uomConversions: conversions,
         isCutToSize,
         cutToSizeUnit,
+        minCutQty: values.minCutQty ? Number(values.minCutQty) : null,
         attributes: parseAttributes(values.attributes),
       });
     },

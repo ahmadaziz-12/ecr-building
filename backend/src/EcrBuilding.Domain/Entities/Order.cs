@@ -74,6 +74,20 @@ public class OrderLine
     public decimal? LengthM { get; set; }
     public decimal? WidthM { get; set; }
     public decimal? HeightM { get; set; }
+    // Cut-to-size minimum-charge audit trail: set only when Product.MinCutQty raised the billed Qty
+    // above the actual measured length/area/volume — kept distinct from Qty so a receipt can show
+    // "billed at minimum" instead of the measured cut looking like a math error. Null when no
+    // minimum applied (Qty already is the measured amount).
+    public decimal? MeasuredQty { get; set; }
+    // Cut-to-size remnant tracking: the cashier optionally records the size of the source piece/
+    // roll this was cut from (e.g. a 3m cable roll for a 2m cut). Null = no source was tracked and
+    // StockQty deducts exactly the measured cut, same as before this feature existed. RemnantQty =
+    // SourceQty - MeasuredQty (or - Qty when MeasuredQty is null); RemnantAction records whether the
+    // leftover was returned to sellable stock ("Restock") or discarded as waste ("Scrap") — required
+    // whenever RemnantQty is positive.
+    public decimal? SourceQty { get; set; }
+    public decimal? RemnantQty { get; set; }
+    public string? RemnantAction { get; set; }
     // BRD §5.2: set when this line was auto-populated from a bundle — groups the constituents on the
     // receipt and feeds the Bundle Sales Report. UnitPrice on a bundle line is the constituent's
     // proportional share of the bundle price, so VAT stays per-item at each line's own rate.

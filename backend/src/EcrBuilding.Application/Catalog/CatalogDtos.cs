@@ -16,10 +16,12 @@ public record ProductDto(int Id, string Sku, string? Barcode, string NameEn, str
     string CutToSizeUnit = "Area",
     // BRD §7 (CR-038): distinct list prices for Contractor/Wholesale/Project — null = not configured,
     // checkout falls back to SellingPrice (the Retail price) for that segment.
-    decimal? ContractorPrice = null, decimal? WholesalePrice = null, decimal? ProjectPrice = null);
+    decimal? ContractorPrice = null, decimal? WholesalePrice = null, decimal? ProjectPrice = null,
+    // BRD §2.3 enhancement: minimum billable qty (stock UOM) for a cut-to-size line — null = no minimum.
+    decimal? MinCutQty = null);
 public record UpsertProductRequest(string Sku, string? Barcode, string NameEn, string? NameAr, int CategoryId, string? Brand, decimal CostPrice, decimal SellingPrice, decimal VatRate, string StockUom, string[] SellUoms, decimal Weight, bool Returnable, int ReorderLevel, int ReorderQty, string? ImageUrl, List<ProductUomConversionDto>? UomConversions = null, bool IsCutToSize = false,
     List<ProductAttributeDto>? Attributes = null, int? SupplierId = null, string? BinLocation = null, string CutToSizeUnit = "Area",
-    decimal? ContractorPrice = null, decimal? WholesalePrice = null, decimal? ProjectPrice = null);
+    decimal? ContractorPrice = null, decimal? WholesalePrice = null, decimal? ProjectPrice = null, decimal? MinCutQty = null);
 
 public record SetStatusRequest(string Status);
 

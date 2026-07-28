@@ -25,6 +25,8 @@ export type ProductDto = {
   // BRD §7 (CR-038): distinct list prices for Contractor/Wholesale/Project — null = not configured,
   // checkout falls back to sellingPrice (the Retail price) for that segment.
   contractorPrice?: number | null; wholesalePrice?: number | null; projectPrice?: number | null;
+  // BRD §2.3 enhancement: minimum billable qty (stock UOM) for a cut-to-size line — null = no minimum.
+  minCutQty?: number | null;
 };
 
 export const useCategories = (enabled = true) => useQuery({ queryKey: ["catalog", "categories"], queryFn: () => apiGet<CategoryDto[]>("/api/catalog/categories"), enabled });
@@ -96,6 +98,7 @@ export type CreateProductRequest = {
   uomConversions?: ProductUomConversionDto[]; isCutToSize?: boolean; cutToSizeUnit?: CutToSizeUnit;
   attributes?: ProductAttributeDto[];
   contractorPrice?: number | null; wholesalePrice?: number | null; projectPrice?: number | null;
+  minCutQty?: number | null;
 };
 
 export function useCreateProduct() {

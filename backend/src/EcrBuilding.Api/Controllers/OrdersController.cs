@@ -574,6 +574,11 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             var sellUom = string.IsNullOrWhiteSpace(line.Uom) ? product.StockUom : line.Uom!;
             decimal factor;
             decimal? lengthM = null, widthM = null, heightM = null;
+            // Cut-to-size enhancement: measuredQty/sourceQty/remnantQty/remnantAction stay null for
+            // every non-cut-to-size line and for a cut-to-size line that doesn't use them — identical
+            // to pre-existing behavior in both cases.
+            decimal? measuredQty = null, sourceQty = null, remnantQty = null;
+            string? remnantAction = null;
 
             // BRD §2.3 items 5-6: which dimensions a cut-to-size line needs depends on the product's
             // configured CutToSizeUnit — Length (cable/pipe, no width), Area (glass, length × width,
@@ -609,6 +614,37 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
                 }
                 sellUom = product.StockUom;
                 factor = 1m;
+
+                // Remnant tracking: the cashier optionally records the source piece/roll size this
+                // was cut from — omitted entirely, this is a no-op (deducts exactly the measured cut,
+                // same as before this feature existed).
+                if (line.SourceQty is decimal src)
+                {
+                    if (src < enteredQty)
+                    {
+                        return BadRequest(new { error = $"Source size for {product.Sku} ({src} {product.StockUom}) can't be smaller than the {enteredQty} being cut." });
+                    }
+                    sourceQty = src;
+                    var remnant = Math.Round(src - enteredQty, 3, MidpointRounding.AwayFromZero);
+                    if (remnant > 0)
+                    {
+                        if (line.RemnantAction is not "Restock" and not "Scrap")
+                        {
+                            return BadRequest(new { error = $"Specify how to handle the {remnant} {product.StockUom} remnant for {product.Sku}: Restock or Scrap." });
+                        }
+                        remnantQty = remnant;
+                        remnantAction = line.RemnantAction;
+                    }
+                }
+
+                // BRD §2.3 enhancement: a minimum billable quantity keeps a tiny cut from being
+                // charged less than the handling/setup cost of making it. Only the billed Qty/price
+                // move — the actual measured cut (and what leaves stock) stays the real dimension.
+                if (product.MinCutQty is decimal minQty && enteredQty < minQty)
+                {
+                    measuredQty = enteredQty;
+                    enteredQty = minQty;
+                }
             }
             else
             {
@@ -622,7 +658,15 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             }
 
             if (enteredQty <= 0) return BadRequest(new { error = $"Quantity for {product.Sku} must be positive." });
-            var stockQty = UomMath.ToStockQty(enteredQty, factor);
+            // The customer's own actual physical demand, in stock UOM — the measured cut (or minimum
+            // charge floor) for a cut-to-size line, the selling-UOM×factor conversion otherwise.
+            // Unaffected by remnant scrapping: that's material that never reaches the customer.
+            var stockQty = UomMath.ToStockQty(measuredQty ?? enteredQty, factor);
+            // What actually leaves BranchStockLevel. Scrapping a remnant destroys the whole source
+            // piece permanently, so the full sourceQty must come off stock; restocking (or no source
+            // tracked at all) nets back to stockQty, since the leftover either never conceptually
+            // left stock or is immediately returned to it.
+            var deductQty = remnantAction == "Scrap" ? UomMath.ToStockQty(sourceQty!.Value, factor) : stockQty;
 
             // BRD §7 (CR-038): resolve the list price for the customer's assigned price list — a
             // genuinely distinct price per segment, not a discount off SellingPrice. Null on Product
@@ -666,13 +710,13 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             // Sqlite test provider even when the quantity is available. A double-bound parameter gets
             // Sqlite's native REAL binding, sidestepping that entirely; MySQL compares DECIMAL vs
             // DOUBLE natively so production behavior is unchanged.
-            var deductQty = (double)stockQty;
+            var deductQtyParam = (double)deductQty;
             var rowsAffected = await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE BranchStockLevels SET OnHand = OnHand - {deductQty} WHERE ProductId = {line.ProductId} AND BranchId = {request.BranchId} AND (OnHand - Reserved) >= {deductQty}",
+                $"UPDATE BranchStockLevels SET OnHand = OnHand - {deductQtyParam} WHERE ProductId = {line.ProductId} AND BranchId = {request.BranchId} AND (OnHand - Reserved) >= {deductQtyParam}",
                 ct);
             if (rowsAffected == 0)
             {
-                return BadRequest(new { error = $"Insufficient stock for {product.Sku} ({stockQty} {product.StockUom} needed)." });
+                return BadRequest(new { error = $"Insufficient stock for {product.Sku} ({deductQty} {product.StockUom} needed)." });
             }
 
             // BRD §5.2: bundle items can't take a further per-line discount on top of the bundle
@@ -706,9 +750,13 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             var lineTotal = Math.Round(enteredQty * unitPrice * (1 - lineDiscountPct / 100), 2);
             order.Lines.Add(new OrderLine
             {
-                ProductId = product.Id, Qty = enteredQty, Uom = sellUom, StockQty = stockQty,
+                // StockQty is deductQty (not stockQty) — the true net amount removed from
+                // BranchStockLevel, including any permanently-scrapped remnant, so Void/VoidLine
+                // restore exactly what was actually taken off the shelf (see their own restoreQty).
+                ProductId = product.Id, Qty = enteredQty, Uom = sellUom, StockQty = deductQty,
                 LengthM = lengthM, WidthM = widthM, HeightM = heightM, UnitPrice = unitPrice, BundleId = priced.BundleId,
                 DiscountPct = lineDiscountPct, VatRate = product.VatRate, LineTotal = lineTotal, Notes = line.Notes,
+                MeasuredQty = measuredQty, SourceQty = sourceQty, RemnantQty = remnantQty, RemnantAction = remnantAction,
             });
             lineCategoryTotals.Add((product.CategoryId, lineTotal));
             if (line.RequiresDelivery)
@@ -974,6 +1022,16 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         {
             await stockMovements.RecordAsync(line.ProductId, order.BranchId, StockMovementType.Sale, -line.StockQty,
                 refTable: "Order", refId: order.Id.ToString(), userId: cashierId, cancellationToken: ct);
+            // Informational only — line.StockQty already carries the full net deduction (including a
+            // scrapped remnant), these just explain, for reporting, why it differs from the plain
+            // measured cut.
+            if (line.RemnantQty is > 0)
+            {
+                var remnantType = line.RemnantAction == "Scrap" ? StockMovementType.WriteOff : StockMovementType.CutRemnantRestock;
+                var remnantMoveQty = line.RemnantAction == "Scrap" ? -line.RemnantQty.Value : line.RemnantQty.Value;
+                await stockMovements.RecordAsync(line.ProductId, order.BranchId, remnantType, remnantMoveQty,
+                    refTable: "OrderLine", refId: line.Id.ToString(), userId: cashierId, cancellationToken: ct);
+            }
         }
         if (createdDeliveryOrder is not null)
         {
@@ -1038,7 +1096,8 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         // Legacy lines predating the UOM engine have StockQty=0 — fall back to Qty, same rule the
         // Uom/StockQty doc comment on OrderLineDto already applies to every other stock-UOM reader.
         o.Lines.Select(l => new OrderLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.UnitPrice, l.DiscountPct, l.VatRate, l.LineTotal, l.Uom, l.StockQty, l.LengthM, l.WidthM, l.Id, l.BundleId, l.Bundle?.NameEn,
-            (l.Product?.Weight ?? 0) * (l.StockQty > 0 ? l.StockQty : l.Qty), l.HeightM, l.Notes)).ToList(),
+            (l.Product?.Weight ?? 0) * (l.StockQty > 0 ? l.StockQty : l.Qty), l.HeightM, l.Notes,
+            l.MeasuredQty, l.SourceQty, l.RemnantQty, l.RemnantAction)).ToList(),
         o.Payments.Select(p => new OrderPaymentDto(p.Method.ToString(), p.Amount, p.ReferenceNumber, p.Status.ToString(), p.CreatedAt)).ToList(),
         o.Fees.Select(f => new OrderFeeDto(f.Label, f.Amount)).ToList(),
         loyaltyPointsEarned, loyaltyPointsBalance, loyaltyNextTierThreshold, loyaltyPointsRedeemed,

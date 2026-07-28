@@ -31,7 +31,11 @@ public record OrderLineDto(int ProductId, string Sku, string ProductName, decima
     // Cut-to-size volume mode's third dimension — null for Length/Area-mode lines.
     decimal? HeightM = null,
     // BRD §2.3: cashier's free-text note for this specific line.
-    string? Notes = null);
+    string? Notes = null,
+    // Cut-to-size enhancement: MeasuredQty is the actual measured dimension when a minimum charge
+    // raised Qty above it (null = Qty already is the measured amount). SourceQty/RemnantQty/
+    // RemnantAction describe an optional remnant-tracked cut (see OrderLine).
+    decimal? MeasuredQty = null, decimal? SourceQty = null, decimal? RemnantQty = null, string? RemnantAction = null);
 public record OrderPaymentDto(string Method, decimal Amount, string? ReferenceNumber, string Status, DateTime CreatedAt);
 public record OrderFeeDto(string Label, decimal Amount);
 public record OrderDto(
@@ -63,7 +67,11 @@ public record OrderDto(
 // ManualUnitPrice (BRD §7 CR-039): an absolute price override for this line — replaces the resolved
 // list price entirely (no further discount stacks on top), gated by Role.CanOverrideItemPrice or a
 // PriceOverride approval (OrdersController.Checkout), distinct from a discount.
-public record CartLineInput(int ProductId, decimal Qty, string? Uom = null, decimal? LengthM = null, decimal? WidthM = null, bool RequiresDelivery = false, decimal? HeightM = null, string? Notes = null, decimal? ManualDiscountPct = null, decimal? ManualUnitPrice = null);
+// SourceQty/RemnantAction (cut-to-size remnant tracking): SourceQty is the size (stock UOM) of the
+// piece/roll the cashier is cutting from — omit it to keep today's behavior (deduct exactly the
+// measured cut, no remnant). When set and larger than the measured cut, RemnantAction ("Restock" |
+// "Scrap") is required and says whether the leftover goes back to sellable stock or is written off.
+public record CartLineInput(int ProductId, decimal Qty, string? Uom = null, decimal? LengthM = null, decimal? WidthM = null, bool RequiresDelivery = false, decimal? HeightM = null, string? Notes = null, decimal? ManualDiscountPct = null, decimal? ManualUnitPrice = null, decimal? SourceQty = null, string? RemnantAction = null);
 
 // BRD §3.5: captured once per checkout (not per line) — every delivery-flagged line in the cart ships
 // to this single address/date. ZoneId (optional): when set, the delivery fee auto-calculates from the

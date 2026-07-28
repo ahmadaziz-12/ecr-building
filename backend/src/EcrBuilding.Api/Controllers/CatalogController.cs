@@ -137,6 +137,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             ImageUrl = request.ImageUrl, IsCutToSize = request.IsCutToSize, CutToSizeUnit = request.CutToSizeUnit,
             SupplierId = request.SupplierId, BinLocation = request.BinLocation,
             ContractorPrice = request.ContractorPrice, WholesalePrice = request.WholesalePrice, ProjectPrice = request.ProjectPrice,
+            MinCutQty = request.MinCutQty,
         };
         product.UomConversions = BuildUomConversions(request.UomConversions, request.StockUom);
         product.Attributes = BuildAttributes(request.Attributes);
@@ -183,6 +184,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         product.ImageUrl = request.ImageUrl; product.IsCutToSize = request.IsCutToSize; product.CutToSizeUnit = request.CutToSizeUnit;
         product.SupplierId = request.SupplierId; product.BinLocation = request.BinLocation;
         product.ContractorPrice = request.ContractorPrice; product.WholesalePrice = request.WholesalePrice; product.ProjectPrice = request.ProjectPrice;
+        product.MinCutQty = request.MinCutQty;
         // Replace-all, same pattern as RolePermissions in RolesController.Update — the request's list
         // is the complete intended state, not a delta.
         db.ProductUomConversions.RemoveRange(product.UomConversions);
@@ -250,7 +252,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
                 p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
                 branchLevels.Sum(s => s.OnHand), branchLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
                 attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit,
-                p.ContractorPrice, p.WholesalePrice, p.ProjectPrice);
+                p.ContractorPrice, p.WholesalePrice, p.ProjectPrice, p.MinCutQty);
         }
 
         return new(
@@ -259,7 +261,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
             p.StockLevels.Sum(s => s.OnHand), p.StockLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
             attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit,
-            p.ContractorPrice, p.WholesalePrice, p.ProjectPrice);
+            p.ContractorPrice, p.WholesalePrice, p.ProjectPrice, p.MinCutQty);
     }
 }
 
