@@ -4,10 +4,11 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/buildpos/PageHeader";
 import { Pill, SectionCard } from "@/components/buildpos/sections";
 import { MultiSelectFilter } from "@/components/buildpos/FilterControls";
-import { STAGES, STAGE_TONE, useDeliveryStore, type DeliveryOrder } from "@/lib/delivery/store";
+import { STAGES, STAGE_TONE, useDeliveryStore, canSplit, type DeliveryOrder } from "@/lib/delivery/store";
 import { useAuth } from "@/lib/api/auth";
 import { CreateDeliveryDialog } from "./CreateDeliveryDialog";
 import { StageActionDialog } from "./StageActionDialog";
+import { SplitDeliveryDialog } from "./SplitDeliveryDialog";
 import { DeliveryTimeline } from "./DeliveryTimeline";
 
 function PendingApprovalsPanel() {
@@ -80,6 +81,7 @@ export function DeliveryOrdersPage() {
   const [stage, setStage] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [active, setActive] = useState<DeliveryOrder | null>(null);
+  const [splitting, setSplitting] = useState<DeliveryOrder | null>(null);
   const [detail, setDetail] = useState<DeliveryOrder | null>(null);
 
   const rows = useMemo(() => {
@@ -136,7 +138,10 @@ export function DeliveryOrdersPage() {
             <tbody>
               {rows.map((o) => (
                 <tr key={o.id} className="border-t border-black/5 hover:bg-canvas">
-                  <td className="px-2 py-2 font-mono text-xs text-brand">{o.id}</td>
+                  <td className="px-2 py-2 font-mono text-xs text-brand">
+                    {o.id}
+                    {o.sourceDeliveryNo && <span className="mt-0.5 block font-sans text-[10px] font-normal text-muted-foreground">↳ redelivery of {o.sourceDeliveryNo}</span>}
+                  </td>
                   <td className="px-2 py-2 font-mono text-xs">{o.orderId}</td>
                   <td className="px-2 py-2">{o.customer}</td>
                   <td className="px-2 py-2 text-muted-foreground">{o.area}</td>
@@ -154,6 +159,11 @@ export function DeliveryOrdersPage() {
                       <button onClick={() => setActive(o)} className="rounded-md bg-brand px-2 py-1 text-[11px] font-medium text-brand-foreground hover:bg-brand/90">
                         Move
                       </button>
+                      {canSplit(o, orders) && (
+                        <button onClick={() => setSplitting(o)} className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800 hover:bg-amber-100">
+                          Split
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -185,6 +195,7 @@ export function DeliveryOrdersPage() {
 
       <CreateDeliveryDialog open={creating} onOpenChange={setCreating} />
       <StageActionDialog order={active} onClose={() => setActive(null)} />
+      <SplitDeliveryDialog order={splitting} onClose={() => setSplitting(null)} />
     </div>
   );
 }

@@ -136,6 +136,104 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit, IPer
         return Ok(new TransitionResponseDto(true, Map(updated), null));
     }
 
+    // Delivery:Edit can only request a split; Delivery:Full creates the redelivery order directly.
+    // Mirrors Transition's request/approve pattern above, reusing the same ApprovalRequest table.
+    [HttpPost("{id:int}/split")]
+    [RequireModule("/delivery/orders", PermissionAction.Edit)]
+    public async Task<ActionResult<TransitionResponseDto>> Split(int id, CreateDeliverySplitRequest request, CancellationToken ct)
+    {
+        var source = await db.DeliveryOrders.Include(o => o.Lines).FirstOrDefaultAsync(o => o.Id == id, ct);
+        if (source is null) return NotFound();
+
+        var error = await ValidateSplitAsync(source, ct);
+        if (error is not null) return BadRequest(new { error });
+
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+        if (!await permissionResolver.HasAsync(userId, "/delivery/orders", PermissionAction.Approve, ct))
+        {
+            var remaining = RemainingLines(source).Sum(l => l.Remaining);
+            var approval = new ApprovalRequest
+            {
+                Type = ApprovalType.DeliverySplit,
+                BranchId = source.BranchId,
+                RequestedByUserId = userId,
+                Reason = $"Split {source.DeliveryNo} into a new delivery for {remaining} remaining unit(s).",
+                RelatedDeliveryOrderId = source.Id,
+                Payload = JsonSerializer.Serialize(request),
+            };
+            db.ApprovalRequests.Add(approval);
+            await db.SaveChangesAsync(ct);
+            await audit.LogAsync("delivery", "DELIVERY_SPLIT_REQUESTED", approval.Id.ToString(), userId: userId, branchId: source.BranchId, cancellationToken: ct);
+
+            var requester = await db.Users.FindAsync([userId], ct);
+            var pending = new DeliveryApprovalDto(approval.Id, source.Id, source.DeliveryNo, requester?.Name ?? "", null, source.Stage.ToString(), "Split", approval.Reason, approval.Status.ToString(), approval.CreatedAt, null);
+            var unchanged = await Query().FirstAsync(o => o.Id == source.Id, ct);
+            return Ok(new TransitionResponseDto(false, Map(unchanged), pending));
+        }
+
+        var created = await CreateSplitOrderAsync(source, request, userId, ct);
+        await audit.LogAsync("delivery", "DELIVERY_SPLIT_CREATED", created.Id.ToString(), userId: userId, branchId: source.BranchId, oldValue: source.DeliveryNo, newValue: created.DeliveryNo, cancellationToken: ct);
+
+        var newOrder = await Query().FirstAsync(o => o.Id == created.Id, ct);
+        return Ok(new TransitionResponseDto(true, Map(newOrder), null));
+    }
+
+    private async Task<string?> ValidateSplitAsync(DeliveryOrder source, CancellationToken ct)
+    {
+        if (source.Stage is not (DeliveryStage.Failed or DeliveryStage.PartiallyDelivered or DeliveryStage.ReturnedToBranch))
+        {
+            return $"Cannot split a delivery order in stage {source.Stage}. Only Failed, Partially Delivered, or Returned to Branch orders have undelivered quantity to redeliver.";
+        }
+
+        if (RemainingLines(source).Count == 0)
+        {
+            return "Nothing left to redeliver — every line is already fully delivered or written off as damaged.";
+        }
+
+        var alreadySplit = await db.DeliveryOrders.AnyAsync(o => o.SourceDeliveryOrderId == source.Id && o.Stage != DeliveryStage.Cancelled, ct);
+        if (alreadySplit)
+        {
+            return "This order has already been split into a redelivery. Cancel that one before splitting again.";
+        }
+
+        return null;
+    }
+
+    private static List<(int ProductId, string Uom, decimal UnitWeight, decimal Remaining)> RemainingLines(DeliveryOrder source) => source.Lines
+        .Select(l => (l.ProductId, l.Uom, l.UnitWeight, Remaining: l.Ordered - l.DeliveredQty - l.DamagedQty))
+        .Where(l => l.Remaining > 0)
+        .ToList();
+
+    private async Task<DeliveryOrder> CreateSplitOrderAsync(DeliveryOrder source, CreateDeliverySplitRequest request, int userId, CancellationToken ct)
+    {
+        var remainingLines = RemainingLines(source);
+
+        var split = new DeliveryOrder
+        {
+            DeliveryNo = $"DO-{DateTime.UtcNow:yyyy}-{await db.DeliveryOrders.CountAsync(ct) + 1:D4}",
+            SourceDeliveryOrderId = source.Id,
+            OrderId = source.OrderId, CustomerId = source.CustomerId, Project = source.Project, PoRef = source.PoRef,
+            BranchId = source.BranchId, Area = source.Area,
+            AddressType = source.AddressType, ContactName = source.ContactName, ContactMobile = source.ContactMobile,
+            City = source.City, District = source.District, Street = source.Street, Landmark = source.Landmark, Instructions = source.Instructions,
+            PromisedDate = request.PromisedDate, PromisedTime = request.PromisedTime, TimeSlot = request.TimeSlot,
+            Priority = source.Priority, DriverId = request.DriverId, VehicleId = request.VehicleId,
+            Notes = $"Redelivery of the undelivered remainder of {source.DeliveryNo}." + (string.IsNullOrWhiteSpace(request.Note) ? "" : $" {request.Note}"),
+        };
+
+        foreach (var line in remainingLines)
+        {
+            split.Lines.Add(new DeliveryOrderLine { ProductId = line.ProductId, Ordered = line.Remaining, Uom = line.Uom, UnitWeight = line.UnitWeight, DeliveryQty = line.Remaining });
+        }
+        split.WeightTons = Math.Round(remainingLines.Sum(l => l.UnitWeight * l.Remaining) / 1000m, 3);
+        split.History.Add(new DeliveryHistory { FromStage = DeliveryStage.Pending, ToStage = DeliveryStage.Pending, ByUserId = userId, Note = $"Created as redelivery split from {source.DeliveryNo}" });
+
+        db.DeliveryOrders.Add(split);
+        await db.SaveChangesAsync(ct);
+        return split;
+    }
+
     [HttpGet("approvals")]
     public async Task<ActionResult<List<DeliveryApprovalDto>>> ListApprovals([FromQuery] string? status, CancellationToken ct)
     {
@@ -152,7 +250,7 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit, IPer
     [RequireModule("/delivery/orders", PermissionAction.Approve)]
     public async Task<ActionResult<TransitionResponseDto>> ApproveMove(int approvalId, CancellationToken ct)
     {
-        var approval = await db.ApprovalRequests.FirstOrDefaultAsync(a => a.Id == approvalId && a.Type == ApprovalType.DeliveryStageChange, ct);
+        var approval = await db.ApprovalRequests.FirstOrDefaultAsync(a => a.Id == approvalId && (a.Type == ApprovalType.DeliveryStageChange || a.Type == ApprovalType.DeliverySplit), ct);
         if (approval is null) return NotFound();
         if (approval.Status != ApprovalStatus.Pending) return BadRequest(new { error = "This request has already been resolved." });
 
@@ -160,6 +258,28 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit, IPer
         if (approverId == approval.RequestedByUserId)
         {
             return BadRequest(new { error = "You cannot approve your own request — a different user with move authority must approve it." });
+        }
+
+        if (approval.Type == ApprovalType.DeliverySplit)
+        {
+            var source = await db.DeliveryOrders.Include(o => o.Lines).FirstOrDefaultAsync(o => o.Id == approval.RelatedDeliveryOrderId, ct);
+            if (source is null) return NotFound(new { error = "The delivery order for this request no longer exists." });
+
+            var splitError = await ValidateSplitAsync(source, ct);
+            if (splitError is not null) return BadRequest(new { error = $"This request is no longer valid: {splitError}" });
+
+            var splitRequest = JsonSerializer.Deserialize<CreateDeliverySplitRequest>(approval.Payload!)!;
+            var created = await CreateSplitOrderAsync(source, splitRequest, approval.RequestedByUserId, ct);
+
+            approval.Status = ApprovalStatus.Approved;
+            approval.ApproverUserId = approverId;
+            approval.ResolvedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            await audit.LogAsync("delivery", "DELIVERY_SPLIT_APPROVED", approval.Id.ToString(), userId: approverId,
+                oldValue: source.DeliveryNo, newValue: created.DeliveryNo, cancellationToken: ct);
+
+            var newOrder = await Query().FirstAsync(o => o.Id == created.Id, ct);
+            return Ok(new TransitionResponseDto(true, Map(newOrder), null));
         }
 
         var order = await db.DeliveryOrders.Include(o => o.Lines).Include(o => o.Driver).Include(o => o.Vehicle)
@@ -192,7 +312,7 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit, IPer
     [RequireModule("/delivery/orders", PermissionAction.Approve)]
     public async Task<ActionResult<DeliveryApprovalDto>> RejectMove(int approvalId, CancellationToken ct)
     {
-        var approval = await db.ApprovalRequests.FirstOrDefaultAsync(a => a.Id == approvalId && a.Type == ApprovalType.DeliveryStageChange, ct);
+        var approval = await db.ApprovalRequests.FirstOrDefaultAsync(a => a.Id == approvalId && (a.Type == ApprovalType.DeliveryStageChange || a.Type == ApprovalType.DeliverySplit), ct);
         if (approval is null) return NotFound();
         if (approval.Status != ApprovalStatus.Pending) return BadRequest(new { error = "This request has already been resolved." });
 
@@ -206,18 +326,27 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit, IPer
         approval.ApproverUserId = approverId;
         approval.ResolvedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
-        await audit.LogAsync("delivery", "DELIVERY_STAGE_CHANGE_REJECTED", approval.Id.ToString(), userId: approverId, cancellationToken: ct);
+        var rejectAction = approval.Type == ApprovalType.DeliverySplit ? "DELIVERY_SPLIT_REJECTED" : "DELIVERY_STAGE_CHANGE_REJECTED";
+        await audit.LogAsync("delivery", rejectAction, approval.Id.ToString(), userId: approverId, cancellationToken: ct);
 
         var resolved = await ApprovalsQuery().FirstAsync(a => a.Id == approvalId, ct);
         return Ok(MapApproval(resolved));
     }
 
     private IQueryable<ApprovalRequest> ApprovalsQuery() => db.ApprovalRequests
-        .Where(a => a.Type == ApprovalType.DeliveryStageChange)
+        .Where(a => a.Type == ApprovalType.DeliveryStageChange || a.Type == ApprovalType.DeliverySplit)
         .Include(a => a.RequestedBy).Include(a => a.Approver).Include(a => a.RelatedDeliveryOrder);
 
     private static DeliveryApprovalDto MapApproval(ApprovalRequest a)
     {
+        if (a.Type == ApprovalType.DeliverySplit)
+        {
+            return new DeliveryApprovalDto(
+                a.Id, a.RelatedDeliveryOrderId ?? 0, a.RelatedDeliveryOrder?.DeliveryNo ?? "",
+                a.RequestedBy?.Name ?? "", a.Approver?.Name, a.RelatedDeliveryOrder?.Stage.ToString() ?? "", "Split (new delivery order)",
+                a.Reason, a.Status.ToString(), a.CreatedAt, a.ResolvedAt);
+        }
+
         var request = a.Payload is not null ? JsonSerializer.Deserialize<TransitionRequest>(a.Payload) : null;
         return new DeliveryApprovalDto(
             a.Id, a.RelatedDeliveryOrderId ?? 0, a.RelatedDeliveryOrder?.DeliveryNo ?? "",
@@ -227,6 +356,7 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit, IPer
 
     private IQueryable<DeliveryOrder> Query() => db.DeliveryOrders
         .Include(o => o.Customer).Include(o => o.Branch).Include(o => o.Driver).Include(o => o.Vehicle)
+        .Include(o => o.SourceDeliveryOrder)
         .Include(o => o.Lines).ThenInclude(l => l.Product)
         .Include(o => o.History).ThenInclude(h => h.By);
 
@@ -244,7 +374,7 @@ public class DeliveryOrdersController(AppDbContext db, IAuditService audit, IPer
             o.FailureReason, o.NextAction, o.Notes,
             o.Lines.Select(l => new DeliveryLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Ordered, l.Uom, l.UnitWeight, l.DeliveryQty, l.LoadedQty, l.MissingQty, l.DamagedQty, l.DeliveredQty)).ToList(),
             o.History.OrderBy(h => h.At).Select(h => new DeliveryHistoryDto(h.At, h.FromStage.ToString(), h.ToStage.ToString(), h.By?.Name ?? "", h.Note)).ToList(),
-            overdue);
+            overdue, o.SourceDeliveryOrderId, o.SourceDeliveryOrder?.DeliveryNo);
     }
 
     [HttpPut("{id:int}/reserve-stock")]

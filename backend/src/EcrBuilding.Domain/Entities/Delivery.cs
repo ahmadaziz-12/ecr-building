@@ -102,6 +102,11 @@ public class DeliveryOrder : BaseEntity
     public string? NextAction { get; set; }
     public string? Notes { get; set; }
 
+    // Set when this order was created by splitting off the undelivered remainder of a Failed /
+    // PartiallyDelivered / ReturnedToBranch order — see DeliveryOrdersController.Split.
+    public int? SourceDeliveryOrderId { get; set; }
+    public DeliveryOrder? SourceDeliveryOrder { get; set; }
+
     public ICollection<DeliveryOrderLine> Lines { get; set; } = new List<DeliveryOrderLine>();
     public ICollection<DeliveryHistory> History { get; set; } = new List<DeliveryHistory>();
 }
