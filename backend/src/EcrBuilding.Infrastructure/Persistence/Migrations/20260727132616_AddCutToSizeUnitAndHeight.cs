@@ -206,9 +206,15 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
         // auto-commits per statement, so a failed migration can leave columns already added).
         private static void AddColumnIfNotExists(MigrationBuilder migrationBuilder, string columnName, string columnDefinitionSql)
         {
+            // The ALTER is assembled as a MySQL string literal to hand to PREPARE, so every single
+            // quote inside the column definition has to be doubled or it closes that literal early.
+            // Without this, a string default of DEFAULT '' emitted ...DEFAULT ''' — which MySQL reads
+            // as one escaped quote plus the closing quote, leaving an unterminated default and
+            // failing the whole migration with "check the manual ... near '''".
+            var definition = columnDefinitionSql.Replace("'", "''");
             migrationBuilder.Sql($@"
                 SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'RolePermissions' AND COLUMN_NAME = '{columnName}');
-                SET @stmt = IF(@col_exists = 0, 'ALTER TABLE `RolePermissions` ADD COLUMN `{columnName}` {columnDefinitionSql}', 'SELECT 1');
+                SET @stmt = IF(@col_exists = 0, 'ALTER TABLE `RolePermissions` ADD COLUMN `{columnName}` {definition}', 'SELECT 1');
                 PREPARE stmt FROM @stmt; EXECUTE stmt; DEALLOCATE PREPARE stmt;");
         }
 

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Check, ChevronLeft, ChevronRight, Package, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Package } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useDeliveryStore, type DeliveryLine, type DeliveryOrder } from "@/lib/delivery/store";
@@ -216,12 +216,12 @@ export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { op
           </div>
 
           <div className="relative flex max-h-[85vh] flex-col">
-            <div className="flex items-start justify-between gap-3 border-b border-black/5 px-6 py-4">
+            {/* Close button comes from DialogContent — see the note in FlowDialog. */}
+            <div className="flex items-start justify-between gap-3 border-b border-black/5 py-4 ps-6 pe-12">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-brand">Step {step + 1} of {STEPS.length}</p>
                 <h2 className="font-display text-lg font-bold">{STEPS[step]}</h2>
               </div>
-              <button onClick={() => close(false)} className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-black/5"><X className="h-4 w-4" /></button>
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
