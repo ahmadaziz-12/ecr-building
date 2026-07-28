@@ -60,11 +60,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -108,6 +104,7 @@ import {
 } from "@/lib/buildpos/data";
 import {
   categoryToFilter,
+  customRangeKeys,
   filterDefaults,
   moreFilterGroups,
   primaryFilterGroups,
@@ -115,7 +112,12 @@ import {
 } from "@/lib/buildpos/filter-context";
 import { useAuth } from "@/lib/api/auth";
 import { useCategories } from "@/lib/api/catalog";
-import { useBranches } from "@/lib/api/admin";
+import { useBranches, useTerminals } from "@/lib/api/admin";
+import { useOrders, useCashierShifts, useCustomers } from "@/lib/api/pos";
+import { useSuppliers } from "@/lib/api/procurement";
+import { useDepartmentsApi } from "@/lib/api/hr";
+import { useSavedViews, useCreateSavedView, useDeleteSavedView } from "@/lib/api/insights";
+import { exportToCsv } from "@/components/buildpos/pos/shared";
 import cementImg from "@/assets/cat-cement.jpg";
 import steelImg from "@/assets/cat-steel.jpg";
 import tilesImg from "@/assets/cat-tiles.jpg";
@@ -150,15 +152,23 @@ const toneIcon: Record<Severity, string> = {
 function toneForStatus(s: string): Severity {
   const k = s.toLowerCase();
   if (["critical", "failed", "offline"].some((x) => k.includes(x))) return "critical";
-  if (["low", "warning", "pending", "queued", "idle", "needs", "quarantine"].some((x) => k.includes(x)))
+  if (
+    ["low", "warning", "pending", "queued", "idle", "needs", "quarantine"].some((x) =>
+      k.includes(x),
+    )
+  )
     return "warning";
   // Negated words checked before the success list substring-matches inside them ("Inactive" contains "active").
-  if (["inactive", "in-active", "disabled", "deactivated", "suspended"].some((x) => k.includes(x))) return "muted";
-  if (["active", "cleared", "delivered", "completed", "reconciled", "healthy", "submitted"].some((x) =>
-    k.includes(x)
-  ))
+  if (["inactive", "in-active", "disabled", "deactivated", "suspended"].some((x) => k.includes(x)))
+    return "muted";
+  if (
+    ["active", "cleared", "delivered", "completed", "reconciled", "healthy", "submitted"].some(
+      (x) => k.includes(x),
+    )
+  )
     return "success";
-  if (["assigned", "dispatched", "posted", "open", "normal"].some((x) => k.includes(x))) return "info";
+  if (["assigned", "dispatched", "posted", "open", "normal"].some((x) => k.includes(x)))
+    return "info";
   return "muted";
 }
 
@@ -192,7 +202,9 @@ export function SectionCard({
       {(title || action) && (
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            {title && <h2 className="font-display text-base font-semibold text-foreground">{title}</h2>}
+            {title && (
+              <h2 className="font-display text-base font-semibold text-foreground">{title}</h2>
+            )}
             {desc && <p className="mt-0.5 text-xs text-muted-foreground">{desc}</p>}
           </div>
           {action}
@@ -204,33 +216,81 @@ export function SectionCard({
 }
 
 const iconMap: Record<string, ComponentType<{ className?: string }>> = {
-  trending: TrendingUp, receipt: Receipt, cart: ShoppingCart, shield: Shield,
-  package: Package, truck: Truck, users: Users, alert: AlertTriangle,
-  layers: Layers, bar: BarChart3, grid: LayoutGrid, paint: PaintBucket,
-  pipe: Wrench, zap: Zap, hammer: Hammer, square: Square,
-  plus: Plus, history: History, file: FileText, search: Search,
-  chart: BarChart3, refresh: RefreshCw, power: Power, monitor: Monitor,
+  trending: TrendingUp,
+  receipt: Receipt,
+  cart: ShoppingCart,
+  shield: Shield,
+  package: Package,
+  truck: Truck,
+  users: Users,
+  alert: AlertTriangle,
+  layers: Layers,
+  bar: BarChart3,
+  grid: LayoutGrid,
+  paint: PaintBucket,
+  pipe: Wrench,
+  zap: Zap,
+  hammer: Hammer,
+  square: Square,
+  plus: Plus,
+  history: History,
+  file: FileText,
+  search: Search,
+  chart: BarChart3,
+  refresh: RefreshCw,
+  power: Power,
+  monitor: Monitor,
 };
 
 /* ---------------- Filter Bar ---------------- */
 
-// Filters actually consumed by live dashboard data (Category → InventoryHealth,
-// Branch → order-derived KPIs in dashboard.tsx). Everything else is display-only.
-const LIVE_FILTER_LABELS = ["Branch", "Category"];
-
-export function FilterBar({ compact = false }: { compact?: boolean }) {
-  const { values, setValue, reset } = useFilters();
+export function FilterBar({
+  compact = false,
+  exportData = null,
+}: {
+  compact?: boolean;
+  exportData?: { filename: string; columns: string[]; rows: (string | number)[][] } | null;
+}) {
+  const { values, setValue, setValues, reset } = useFilters();
   const queryClient = useQueryClient();
   const { hasAccess } = useAuth();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [viewsOpen, setViewsOpen] = useState(false);
   // The static blueprint option names ("Cement & Binders", "Riyadh Main Branch") don't match the
-  // live category/branch names, so wired consumers would filter everything to nothing — swap in
-  // the real names once loaded.
+  // live category/branch/terminal/cashier/contractor/supplier/department names, so wired consumers
+  // would filter everything to nothing — swap in the real names once loaded.
   const { data: liveCategories } = useCategories(hasAccess("Inventory"));
   const { data: liveBranches } = useBranches(hasAccess("Network"));
+  const { data: liveTerminals } = useTerminals(hasAccess("Network"));
+  const { data: liveOrders } = useOrders(hasAccess("Orders"));
+  const { data: liveShifts } = useCashierShifts(hasAccess("Pos"));
+  const { data: liveCustomers } = useCustomers(hasAccess("Orders"));
+  const { data: liveSuppliers } = useSuppliers(hasAccess("Suppliers"));
+  const { data: liveDepartments } = useDepartmentsApi();
+  const liveCashierNames = [
+    ...new Set([
+      ...(liveOrders ?? []).map((o) => o.cashierName),
+      ...(liveShifts ?? []).map((s) => s.cashierName),
+    ]),
+  ].sort();
+  const liveContractors = (liveCustomers ?? [])
+    .filter((c) => c.type === "Contractor" || c.type === "B2B")
+    .map((c) => c.nameEn);
   const liveOptions = (g: { label: string; options: string[] }): string[] => {
-    if (g.label === "Category" && liveCategories?.length) return ["All Categories", ...liveCategories.map((c) => c.nameEn)];
-    if (g.label === "Branch" && liveBranches?.length) return ["All Permitted Branches", ...liveBranches.map((b) => b.nameEn)];
+    if (g.label === "Category" && liveCategories?.length)
+      return ["All Categories", ...liveCategories.map((c) => c.nameEn)];
+    if (g.label === "Branch" && liveBranches?.length)
+      return ["All Permitted Branches", ...liveBranches.map((b) => b.nameEn)];
+    if (g.label === "Terminal" && liveTerminals?.length)
+      return ["All Terminals", ...liveTerminals.map((t) => t.code)];
+    if (g.label === "Cashier" && liveCashierNames.length)
+      return ["All Cashiers", ...liveCashierNames];
+    if (g.label === "Contractor Account" && liveContractors.length)
+      return ["All", ...liveContractors];
+    if (g.label === "Supplier" && liveSuppliers?.length)
+      return ["All", ...liveSuppliers.map((s) => s.nameEn)];
+    if (g.label === "Employee Department" && liveDepartments?.length)
+      return ["All", ...liveDepartments.map((d) => d.name)];
     return g.options;
   };
   const shown = compact ? primaryFilterGroups.slice(0, 4) : primaryFilterGroups;
@@ -239,6 +299,10 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
     .filter((g) => values[g.label] && values[g.label] !== filterDefaults[g.label])
     .map((g) => ({ label: g.label, value: values[g.label] }));
 
+  const { data: savedViews } = useSavedViews();
+  const createSavedView = useCreateSavedView();
+  const deleteSavedView = useDeleteSavedView();
+
   return (
     <div className="rounded-2xl border border-brand/15 bg-gradient-to-r from-brand/5 via-white to-teal/5 p-3 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -246,8 +310,12 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
           <span className="grid h-6 w-6 place-items-center rounded-md bg-brand/10 text-brand">
             <Filter className="h-3.5 w-3.5" />
           </span>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/80">Filters</h3>
-          <span className="hidden text-[11px] text-muted-foreground sm:inline">Branch & Category filter the live data · other filters are demo-only</span>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/80">
+            Filters
+          </h3>
+          <span className="hidden text-[11px] text-muted-foreground sm:inline">
+            All filters apply to the live data.
+          </span>
           {activeChips.length > 0 && (
             <span className="ml-1 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-semibold text-[oklch(0.4_0.13_70)]">
               {activeChips.length} active
@@ -266,14 +334,72 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
           >
             Reset
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8 gap-1 text-xs text-muted-foreground hover:text-brand"
-            onClick={() => toast.info("Saved views aren't wired on the dashboard yet.")}
-          >
-            <Bookmark className="h-3.5 w-3.5" /> Save View
-          </Button>
+          <Popover open={viewsOpen} onOpenChange={setViewsOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 gap-1 text-xs text-muted-foreground hover:text-brand"
+              >
+                <Bookmark className="h-3.5 w-3.5" /> Save View
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 p-3" align="end">
+              <Button
+                size="sm"
+                className="mb-2 h-8 w-full bg-brand text-xs text-brand-foreground hover:bg-brand/90"
+                onClick={() => {
+                  const name = window.prompt("Name this view:");
+                  if (!name) return;
+                  createSavedView.mutate(
+                    { name, filters: values },
+                    {
+                      onSuccess: () => toast.success(`View "${name}" saved.`),
+                      onError: () => toast.error("Couldn't save this view."),
+                    },
+                  );
+                }}
+              >
+                Save current filters as new view
+              </Button>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Saved views
+              </p>
+              {!savedViews?.length && (
+                <p className="text-xs text-muted-foreground">No saved views yet.</p>
+              )}
+              <div className="flex flex-col gap-1">
+                {(savedViews ?? []).map((v) => (
+                  <div
+                    key={v.id}
+                    className="flex items-center justify-between gap-2 rounded-md px-1 py-1 hover:bg-black/5"
+                  >
+                    <button
+                      type="button"
+                      className="flex-1 truncate text-left text-xs font-medium text-foreground/80"
+                      onClick={() => {
+                        setValues({
+                          ...filterDefaults,
+                          ...(JSON.parse(v.filtersJson) as Record<string, string>),
+                        });
+                        setViewsOpen(false);
+                        toast.success(`Loaded "${v.name}"`);
+                      }}
+                    >
+                      {v.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteSavedView.mutate(v.id)}
+                      className="text-muted-foreground hover:text-destructive"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
           <Button
             size="sm"
             variant="ghost"
@@ -289,7 +415,18 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             size="sm"
             variant="ghost"
             className="h-8 gap-1 text-xs text-muted-foreground hover:text-brand"
-            onClick={() => toast.info("Export isn't wired on the dashboard yet.")}
+            onClick={() => {
+              if (!exportData || exportData.rows.length === 0) {
+                toast.info("Nothing to export", {
+                  description: "This tab has no rows for the current filters.",
+                });
+                return;
+              }
+              exportToCsv(exportData.filename, exportData.columns, exportData.rows);
+              toast.success("Exported", {
+                description: `${exportData.rows.length} rows · ${exportData.filename}`,
+              });
+            }}
           >
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
@@ -297,23 +434,12 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             size="sm"
             className="h-8 bg-brand text-brand-foreground hover:bg-brand/90"
             onClick={() => {
-              // Filters apply live as they change — this button only reports what's active, and
-              // never claims controls that aren't wired to live data were "applied".
-              const wired = activeChips.filter((c) => LIVE_FILTER_LABELS.includes(c.label));
-              const unwired = activeChips.filter((c) => !LIVE_FILTER_LABELS.includes(c.label));
-              if (unwired.length > 0) {
-                toast.warning(`Not wired to live data yet: ${unwired.map((c) => c.label).join(", ")}`, {
-                  description: wired.length
-                    ? `Applied — ${wired.map((c) => `${c.label}: ${c.value}`).join(" · ")}`
-                    : "Only Branch & Category filter the live data.",
-                });
-              } else {
-                toast.success(wired.length ? "Filters applied" : "Default view", {
-                  description: wired.length
-                    ? wired.map((c) => `${c.label}: ${c.value}`).join(" · ")
-                    : "Filters apply as you change them.",
-                });
-              }
+              // Filters already apply live as they change — this is a plain confirmation toast.
+              toast.success(activeChips.length ? "Filters applied" : "Default view", {
+                description: activeChips.length
+                  ? activeChips.map((c) => `${c.label}: ${c.value}`).join(" · ")
+                  : "Filters apply as you change them.",
+              });
             }}
           >
             Apply Filters
@@ -324,19 +450,49 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
       <div className="flex flex-wrap items-end gap-2">
         {shown.map((g) => (
           <div key={g.label} className="flex flex-col gap-1">
-            <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{g.label}</label>
+            <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {g.label}
+            </label>
             <Select value={values[g.label]} onValueChange={(v) => setValue(g.label, v)}>
               <SelectTrigger className="h-8 w-auto min-w-[150px] border-black/10 bg-white text-xs transition hover:border-brand/40">
                 <SelectValue placeholder={g.label} />
               </SelectTrigger>
               <SelectContent>
                 {liveOptions(g).map((o) => (
-                  <SelectItem key={o} value={o}>{o}</SelectItem>
+                  <SelectItem key={o} value={o}>
+                    {o}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
         ))}
+        {values["Date Range"] === "Custom Range" && (
+          <div className="flex items-end gap-1.5">
+            <div className="flex flex-col gap-1">
+              <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                From
+              </label>
+              <input
+                type="date"
+                value={values[customRangeKeys[0]]}
+                onChange={(e) => setValue(customRangeKeys[0], e.target.value)}
+                className="h-8 rounded-md border border-black/10 bg-white px-2 text-xs"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                To
+              </label>
+              <input
+                type="date"
+                value={values[customRangeKeys[1]]}
+                onChange={(e) => setValue(customRangeKeys[1], e.target.value)}
+                className="h-8 rounded-md border border-black/10 bg-white px-2 text-xs"
+              />
+            </div>
+          </div>
+        )}
         <Popover open={moreOpen} onOpenChange={setMoreOpen}>
           <PopoverTrigger asChild>
             <Button variant="outline" size="sm" className="h-8 gap-1 border-dashed text-xs">
@@ -345,7 +501,9 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-80 p-3" align="end">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Advanced filters</p>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Advanced filters
+            </p>
             <div className="grid grid-cols-1 gap-2">
               {moreFilterGroups.map((g) => (
                 <div key={g.label} className="flex items-center justify-between gap-2">
@@ -356,7 +514,9 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
                     </SelectTrigger>
                     <SelectContent>
                       {g.options.map((o) => (
-                        <SelectItem key={o} value={o}>{o}</SelectItem>
+                        <SelectItem key={o} value={o}>
+                          {o}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -481,12 +641,38 @@ export function SalesPerformance({ data = hourlySales }: { data?: typeof hourlyS
             <XAxis dataKey="time" stroke="rgba(15,10,50,0.5)" fontSize={11} />
             <YAxis stroke="rgba(15,10,50,0.5)" fontSize={11} />
             <Tooltip
-              contentStyle={{ background: "white", border: "1px solid rgba(15,10,50,0.1)", borderRadius: 8, fontSize: 12 }}
+              contentStyle={{
+                background: "white",
+                border: "1px solid rgba(15,10,50,0.1)",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
             />
             <Legend wrapperStyle={{ fontSize: 11 }} />
-            <Area type="monotone" dataKey="gross" stroke={BRAND} strokeWidth={2} fill="url(#g-gross)" name="Gross" />
-            <Area type="monotone" dataKey="net" stroke={TEAL} strokeWidth={2} fill="url(#g-net)" name="Net" />
-            <Line type="monotone" dataKey="returns" stroke={RED} strokeWidth={2} name="Returns" dot={false} />
+            <Area
+              type="monotone"
+              dataKey="gross"
+              stroke={BRAND}
+              strokeWidth={2}
+              fill="url(#g-gross)"
+              name="Gross"
+            />
+            <Area
+              type="monotone"
+              dataKey="net"
+              stroke={TEAL}
+              strokeWidth={2}
+              fill="url(#g-net)"
+              name="Net"
+            />
+            <Line
+              type="monotone"
+              dataKey="returns"
+              stroke={RED}
+              strokeWidth={2}
+              name="Returns"
+              dot={false}
+            />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -496,7 +682,14 @@ export function SalesPerformance({ data = hourlySales }: { data?: typeof hourlyS
 
 /* ---------------- Payment Collection ---------------- */
 
-const PIE_COLORS = [BRAND, TEAL, "oklch(0.7 0.15 300)", "oklch(0.7 0.13 220)", "oklch(0.75 0.14 60)", "oklch(0.65 0.15 340)"];
+const PIE_COLORS = [
+  BRAND,
+  TEAL,
+  "oklch(0.7 0.15 300)",
+  "oklch(0.7 0.13 220)",
+  "oklch(0.75 0.14 60)",
+  "oklch(0.65 0.15 340)",
+];
 
 export function PaymentCollection() {
   const total = payments.reduce((s, p) => s + p.amount, 0);
@@ -506,20 +699,41 @@ export function PaymentCollection() {
         <div className="h-52 md:col-span-2">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={payments} dataKey="amount" nameKey="method" innerRadius={45} outerRadius={80} stroke="white" strokeWidth={2}>
+              <Pie
+                data={payments}
+                dataKey="amount"
+                nameKey="method"
+                innerRadius={45}
+                outerRadius={80}
+                stroke="white"
+                strokeWidth={2}
+              >
                 {payments.map((_, i) => (
                   <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip contentStyle={{ background: "white", border: "1px solid rgba(15,10,50,0.1)", borderRadius: 8, fontSize: 12 }} />
+              <Tooltip
+                contentStyle={{
+                  background: "white",
+                  border: "1px solid rgba(15,10,50,0.1)",
+                  borderRadius: 8,
+                  fontSize: 12,
+                }}
+              />
             </PieChart>
           </ResponsiveContainer>
         </div>
         <div className="space-y-1.5 md:col-span-3">
           {payments.map((p, i) => (
-            <div key={p.method} className="flex items-center justify-between rounded-lg px-2 py-1.5 text-xs hover:bg-canvas">
+            <div
+              key={p.method}
+              className="flex items-center justify-between rounded-lg px-2 py-1.5 text-xs hover:bg-canvas"
+            >
               <span className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                <span
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ background: PIE_COLORS[i % PIE_COLORS.length] }}
+                />
                 <span className="font-medium text-foreground">{p.method}</span>
                 <span className="text-muted-foreground">· {p.tx} tx</span>
               </span>
@@ -591,7 +805,9 @@ export function TopCategories() {
                   <span className="absolute left-2 top-2 grid h-7 w-7 place-items-center rounded-md bg-white/90 text-brand backdrop-blur">
                     <Icon className="h-3.5 w-3.5" />
                   </span>
-                  <span className="absolute right-2 top-2"><Pill tone={tone}>{c.health}</Pill></span>
+                  <span className="absolute right-2 top-2">
+                    <Pill tone={tone}>{c.health}</Pill>
+                  </span>
                   {isActive && (
                     <span className="absolute bottom-2 left-2 rounded-full bg-brand px-2 py-0.5 text-[10px] font-semibold text-brand-foreground">
                       Active filter
@@ -604,7 +820,9 @@ export function TopCategories() {
                   <span className="absolute left-2 top-2 grid h-7 w-7 place-items-center rounded-md bg-white/90 text-brand">
                     <Icon className="h-3.5 w-3.5" />
                   </span>
-                  <span className="absolute right-2 top-2"><Pill tone={tone}>{c.health}</Pill></span>
+                  <span className="absolute right-2 top-2">
+                    <Pill tone={tone}>{c.health}</Pill>
+                  </span>
                   {isActive && (
                     <span className="absolute bottom-2 left-2 rounded-full bg-brand px-2 py-0.5 text-[10px] font-semibold text-brand-foreground">
                       Active filter
@@ -614,7 +832,9 @@ export function TopCategories() {
               )}
               <div className="p-3">
                 <p className="text-sm font-medium text-foreground">{c.name}</p>
-                <p className="mt-1 font-display text-lg font-bold text-foreground">{formatSAR(c.sales)}</p>
+                <p className="mt-1 font-display text-lg font-bold text-foreground">
+                  {formatSAR(c.sales)}
+                </p>
                 <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
                   <span>{c.units}</span>
                   <span>Returns {c.ret}</span>
@@ -640,11 +860,18 @@ export function InventoryHealth({
   const { values, setValue } = useFilters();
   const navigate = useNavigate();
   const cat = values.Category;
-  const rows = cat === "All Categories" ? allRows : allRows.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
+  const rows =
+    cat === "All Categories"
+      ? allRows
+      : allRows.filter((r) => r.cat.toLowerCase() === cat.toLowerCase());
   return (
     <SectionCard
       title="Stock Health & Availability"
-      desc={cat === "All Categories" ? "Availability across branches and warehouses." : `Filtered by category · ${cat} (${rows.length} SKUs)`}
+      desc={
+        cat === "All Categories"
+          ? "Availability across branches and warehouses."
+          : `Filtered by category · ${cat} (${rows.length} SKUs)`
+      }
       action={
         <div className="flex items-center gap-2">
           {cat !== "All Categories" && (
@@ -680,8 +907,19 @@ export function InventoryHealth({
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {["SKU", "Product", "Category", "Branch", "Available", "Reorder", "Supplier", "Status"].map((h) => (
-                <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+              {[
+                "SKU",
+                "Product",
+                "Category",
+                "Branch",
+                "Available",
+                "Reorder",
+                "Supplier",
+                "Status",
+              ].map((h) => (
+                <TableHead key={h} className="text-muted-foreground">
+                  {h}
+                </TableHead>
               ))}
             </TableRow>
           </TableHeader>
@@ -689,21 +927,24 @@ export function InventoryHealth({
             {rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
-                  No SKUs in stock alerts for <span className="font-semibold text-foreground">{cat}</span>.
+                  No SKUs in stock alerts for{" "}
+                  <span className="font-semibold text-foreground">{cat}</span>.
                 </TableCell>
               </TableRow>
             ) : (
               rows.map((r) => (
-              <TableRow key={`${r.sku}-${r.branch}`} className="bp-enter hover:bg-canvas">
-                <TableCell className="font-mono text-xs">{r.sku}</TableCell>
-                <TableCell className="font-medium">{r.name}</TableCell>
-                <TableCell className="text-muted-foreground">{r.cat}</TableCell>
-                <TableCell>{r.branch}</TableCell>
-                <TableCell>{r.qty}</TableCell>
-                <TableCell className="text-muted-foreground">{r.reorder}</TableCell>
-                <TableCell className="text-muted-foreground">{r.supplier}</TableCell>
-                <TableCell><Pill tone={toneForStatus(String(r.status))}>{String(r.status)}</Pill></TableCell>
-              </TableRow>
+                <TableRow key={`${r.sku}-${r.branch}`} className="bp-enter hover:bg-canvas">
+                  <TableCell className="font-mono text-xs">{r.sku}</TableCell>
+                  <TableCell className="font-medium">{r.name}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.cat}</TableCell>
+                  <TableCell>{r.branch}</TableCell>
+                  <TableCell>{r.qty}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.reorder}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.supplier}</TableCell>
+                  <TableCell>
+                    <Pill tone={toneForStatus(String(r.status))}>{String(r.status)}</Pill>
+                  </TableCell>
+                </TableRow>
               ))
             )}
           </TableBody>
@@ -723,8 +964,19 @@ export function CashierActivity() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                {["Terminal", "Cashier", "Shift Start", "Tx", "Sales", "Expected Cash", "Last Sync", "Status"].map((h) => (
-                  <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+                {[
+                  "Terminal",
+                  "Cashier",
+                  "Shift Start",
+                  "Tx",
+                  "Sales",
+                  "Expected Cash",
+                  "Last Sync",
+                  "Status",
+                ].map((h) => (
+                  <TableHead key={h} className="text-muted-foreground">
+                    {h}
+                  </TableHead>
                 ))}
               </TableRow>
             </TableHeader>
@@ -738,7 +990,9 @@ export function CashierActivity() {
                   <TableCell className="font-semibold">{t.sales}</TableCell>
                   <TableCell className="text-muted-foreground">{t.cash}</TableCell>
                   <TableCell className="text-muted-foreground">{t.sync}</TableCell>
-                  <TableCell><Pill tone={toneForStatus(String(t.status))}>{String(t.status)}</Pill></TableCell>
+                  <TableCell>
+                    <Pill tone={toneForStatus(String(t.status))}>{String(t.status)}</Pill>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -746,13 +1000,27 @@ export function CashierActivity() {
         </div>
       </SectionCard>
 
-      <SectionCard title="Shift Summary" desc="Cash reconciliation and variance across active shifts.">
+      <SectionCard
+        title="Shift Summary"
+        desc="Cash reconciliation and variance across active shifts."
+      >
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                {["Shift", "Cashier", "Opening", "Cash Sales", "Expected", "Counted", "Variance", "Status"].map((h) => (
-                  <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+                {[
+                  "Shift",
+                  "Cashier",
+                  "Opening",
+                  "Cash Sales",
+                  "Expected",
+                  "Counted",
+                  "Variance",
+                  "Status",
+                ].map((h) => (
+                  <TableHead key={h} className="text-muted-foreground">
+                    {h}
+                  </TableHead>
                 ))}
               </TableRow>
             </TableHeader>
@@ -765,10 +1033,16 @@ export function CashierActivity() {
                   <TableCell>{formatSAR(s.cash)}</TableCell>
                   <TableCell>{formatSAR(s.expected)}</TableCell>
                   <TableCell>{formatSAR(s.counted)}</TableCell>
-                  <TableCell className={s.variance < 0 ? "font-semibold text-critical" : "text-muted-foreground"}>
+                  <TableCell
+                    className={
+                      s.variance < 0 ? "font-semibold text-critical" : "text-muted-foreground"
+                    }
+                  >
                     {s.variance === 0 ? "0 ر.س" : formatSAR(s.variance)}
                   </TableCell>
-                  <TableCell><Pill tone={toneForStatus(s.status)}>{s.status}</Pill></TableCell>
+                  <TableCell>
+                    <Pill tone={toneForStatus(s.status)}>{s.status}</Pill>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -783,7 +1057,10 @@ export function CashierActivity() {
 
 export function DeliveryQueue() {
   return (
-    <SectionCard title="Delivery & Dispatch Queue" desc="Contractor orders and bulky-material dispatch.">
+    <SectionCard
+      title="Delivery & Dispatch Queue"
+      desc="Contractor orders and bulky-material dispatch."
+    >
       <div className="mb-4 flex flex-wrap gap-2">
         {deliveryChips.map((c) => (
           <Pill key={c.label} tone={c.tone}>
@@ -795,8 +1072,19 @@ export function DeliveryQueue() {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {["Delivery No.", "Customer", "Area", "Items", "Time", "Driver", "Status", "Amount"].map((h) => (
-                <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+              {[
+                "Delivery No.",
+                "Customer",
+                "Area",
+                "Items",
+                "Time",
+                "Driver",
+                "Status",
+                "Amount",
+              ].map((h) => (
+                <TableHead key={h} className="text-muted-foreground">
+                  {h}
+                </TableHead>
               ))}
             </TableRow>
           </TableHeader>
@@ -809,7 +1097,9 @@ export function DeliveryQueue() {
                 <TableCell className="text-muted-foreground">{d.items}</TableCell>
                 <TableCell>{d.time}</TableCell>
                 <TableCell className="text-muted-foreground">{d.driver}</TableCell>
-                <TableCell><Pill tone={toneForStatus(String(d.status))}>{String(d.status)}</Pill></TableCell>
+                <TableCell>
+                  <Pill tone={toneForStatus(String(d.status))}>{String(d.status)}</Pill>
+                </TableCell>
                 <TableCell className="font-semibold">{d.amount}</TableCell>
               </TableRow>
             ))}
@@ -832,7 +1122,9 @@ export function OperationalAlerts() {
             className="flex flex-col gap-3 rounded-xl border border-black/5 bg-canvas p-3 sm:flex-row sm:items-center sm:justify-between"
           >
             <div className="flex items-start gap-3">
-              <div className={`grid h-9 w-9 flex-none place-items-center rounded-lg ${toneIcon[a.severity]}`}>
+              <div
+                className={`grid h-9 w-9 flex-none place-items-center rounded-lg ${toneIcon[a.severity]}`}
+              >
                 <AlertTriangle className="h-4 w-4" />
               </div>
               <div>
@@ -872,7 +1164,10 @@ export function OperationalAlerts() {
 
 export function ReturnsRefunds() {
   return (
-    <SectionCard title="Returns & Refunds" desc="Standard, damaged, and surplus returns with VAT reversal.">
+    <SectionCard
+      title="Returns & Refunds"
+      desc="Standard, damaged, and surplus returns with VAT reversal."
+    >
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
         {returnsSummary.map((s) => (
           <div key={s.label} className="rounded-lg border border-black/5 bg-canvas p-2.5">
@@ -885,8 +1180,20 @@ export function ReturnsRefunds() {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {["Return", "Invoice", "Customer", "Type", "Product", "Refund", "Reason", "Status", "Approved By"].map((h) => (
-                <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+              {[
+                "Return",
+                "Invoice",
+                "Customer",
+                "Type",
+                "Product",
+                "Refund",
+                "Reason",
+                "Status",
+                "Approved By",
+              ].map((h) => (
+                <TableHead key={h} className="text-muted-foreground">
+                  {h}
+                </TableHead>
               ))}
             </TableRow>
           </TableHeader>
@@ -900,7 +1207,9 @@ export function ReturnsRefunds() {
                 <TableCell>{r.product}</TableCell>
                 <TableCell className="font-semibold">{r.amount}</TableCell>
                 <TableCell className="text-muted-foreground">{r.reason}</TableCell>
-                <TableCell><Pill tone={toneForStatus(String(r.status))}>{String(r.status)}</Pill></TableCell>
+                <TableCell>
+                  <Pill tone={toneForStatus(String(r.status))}>{String(r.status)}</Pill>
+                </TableCell>
                 <TableCell className="text-muted-foreground">{r.by}</TableCell>
               </TableRow>
             ))}
@@ -920,8 +1229,19 @@ export function BranchPerformance({ rows = branches }: { rows?: typeof branches 
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {["Branch", "Sales", "Tx", "Returns", "Avg Basket", "Low Stock", "Open Shifts", "Status"].map((h) => (
-                <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+              {[
+                "Branch",
+                "Sales",
+                "Tx",
+                "Returns",
+                "Avg Basket",
+                "Low Stock",
+                "Open Shifts",
+                "Status",
+              ].map((h) => (
+                <TableHead key={h} className="text-muted-foreground">
+                  {h}
+                </TableHead>
               ))}
             </TableRow>
           </TableHeader>
@@ -935,7 +1255,9 @@ export function BranchPerformance({ rows = branches }: { rows?: typeof branches 
                 <TableCell>{b.basket}</TableCell>
                 <TableCell>{b.low}</TableCell>
                 <TableCell>{b.shifts}</TableCell>
-                <TableCell><Pill tone="success">Active</Pill></TableCell>
+                <TableCell>
+                  <Pill tone="success">Active</Pill>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -954,9 +1276,13 @@ export function ZatcaCompliance() {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {["Invoice", "Order", "Type", "Amount", "VAT", "Status", "Error", "Action"].map((h) => (
-                <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
-              ))}
+              {["Invoice", "Order", "Type", "Amount", "VAT", "Status", "Error", "Action"].map(
+                (h) => (
+                  <TableHead key={h} className="text-muted-foreground">
+                    {h}
+                  </TableHead>
+                ),
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -967,14 +1293,18 @@ export function ZatcaCompliance() {
                 <TableCell>{z.type}</TableCell>
                 <TableCell>{z.amount}</TableCell>
                 <TableCell>{z.vat}</TableCell>
-                <TableCell><Pill tone={toneForStatus(String(z.status))}>{String(z.status)}</Pill></TableCell>
+                <TableCell>
+                  <Pill tone={toneForStatus(String(z.status))}>{String(z.status)}</Pill>
+                </TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{z.err}</TableCell>
                 <TableCell>
                   <Button
                     size="sm"
                     variant="ghost"
                     className="h-7 text-xs text-brand hover:bg-brand/5 hover:text-brand"
-                    onClick={() => toast.success(`${z.action}: ${z.no}`, { description: `Order ${z.order}` })}
+                    onClick={() =>
+                      toast.success(`${z.action}: ${z.no}`, { description: `Order ${z.order}` })
+                    }
                   >
                     {z.action}
                   </Button>
@@ -996,19 +1326,67 @@ export function CommandKpis() {
     (topCategories.find((c) => /steel/i.test(c.name))?.sales ?? 0);
   const contractorValue = contractorOrders.reduce(
     (s, o) => s + Number(String(o.value).replace(/[^0-9.-]/g, "")),
-    0
+    0,
   );
   const warehouseValue = inventorySummary.find((s) => /value/i.test(s.label))?.value ?? "—";
 
   const tiles = [
-    { label: "Today's Material Sales", value: kpis.find((k) => k.key === "sales")?.value ?? "0", hint: "Live from POS", icon: TrendingUp, tone: "brand" },
-    { label: "Contractor Orders", value: `${contractorOrders.length} Orders`, hint: `${formatSAR(contractorValue)} B2B pipeline`, icon: Users, tone: "info" },
-    { label: "Cement & Steel Sales", value: formatSAR(cementSteel), hint: "Bulk material lane", icon: Layers, tone: "brand" },
-    { label: "Pending Deliveries", value: `${deliveryChips.find((c) => /pending/i.test(c.label))?.value ?? 0} DOs`, hint: "Awaiting dispatch", icon: Truck, tone: "warning" },
-    { label: "Low Stock Materials", value: inventorySummary.find((s) => /low/i.test(s.label))?.value ?? "—", hint: "Reorder queue", icon: Package, tone: "warning" },
-    { label: "Warehouse Stock Value", value: warehouseValue, hint: "Across 5 KSA branches", icon: Boxes, tone: "success" },
-    { label: "Open Cashier Shifts", value: `${terminals.filter((t) => String(t.status).toLowerCase().includes("active")).length} Active`, hint: `${terminals.length} terminals total`, icon: Users, tone: "info" },
-    { label: "Failed ZATCA / Sync", value: `${zatcaInvoices.filter((z) => /fail|queued/i.test(String(z.status))).length} Alerts`, hint: "Needs retry", icon: Shield, tone: "critical" },
+    {
+      label: "Today's Material Sales",
+      value: kpis.find((k) => k.key === "sales")?.value ?? "0",
+      hint: "Live from POS",
+      icon: TrendingUp,
+      tone: "brand",
+    },
+    {
+      label: "Contractor Orders",
+      value: `${contractorOrders.length} Orders`,
+      hint: `${formatSAR(contractorValue)} B2B pipeline`,
+      icon: Users,
+      tone: "info",
+    },
+    {
+      label: "Cement & Steel Sales",
+      value: formatSAR(cementSteel),
+      hint: "Bulk material lane",
+      icon: Layers,
+      tone: "brand",
+    },
+    {
+      label: "Pending Deliveries",
+      value: `${deliveryChips.find((c) => /pending/i.test(c.label))?.value ?? 0} DOs`,
+      hint: "Awaiting dispatch",
+      icon: Truck,
+      tone: "warning",
+    },
+    {
+      label: "Low Stock Materials",
+      value: inventorySummary.find((s) => /low/i.test(s.label))?.value ?? "—",
+      hint: "Reorder queue",
+      icon: Package,
+      tone: "warning",
+    },
+    {
+      label: "Warehouse Stock Value",
+      value: warehouseValue,
+      hint: "Across 5 KSA branches",
+      icon: Boxes,
+      tone: "success",
+    },
+    {
+      label: "Open Cashier Shifts",
+      value: `${terminals.filter((t) => String(t.status).toLowerCase().includes("active")).length} Active`,
+      hint: `${terminals.length} terminals total`,
+      icon: Users,
+      tone: "info",
+    },
+    {
+      label: "Failed ZATCA / Sync",
+      value: `${zatcaInvoices.filter((z) => /fail|queued/i.test(String(z.status))).length} Alerts`,
+      hint: "Needs retry",
+      icon: Shield,
+      tone: "critical",
+    },
   ] as const;
 
   const toneMap: Record<string, string> = {
@@ -1048,7 +1426,9 @@ export function CommandKpis() {
                 </p>
                 <p className="mt-1.5 text-[11px] text-muted-foreground">{t.hint}</p>
               </div>
-              <div className={`grid h-11 w-11 flex-none place-items-center rounded-xl ${iconTone[t.tone]}`}>
+              <div
+                className={`grid h-11 w-11 flex-none place-items-center rounded-xl ${iconTone[t.tone]}`}
+              >
                 <Icon className="h-5 w-5" />
               </div>
             </div>
@@ -1078,8 +1458,21 @@ export function ContractorOrders() {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {["Order", "Contractor", "Project", "PO Ref", "Credit", "Value", "Delivery", "Invoice", "Payment", "Status"].map((h) => (
-                <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+              {[
+                "Order",
+                "Contractor",
+                "Project",
+                "PO Ref",
+                "Credit",
+                "Value",
+                "Delivery",
+                "Invoice",
+                "Payment",
+                "Status",
+              ].map((h) => (
+                <TableHead key={h} className="text-muted-foreground">
+                  {h}
+                </TableHead>
               ))}
             </TableRow>
           </TableHeader>
@@ -1088,14 +1481,20 @@ export function ContractorOrders() {
               <TableRow key={o.id} className="bp-enter hover:bg-canvas">
                 <TableCell className="font-mono text-xs">{o.id}</TableCell>
                 <TableCell className="font-medium">{o.customer}</TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">{o.project}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">
+                  {o.project}
+                </TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{o.po}</TableCell>
-                <TableCell><Pill tone={o.credit === "Approved" ? "success" : "warning"}>{o.credit}</Pill></TableCell>
+                <TableCell>
+                  <Pill tone={o.credit === "Approved" ? "success" : "warning"}>{o.credit}</Pill>
+                </TableCell>
                 <TableCell className="font-semibold">{o.value}</TableCell>
                 <TableCell className="text-muted-foreground">{o.delivery}</TableCell>
                 <TableCell className="text-muted-foreground">{o.invoice}</TableCell>
                 <TableCell className="text-muted-foreground">{o.pay}</TableCell>
-                <TableCell><Pill tone={toneForStatus(String(o.status))}>{String(o.status)}</Pill></TableCell>
+                <TableCell>
+                  <Pill tone={toneForStatus(String(o.status))}>{String(o.status)}</Pill>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -1131,7 +1530,9 @@ export function DispatchBoard() {
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {lanes.map((lane) => {
-          const cards = deliveries.filter((d) => String(d.status).toLowerCase() === lane.key.toLowerCase());
+          const cards = deliveries.filter(
+            (d) => String(d.status).toLowerCase() === lane.key.toLowerCase(),
+          );
           return (
             <div key={lane.key} className="rounded-xl border border-black/5 concrete-panel p-2.5">
               <div className="mb-2 flex items-center justify-between">
@@ -1150,14 +1551,22 @@ export function DispatchBoard() {
                   <div
                     key={d.no}
                     className="bp-enter group cursor-pointer rounded-lg border border-black/5 bg-white p-2.5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand/30 hover:shadow"
-                    onClick={() => toast.info(`${d.no} · ${d.customer}`, { description: `${d.items} · ${d.driver}` })}
+                    onClick={() =>
+                      toast.info(`${d.no} · ${d.customer}`, {
+                        description: `${d.items} · ${d.driver}`,
+                      })
+                    }
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-mono text-[11px] font-semibold text-brand">{d.no}</span>
                       <span className="text-[10px] text-muted-foreground">{d.time}</span>
                     </div>
-                    <p className="mt-0.5 truncate text-xs font-medium text-foreground">{d.customer}</p>
-                    <p className="truncate text-[11px] text-muted-foreground">{d.items} · {d.area}</p>
+                    <p className="mt-0.5 truncate text-xs font-medium text-foreground">
+                      {d.customer}
+                    </p>
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      {d.items} · {d.area}
+                    </p>
                     <div className="mt-1.5 flex items-center justify-between text-[11px]">
                       <span className="text-muted-foreground">🚚 {d.driver}</span>
                       <span className="font-semibold text-foreground">{d.amount}</span>
@@ -1233,7 +1642,13 @@ export function StockYardHealth() {
 /* ---------------- Alerts Rail (right-side compact) ---------------- */
 
 export function AlertsRail() {
-  const grouped: Record<Severity, typeof alerts> = { critical: [], warning: [], info: [], success: [], muted: [] };
+  const grouped: Record<Severity, typeof alerts> = {
+    critical: [],
+    warning: [],
+    info: [],
+    success: [],
+    muted: [],
+  };
   alerts.forEach((a) => grouped[a.severity].push(a));
   const order: Severity[] = ["critical", "warning", "info"];
   return (
@@ -1248,12 +1663,17 @@ export function AlertsRail() {
           grouped[sev].length === 0 ? null : (
             <div key={sev}>
               <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                <span className={`h-1.5 w-1.5 rounded-full ${sev === "critical" ? "bg-critical bp-pulse-dot" : sev === "warning" ? "bg-warning" : "bg-info"}`} />
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${sev === "critical" ? "bg-critical bp-pulse-dot" : sev === "warning" ? "bg-warning" : "bg-info"}`}
+                />
                 {sev} · {grouped[sev].length}
               </div>
               <div className="space-y-1.5">
                 {grouped[sev].map((a, i) => (
-                  <div key={i} className="rounded-lg border border-black/5 bg-canvas p-2.5 transition hover:bg-white hover:shadow-sm">
+                  <div
+                    key={i}
+                    className="rounded-lg border border-black/5 bg-canvas p-2.5 transition hover:bg-white hover:shadow-sm"
+                  >
                     <div className="flex items-center justify-between">
                       <Pill tone={a.severity}>{a.module}</Pill>
                       <span className="text-[10px] text-muted-foreground">{a.age}</span>
@@ -1274,7 +1694,7 @@ export function AlertsRail() {
                 ))}
               </div>
             </div>
-          )
+          ),
         )}
       </div>
     </SectionCard>
@@ -1346,7 +1766,13 @@ export function OverviewKpis({ items = overviewKpis }: { items?: typeof overview
 
 /* ---------- 7.1b Today's Sales Summary — compact hourly ---------- */
 
-export function HourlySummary({ data = hourlySales, tx = 286 }: { data?: typeof hourlySales; tx?: number }) {
+export function HourlySummary({
+  data = hourlySales,
+  tx = 286,
+}: {
+  data?: typeof hourlySales;
+  tx?: number;
+}) {
   const gross = data.reduce((s, h) => s + h.gross, 0);
   const net = data.reduce((s, h) => s + h.net, 0);
   const basket = tx === 0 ? 0 : Math.round(net / tx);
@@ -1365,7 +1791,9 @@ export function HourlySummary({ data = hourlySales, tx = 286 }: { data?: typeof 
         ].map((c) => (
           <div key={c.l} className="rounded-lg border border-black/5 bg-canvas p-2.5">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{c.l}</p>
-            <p className="mt-1 font-display text-base font-bold tabular-nums text-foreground">{c.v}</p>
+            <p className="mt-1 font-display text-base font-bold tabular-nums text-foreground">
+              {c.v}
+            </p>
           </div>
         ))}
       </div>
@@ -1385,10 +1813,31 @@ export function HourlySummary({ data = hourlySales, tx = 286 }: { data?: typeof 
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(15,10,50,0.06)" />
             <XAxis dataKey="time" stroke="rgba(15,10,50,0.5)" fontSize={11} />
             <YAxis stroke="rgba(15,10,50,0.5)" fontSize={11} />
-            <Tooltip contentStyle={{ background: "white", border: "1px solid rgba(15,10,50,0.1)", borderRadius: 8, fontSize: 12 }} />
+            <Tooltip
+              contentStyle={{
+                background: "white",
+                border: "1px solid rgba(15,10,50,0.1)",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+            />
             <Legend wrapperStyle={{ fontSize: 11 }} />
-            <Area type="monotone" dataKey="gross" stroke={BRAND} strokeWidth={2} fill="url(#g-hs-gross)" name="Gross" />
-            <Area type="monotone" dataKey="net" stroke={TEAL} strokeWidth={2} fill="url(#g-hs-net)" name="Net" />
+            <Area
+              type="monotone"
+              dataKey="gross"
+              stroke={BRAND}
+              strokeWidth={2}
+              fill="url(#g-hs-gross)"
+              name="Gross"
+            />
+            <Area
+              type="monotone"
+              dataKey="net"
+              stroke={TEAL}
+              strokeWidth={2}
+              fill="url(#g-hs-net)"
+              name="Net"
+            />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -1432,24 +1881,35 @@ export function DispatchPipelinePreview({
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {stage.key}
               </span>
-              <span className={`h-1.5 w-1.5 rounded-full ${stage.tone === "critical" ? "bg-critical bp-pulse-dot" : stage.tone === "warning" ? "bg-warning" : stage.tone === "success" ? "bg-success" : "bg-info"}`} />
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${stage.tone === "critical" ? "bg-critical bp-pulse-dot" : stage.tone === "warning" ? "bg-warning" : stage.tone === "success" ? "bg-success" : "bg-info"}`}
+              />
             </div>
-            <p className="mt-1 font-display text-2xl font-bold tabular-nums text-foreground">{stage.count}</p>
+            <p className="mt-1 font-display text-2xl font-bold tabular-nums text-foreground">
+              {stage.count}
+            </p>
             <p className="text-[10px] text-muted-foreground">deliveries</p>
           </div>
         ))}
       </div>
       <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3">
         {previewCards.map((d) => (
-          <div key={d.no} className="bp-enter rounded-lg border border-black/5 bg-white p-2.5 shadow-sm">
+          <div
+            key={d.no}
+            className="bp-enter rounded-lg border border-black/5 bg-white p-2.5 shadow-sm"
+          >
             <div className="flex items-center justify-between">
               <span className="font-mono text-[11px] font-semibold text-brand">{d.no}</span>
               <Pill tone={toneForStatus(d.status)}>{d.status}</Pill>
             </div>
             <p className="mt-1 truncate text-xs font-medium text-foreground">{d.customer}</p>
-            <p className="truncate text-[11px] text-muted-foreground">{d.materials} · {d.area}</p>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {d.materials} · {d.area}
+            </p>
             <div className="mt-1 flex items-center justify-between text-[11px]">
-              <span className="text-muted-foreground"><Clock className="mr-0.5 inline h-2.5 w-2.5" /> {d.promised.replace("Today, ", "")}</span>
+              <span className="text-muted-foreground">
+                <Clock className="mr-0.5 inline h-2.5 w-2.5" /> {d.promised.replace("Today, ", "")}
+              </span>
               <span className="font-semibold">{d.amount}</span>
             </div>
           </div>
@@ -1463,7 +1923,10 @@ export function DispatchPipelinePreview({
 
 export function CashierWorkspaceSummary({
   tiles,
-  quickActions: actions = cashierWorkspaceSummary.quickActions.map((label) => ({ label, onClick: () => toast.info(label, { description: "Cashier action triggered." }) })),
+  quickActions: actions = cashierWorkspaceSummary.quickActions.map((label) => ({
+    label,
+    onClick: () => toast.info(label, { description: "Cashier action triggered." }),
+  })),
 }: {
   tiles?: { l: string; v: string; tone: Severity }[];
   quickActions?: { label: string; onClick: () => void }[];
@@ -1472,13 +1935,20 @@ export function CashierWorkspaceSummary({
     { l: "Active terminals", v: cashierWorkspaceSummary.activeTerminals, tone: "success" },
     { l: "Open shifts", v: String(cashierWorkspaceSummary.openShifts), tone: "info" },
     { l: "Parked sales", v: String(cashierWorkspaceSummary.parkedSales), tone: "warning" },
-    { l: "Pending approvals", v: String(cashierWorkspaceSummary.pendingApprovals), tone: "warning" },
+    {
+      l: "Pending approvals",
+      v: String(cashierWorkspaceSummary.pendingApprovals),
+      tone: "warning",
+    },
     { l: "Offline terminals", v: cashierWorkspaceSummary.offlineTerminals, tone: "critical" },
     { l: "Cash variance", v: cashierWorkspaceSummary.cashVariance, tone: "critical" },
   ];
   const rows = tiles ?? defaultTiles;
   return (
-    <SectionCard title="Cashier Workspace Summary" desc="Terminals, shifts and cash reconciliation at a glance.">
+    <SectionCard
+      title="Cashier Workspace Summary"
+      desc="Terminals, shifts and cash reconciliation at a glance."
+    >
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
         {rows.map((t, i) => (
           <div
@@ -1487,15 +1957,25 @@ export function CashierWorkspaceSummary({
           >
             <div className="flex items-center justify-between">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{t.l}</p>
-              <span className={`h-1.5 w-1.5 rounded-full ${t.tone === "critical" ? "bg-critical" : t.tone === "warning" ? "bg-warning" : t.tone === "success" ? "bg-success" : "bg-info"}`} />
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${t.tone === "critical" ? "bg-critical" : t.tone === "warning" ? "bg-warning" : t.tone === "success" ? "bg-success" : "bg-info"}`}
+              />
             </div>
-            <p className="mt-1 font-display text-sm font-bold tabular-nums text-foreground">{t.v}</p>
+            <p className="mt-1 font-display text-sm font-bold tabular-nums text-foreground">
+              {t.v}
+            </p>
           </div>
         ))}
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {actions.map((a) => (
-          <Button key={a.label} size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={a.onClick}>
+          <Button
+            key={a.label}
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1 text-xs"
+            onClick={a.onClick}
+          >
             {a.label}
           </Button>
         ))}
@@ -1534,14 +2014,18 @@ export function TopCategoriesCompact({
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             {["Category", "Sales", "Units", "Stock", "Top product"].map((h) => (
-              <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+              <TableHead key={h} className="text-muted-foreground">
+                {h}
+              </TableHead>
             ))}
           </TableRow>
         </TableHeader>
         <TableBody>
           {categories.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">No sales recorded yet.</TableCell>
+              <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                No sales recorded yet.
+              </TableCell>
             </TableRow>
           )}
           {categories.slice(0, 6).map((c) => {
@@ -1560,7 +2044,9 @@ export function TopCategoriesCompact({
                         className="h-8 w-8 rounded-md object-cover ring-1 ring-black/5 transition hover:scale-110"
                       />
                     ) : (
-                      <span className={`grid h-8 w-8 place-items-center rounded-md ${toneIcon.info}`}>
+                      <span
+                        className={`grid h-8 w-8 place-items-center rounded-md ${toneIcon.info}`}
+                      >
                         <Icon className="h-4 w-4" />
                       </span>
                     )}
@@ -1569,7 +2055,9 @@ export function TopCategoriesCompact({
                 </TableCell>
                 <TableCell className="font-semibold tabular-nums">{formatSAR(c.sales)}</TableCell>
                 <TableCell className="text-muted-foreground">{c.units}</TableCell>
-                <TableCell><Pill tone={tone}>{c.health}</Pill></TableCell>
+                <TableCell>
+                  <Pill tone={tone}>{c.health}</Pill>
+                </TableCell>
                 <TableCell className="text-muted-foreground">{top[c.name] ?? "—"}</TableCell>
               </TableRow>
             );
@@ -1593,12 +2081,16 @@ export function SalesPerfKpis({ items = salesPerfKpis }: { items?: typeof salesP
             className={`bp-enter stagger-${(i % 6) + 1} rounded-2xl border border-black/5 bg-white p-4 shadow-sm`}
           >
             <div className="flex items-start justify-between">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{k.title}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                {k.title}
+              </p>
               <div className={`grid h-7 w-7 place-items-center rounded ${toneIcon[k.tone]}`}>
                 <Icon className="h-3.5 w-3.5" />
               </div>
             </div>
-            <p className="mt-2 font-display text-xl font-bold tabular-nums text-foreground">{k.value}</p>
+            <p className="mt-2 font-display text-xl font-bold tabular-nums text-foreground">
+              {k.value}
+            </p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">{k.sub}</p>
           </div>
         );
@@ -1632,14 +2124,18 @@ export function RecentOrdersTable({
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             {["Order", "Customer", "Type", "Value", "Status", "Payment", "Invoice"].map((h) => (
-              <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+              <TableHead key={h} className="text-muted-foreground">
+                {h}
+              </TableHead>
             ))}
           </TableRow>
         </TableHeader>
         <TableBody>
           {orders.length === 0 && (
             <TableRow>
-              <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">No orders yet.</TableCell>
+              <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                No orders yet.
+              </TableCell>
             </TableRow>
           )}
           {orders.map((o) => (
@@ -1648,7 +2144,9 @@ export function RecentOrdersTable({
               <TableCell className="font-medium">{o.customer}</TableCell>
               <TableCell>{o.type}</TableCell>
               <TableCell className="font-semibold tabular-nums">{o.value}</TableCell>
-              <TableCell><Pill tone={toneForStatus(o.status)}>{o.status}</Pill></TableCell>
+              <TableCell>
+                <Pill tone={toneForStatus(o.status)}>{o.status}</Pill>
+              </TableCell>
               <TableCell className="text-muted-foreground">{o.payment}</TableCell>
               <TableCell className="text-muted-foreground">{o.invoice}</TableCell>
             </TableRow>
@@ -1672,12 +2170,16 @@ export function InventoryKpiGrid({ items = inventoryKpis }: { items?: typeof inv
             className={`bp-enter stagger-${(i % 6) + 1} rounded-2xl border border-black/5 bg-white p-4 shadow-sm`}
           >
             <div className="flex items-start justify-between">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{k.title}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                {k.title}
+              </p>
               <div className={`grid h-7 w-7 place-items-center rounded ${toneIcon[k.tone]}`}>
                 <Icon className="h-3.5 w-3.5" />
               </div>
             </div>
-            <p className="mt-2 font-display text-xl font-bold tabular-nums text-foreground">{k.value}</p>
+            <p className="mt-2 font-display text-xl font-bold tabular-nums text-foreground">
+              {k.value}
+            </p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">{k.sub}</p>
           </div>
         );
@@ -1688,7 +2190,11 @@ export function InventoryKpiGrid({ items = inventoryKpis }: { items?: typeof inv
 
 /* ---------- 7.4 Delivery pipeline board (full, 6 lanes) ---------- */
 
-export function DeliveryPipelineBoard({ cards: allCards = deliveryDetail }: { cards?: typeof deliveryDetail }) {
+export function DeliveryPipelineBoard({
+  cards: allCards = deliveryDetail,
+}: {
+  cards?: typeof deliveryDetail;
+}) {
   const navigate = useNavigate();
   const lanes: { key: string; tone: Severity }[] = [
     { key: "Pending", tone: "warning" },
@@ -1699,7 +2205,10 @@ export function DeliveryPipelineBoard({ cards: allCards = deliveryDetail }: { ca
     { key: "Failed / Returned", tone: "critical" },
   ];
   return (
-    <SectionCard title="Delivery & Dispatch Board" desc="Driver, vehicle, weight and area on every card.">
+    <SectionCard
+      title="Delivery & Dispatch Board"
+      desc="Driver, vehicle, weight and area on every card."
+    >
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {lanes.map((lane) => {
           const cards = allCards.filter((d) => d.status === lane.key);
@@ -1727,14 +2236,22 @@ export function DeliveryPipelineBoard({ cards: allCards = deliveryDetail }: { ca
                       <span className="font-mono text-[11px] font-semibold text-brand">{d.no}</span>
                       <span className="text-[10px] text-muted-foreground">{d.priority}</span>
                     </div>
-                    <p className="mt-0.5 truncate text-xs font-medium text-foreground">{d.customer}</p>
+                    <p className="mt-0.5 truncate text-xs font-medium text-foreground">
+                      {d.customer}
+                    </p>
                     <p className="truncate text-[11px] text-muted-foreground">{d.materials}</p>
-                    <p className="truncate text-[10px] text-muted-foreground">🚚 {d.driver} · {d.vehicle}</p>
+                    <p className="truncate text-[10px] text-muted-foreground">
+                      🚚 {d.driver} · {d.vehicle}
+                    </p>
                     <div className="mt-1 flex items-center justify-between text-[11px]">
-                      <span className="text-muted-foreground">{d.area} · {d.weight}</span>
+                      <span className="text-muted-foreground">
+                        {d.area} · {d.weight}
+                      </span>
                       <span className="font-semibold">{d.amount}</span>
                     </div>
-                    <p className="mt-0.5 text-[10px] text-muted-foreground">Promised {d.promised}</p>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      Promised {d.promised}
+                    </p>
                   </div>
                 ))}
               </div>
@@ -1743,8 +2260,22 @@ export function DeliveryPipelineBoard({ cards: allCards = deliveryDetail }: { ca
         })}
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-        {["Assign Driver", "Assign Vehicle", "Start Loading", "Mark Dispatched", "Mark Delivered", "Print Delivery Order", "View Timeline"].map((a) => (
-          <Button key={a} size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => navigate({ to: "/delivery/pipeline" })}>
+        {[
+          "Assign Driver",
+          "Assign Vehicle",
+          "Start Loading",
+          "Mark Dispatched",
+          "Mark Delivered",
+          "Print Delivery Order",
+          "View Timeline",
+        ].map((a) => (
+          <Button
+            key={a}
+            size="sm"
+            variant="outline"
+            className="h-7 text-[11px]"
+            onClick={() => navigate({ to: "/delivery/pipeline" })}
+          >
             {a}
           </Button>
         ))}
@@ -1766,12 +2297,16 @@ export function CashierKpiGrid({ items = cashierKpis }: { items?: typeof cashier
             className={`bp-enter stagger-${(i % 6) + 1} rounded-2xl border border-black/5 bg-white p-4 shadow-sm`}
           >
             <div className="flex items-start justify-between">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{k.title}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                {k.title}
+              </p>
               <div className={`grid h-7 w-7 place-items-center rounded ${toneIcon[k.tone]}`}>
                 <Icon className="h-3.5 w-3.5" />
               </div>
             </div>
-            <p className="mt-2 font-display text-xl font-bold tabular-nums text-foreground">{k.value}</p>
+            <p className="mt-2 font-display text-xl font-bold tabular-nums text-foreground">
+              {k.value}
+            </p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">{k.sub}</p>
           </div>
         );
@@ -1783,20 +2318,39 @@ export function CashierKpiGrid({ items = cashierKpis }: { items?: typeof cashier
 export function TerminalDetailTable({ rows = terminalDetail }: { rows?: typeof terminalDetail }) {
   const navigate = useNavigate();
   return (
-    <SectionCard title="Terminal Status" desc="Cashier · shift · sales · sync · printer · card terminal.">
+    <SectionCard
+      title="Terminal Status"
+      desc="Cashier · shift · sales · sync · printer · card terminal."
+    >
       <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {["Terminal", "Cashier", "Shift", "Started", "Tx", "Sales", "Expected", "Sync", "Printer", "Card", "Status"].map((h) => (
-                <TableHead key={h} className="text-muted-foreground">{h}</TableHead>
+              {[
+                "Terminal",
+                "Cashier",
+                "Shift",
+                "Started",
+                "Tx",
+                "Sales",
+                "Expected",
+                "Sync",
+                "Printer",
+                "Card",
+                "Status",
+              ].map((h) => (
+                <TableHead key={h} className="text-muted-foreground">
+                  {h}
+                </TableHead>
               ))}
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={11} className="py-8 text-center text-sm text-muted-foreground">No shift activity yet.</TableCell>
+                <TableCell colSpan={11} className="py-8 text-center text-sm text-muted-foreground">
+                  No shift activity yet.
+                </TableCell>
               </TableRow>
             )}
             {rows.map((t) => (
@@ -1811,15 +2365,30 @@ export function TerminalDetailTable({ rows = terminalDetail }: { rows?: typeof t
                 <TableCell className="text-muted-foreground">{t.sync}</TableCell>
                 <TableCell className="text-muted-foreground">{t.printer}</TableCell>
                 <TableCell className="text-muted-foreground">{t.card}</TableCell>
-                <TableCell><Pill tone={toneForStatus(t.status)}>{t.status}</Pill></TableCell>
+                <TableCell>
+                  <Pill tone={toneForStatus(t.status)}>{t.status}</Pill>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5">
-        {["View Shift", "Print X-Report", "Request Cash Count", "Review Variance", "Recall Parked Sale", "Reassign Cashier"].map((a) => (
-          <Button key={a} size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => navigate({ to: "/operate/cashier-shift" })}>
+        {[
+          "View Shift",
+          "Print X-Report",
+          "Request Cash Count",
+          "Review Variance",
+          "Recall Parked Sale",
+          "Reassign Cashier",
+        ].map((a) => (
+          <Button
+            key={a}
+            size="sm"
+            variant="outline"
+            className="h-7 text-[11px]"
+            onClick={() => navigate({ to: "/operate/cashier-shift" })}
+          >
             {a}
           </Button>
         ))}
@@ -1830,11 +2399,19 @@ export function TerminalDetailTable({ rows = terminalDetail }: { rows?: typeof t
 
 /* ---------- 7.6 Payments & Returns ---------- */
 
-export function PaymentBreakdownTiles({ items = paymentBreakdown }: { items?: typeof paymentBreakdown }) {
+export function PaymentBreakdownTiles({
+  items = paymentBreakdown,
+}: {
+  items?: typeof paymentBreakdown;
+}) {
   return (
     <SectionCard title="Payment Summary" desc="Today's collections by method (Card replaces Mada).">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {items.length === 0 && <p className="col-span-full py-6 text-center text-sm text-muted-foreground">No payments recorded yet.</p>}
+        {items.length === 0 && (
+          <p className="col-span-full py-6 text-center text-sm text-muted-foreground">
+            No payments recorded yet.
+          </p>
+        )}
         {items.map((p, i) => {
           const Icon = iconMap[p.icon] ?? Receipt;
           return (
@@ -1848,8 +2425,12 @@ export function PaymentBreakdownTiles({ items = paymentBreakdown }: { items?: ty
                 </span>
                 <span className="text-[10px] text-muted-foreground">{p.tx} tx</span>
               </div>
-              <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">{p.method}</p>
-              <p className="mt-0.5 font-display text-base font-bold tabular-nums text-foreground">{p.amount}</p>
+              <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+                {p.method}
+              </p>
+              <p className="mt-0.5 font-display text-base font-bold tabular-nums text-foreground">
+                {p.amount}
+              </p>
             </div>
           );
         })}
@@ -1858,14 +2439,23 @@ export function PaymentBreakdownTiles({ items = paymentBreakdown }: { items?: ty
   );
 }
 
-export function ReturnBreakdownTiles({ items = returnBreakdown }: { items?: typeof returnBreakdown }) {
+export function ReturnBreakdownTiles({
+  items = returnBreakdown,
+}: {
+  items?: typeof returnBreakdown;
+}) {
   return (
-    <SectionCard title="Return Summary" desc="Standard, damaged, surplus, exchanges, VAT reversal and restocking.">
+    <SectionCard
+      title="Return Summary"
+      desc="Standard, damaged, surplus, exchanges, VAT reversal and restocking."
+    >
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
         {items.map((r) => (
           <div key={r.label} className="rounded-lg border border-black/5 bg-canvas p-2.5">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{r.label}</p>
-            <p className="mt-1 font-display text-sm font-bold tabular-nums text-foreground">{r.value}</p>
+            <p className="mt-1 font-display text-sm font-bold tabular-nums text-foreground">
+              {r.value}
+            </p>
           </div>
         ))}
       </div>
@@ -1916,12 +2506,16 @@ export function AlertsByGroup({
                       <Pill tone={sev}>{a.module}</Pill>
                       <span className="text-[10px] text-muted-foreground">{a.age} ago</span>
                     </div>
-                    <p className="mt-1.5 text-xs font-medium leading-snug text-foreground">{a.msg}</p>
+                    <p className="mt-1.5 text-xs font-medium leading-snug text-foreground">
+                      {a.msg}
+                    </p>
                     <Button
                       size="sm"
                       variant="ghost"
                       className="mt-1 h-7 px-2 text-[11px] text-brand hover:bg-brand/10 hover:text-brand"
-                      onClick={() => (onAction ? onAction(a) : toast.success(a.action, { description: a.msg }))}
+                      onClick={() =>
+                        onAction ? onAction(a) : toast.success(a.action, { description: a.msg })
+                      }
                     >
                       {a.action} <ArrowRight className="ml-1 h-3 w-3" />
                     </Button>

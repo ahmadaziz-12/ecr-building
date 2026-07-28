@@ -98,6 +98,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Kpi> Kpis => Set<Kpi>();
     public DbSet<ReportDefinition> ReportDefinitions => Set<ReportDefinition>();
     public DbSet<BiFeed> BiFeeds => Set<BiFeed>();
+    public DbSet<SavedDashboardView> SavedDashboardViews => Set<SavedDashboardView>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

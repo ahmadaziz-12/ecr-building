@@ -8,3 +8,6 @@ public record BiFeedDto(int Id, string Name, string Source, string Destination, 
 
 public record OverviewAreaDto(string Area, string Status, string Owner, string Metric, string Value, string Sla);
 public record AdminOverviewDto(int ActiveUsers, int PendingApprovals, int OpenMaintenanceTickets, int CriticalAuditEvents24h, int ComplianceOverdue, IReadOnlyList<OverviewAreaDto> Areas);
+
+public record SavedDashboardViewDto(int Id, string Name, string FiltersJson, DateTime CreatedAt);
+public record CreateSavedDashboardViewRequest(string Name, Dictionary<string, string> Filters);

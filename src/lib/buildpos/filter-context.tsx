@@ -7,7 +7,15 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 export const primaryFilterGroups: { label: string; options: string[] }[] = [
   {
     label: "Date Range",
-    options: ["Today", "Yesterday", "Last 7 Days", "Last 30 Days", "This Month", "Last Month", "Custom Range"],
+    options: [
+      "Today",
+      "Yesterday",
+      "Last 7 Days",
+      "Last 30 Days",
+      "This Month",
+      "Last Month",
+      "Custom Range",
+    ],
   },
   {
     label: "Branch",
@@ -57,30 +65,74 @@ export const primaryFilterGroups: { label: string; options: string[] }[] = [
     ],
   },
   {
+    // Matches the real OrderStatus enum (Order.cs) so it can actually filter order data.
     label: "Status",
-    options: ["All", "Active", "Pending", "Completed", "Failed", "On Hold"],
+    options: ["All", "Pending", "Completed", "Dispatched", "Delivered", "Returned", "Voided"],
   },
 ];
 
 export const moreFilterGroups: { label: string; options: string[] }[] = [
   { label: "Customer", options: ["All", "Walk-in", "Retail", "Loyalty Member"] },
-  { label: "Contractor Account", options: ["All", "Al Noor Contracting", "Modern Villas Est.", "Gulf Build Co."] },
-  { label: "Supplier", options: ["All", "Al Noor Cement", "Gulf Steel Supply", "Saudi Tiles Trading", "ColorPro Paints"] },
-  { label: "Payment Method", options: ["All", "Cash", "Card", "Wallet", "Bank Transfer", "Account Credit", "Loyalty Points"] },
-  { label: "Order Status", options: ["All", "Draft", "Confirmed", "Delivery Planned", "Completed", "Voided"] },
-  { label: "Delivery Status", options: ["All", "Pending", "Assigned", "Loading", "Dispatched", "Delivered", "Failed / Returned"] },
-  { label: "Stock Status", options: ["All", "Healthy", "Low", "Critical", "Out of Stock", "Quarantine"] },
+  // Contractor Account and Supplier option lists are placeholders here — FilterBar swaps them for
+  // live contractor customer / supplier names once loaded, same mechanism as Category/Branch.
+  {
+    label: "Contractor Account",
+    options: ["All", "Al Noor Contracting", "Modern Villas Est.", "Gulf Build Co."],
+  },
+  {
+    label: "Supplier",
+    options: [
+      "All",
+      "Al Noor Cement",
+      "Gulf Steel Supply",
+      "Saudi Tiles Trading",
+      "ColorPro Paints",
+    ],
+  },
+  // Matches the real PaymentMethod enum (Order.cs).
+  {
+    label: "Payment Method",
+    options: ["All", "Cash", "Mada", "ApplePay", "StcPay", "Transfer", "Loyalty", "AccountCredit"],
+  },
+  {
+    label: "Delivery Status",
+    options: [
+      "All",
+      "Pending",
+      "Assigned",
+      "Loading",
+      "Dispatched",
+      "Delivered",
+      "Failed / Returned",
+    ],
+  },
+  {
+    label: "Stock Status",
+    options: ["All", "Healthy", "Low", "Critical", "Out of Stock", "Quarantine"],
+  },
   { label: "Return Type", options: ["All", "Standard", "Damaged", "Surplus", "Exchange"] },
-  { label: "Invoice Status", options: ["All", "Submitted", "Cleared", "Queued", "Failed"] },
-  { label: "Employee Department", options: ["All", "Sales", "Warehouse", "Dispatch", "Finance", "Admin"] },
+  // Matches the real ZatcaInvoiceStatus enum (Zatca.cs) — "Queued" doesn't exist, "Pending" does.
+  { label: "Invoice Status", options: ["All", "Pending", "Submitted", "Cleared", "Failed"] },
+  {
+    label: "Employee Department",
+    options: ["All", "Sales", "Warehouse", "Dispatch", "Finance", "Admin"],
+  },
   { label: "Shift Status", options: ["All", "Open", "Closed", "Needs Review"] },
 ];
 
 export const filterGroups = primaryFilterGroups;
 
-export const filterDefaults: Record<string, string> = Object.fromEntries(
-  [...primaryFilterGroups, ...moreFilterGroups].map((g) => [g.label, g.options[0]])
-);
+// Not real dropdown groups — two ISO-date values written by native <input type="date"> fields that
+// FilterBar renders inline only when Date Range === "Custom Range". Kept in the same `values` map
+// (rather than separate state) so Reset / Save View / Load View cover them for free.
+export const customRangeKeys = ["Custom Range Start", "Custom Range End"];
+
+export const filterDefaults: Record<string, string> = {
+  ...Object.fromEntries(
+    [...primaryFilterGroups, ...moreFilterGroups].map((g) => [g.label, g.options[0]]),
+  ),
+  ...Object.fromEntries(customRangeKeys.map((k) => [k, ""])),
+};
 
 type Ctx = {
   values: Record<string, string>;
@@ -102,7 +154,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   const reset = useCallback(() => setValuesState(filterDefaults), []);
   const ctx = useMemo(
     () => ({ values, setValue, setValues: setValuesState, reset, activeTab, setActiveTab }),
-    [values, setValue, reset, activeTab]
+    [values, setValue, reset, activeTab],
   );
   return <FilterCtx.Provider value={ctx}>{children}</FilterCtx.Provider>;
 }
