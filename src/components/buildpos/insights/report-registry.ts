@@ -1,7 +1,7 @@
 import {
   AlertTriangle, BadgePercent, Banknote, Boxes, CalendarClock, ClipboardCheck, Clock, FileBarChart2,
-  Gauge, HeartPulse, Layers, PackageSearch, Receipt, RotateCcw, Scale, ShieldCheck, ShoppingCart,
-  TrendingUp, Truck, Undo2, UserCheck, UserCog, Users, Wallet,
+  Gauge, HeartPulse, Layers, PackageOpen, PackageSearch, Receipt, RotateCcw, Scale, ShieldCheck, ShoppingCart,
+  TrendingUp, Truck, Undo2, UserCheck, UserCog, Users, Wallet, Route as RouteIcon, Coins,
 } from "lucide-react";
 import type { ReportFilterSpec, ReportKnobSpec } from "./ReportFilterBar";
 import type { ReportColumn, ReportDetail } from "./ReportTable";
@@ -16,14 +16,17 @@ export type ReportKey =
   | "sales-summary" | "top-products" | "discount-utilization" | "cashier-performance"
   | "profit-margin" | "category-performance" | "payment-methods"
   | "returns-analysis" | "refund-methods" | "restocking-fees" | "customer-returns" | "damaged-items"
+  | "surplus-returns"
   | "item-report" | "inventory-report" | "low-stock" | "stock-count-variance" | "slow-moving" | "expiry-report"
   | "purchase-orders" | "supplier-returns" | "supplier-performance"
-  | "vat" | "contractor-aging" | "employee-report" | "employee-audit";
+  | "delivery-orders" | "driver-performance"
+  | "vat" | "contractor-aging" | "shift-report" | "employee-report" | "employee-audit";
 
-export type ReportGroup = "Sales" | "Returns & Quality" | "Inventory" | "Procurement" | "Tax & B2B" | "People & Audit";
+export type ReportGroup =
+  | "Sales" | "Returns & Quality" | "Inventory" | "Procurement" | "Delivery" | "Tax & B2B" | "People & Audit";
 
 export const REPORT_GROUPS: ReportGroup[] = [
-  "Sales", "Inventory", "Procurement", "Returns & Quality", "Tax & B2B", "People & Audit",
+  "Sales", "Inventory", "Procurement", "Delivery", "Returns & Quality", "Tax & B2B", "People & Audit",
 ];
 
 export type ReportDef = {
@@ -80,6 +83,13 @@ const F = {
   auditSeverity: { key: "severity", label: "Severity", allLabel: "Severities", options: () => opt(["Info", "Warning", "Critical"]) },
   expiryStatus: { key: "status", label: "Status", allLabel: "Statuses", options: () => opt(["Healthy", "Monitor", "Expiring", "Critical", "Expired", "Quarantine", "WrittenOff"]) },
   customerType: { key: "customerType", label: "Account Type", allLabel: "Types", options: () => opt(["Contractor", "B2B"]) },
+  terminal: { key: "terminalId", label: "Terminal", allLabel: "Terminals", options: (o: ReportFilterOptionsDto) => o.terminals },
+  shiftStatus: { key: "status", label: "Shift Status", allLabel: "Statuses", options: (o: ReportFilterOptionsDto) => opt(o.shiftStatuses) },
+  driver: { key: "driverId", label: "Driver", allLabel: "Drivers", options: (o: ReportFilterOptionsDto) => o.drivers },
+  vehicle: { key: "vehicleId", label: "Vehicle", allLabel: "Vehicles", options: (o: ReportFilterOptionsDto) => o.vehicles },
+  deliveryZone: { key: "zone", label: "Zone", allLabel: "Zones", options: (o: ReportFilterOptionsDto) => o.deliveryZones },
+  deliveryStage: { key: "stage", label: "Stage", allLabel: "Stages", options: (o: ReportFilterOptionsDto) => opt(o.deliveryStages) },
+  deliveryPriority: { key: "priority", label: "Priority", allLabel: "Priorities", options: (o: ReportFilterOptionsDto) => opt(o.deliveryPriorities) },
 } satisfies Record<string, ReportFilterSpec>;
 
 // ————— Column helpers —————
@@ -463,6 +473,105 @@ export const REPORTS: ReportDef[] = [
     ],
   },
 
+  // ————————————— Delivery —————————————
+  {
+    key: "delivery-orders",
+    label: "Delivery Report",
+    desc: "Every dispatch ticket with the promise it was made against, what actually left the yard, and the charges billed.",
+    group: "Delivery",
+    icon: Truck,
+    dated: true,
+    filters: [
+      F.branch, F.customer, F.driver, F.vehicle, F.deliveryZone, F.deliveryStage, F.deliveryPriority,
+      F.item, F.category,
+    ],
+    tableTitle: "Delivery Tickets",
+    columns: [
+      c("deliveryNo", "Delivery #", "mono"), c("date", "Created", "datetime"),
+      c("orderNo", "Order", "mono"), c("branch", "Branch"), c("customer", "Customer"),
+      c("area", "Zone"), c("city", "City"), c("priority", "Priority"),
+      c("driver", "Driver"), c("vehicle", "Vehicle"),
+      c("promisedDate", "Promised", "date"), c("promisedTime", "Slot"),
+      c("dispatchedAt", "Dispatched", "datetime"), c("deliveredAt", "Delivered", "datetime"),
+      c("cycleHours", "Cycle (h)", "qty"), c("daysLate", "Days Late", "int"),
+      c("punctuality", "Punctuality", "status"),
+      c("weightTons", "Tonnage", "qty"), c("itemCount", "Lines", "int"),
+      c("qtyOrdered", "Ordered", "qty"), c("qtyLoaded", "Loaded", "qty"), c("qtyDelivered", "Delivered", "qty"),
+      c("qtyMissing", "Missing", "qty"), c("qtyDamaged", "Damaged", "qty"), c("fulfilledPct", "Fulfilled", "pct"),
+      c("amount", "Goods Value", "money"), c("deliveryFee", "Delivery Fee", "money"),
+      c("handlingCharge", "Handling", "money"), c("heavyCharge", "Heavy", "money"),
+      c("totalCharges", "Total Charges", "money"),
+      c("paymentStatus", "Payment", "status"), c("stage", "Stage", "status"),
+      { key: "project", label: "Project", exportOnly: true },
+      { key: "poRef", label: "Customer PO", exportOnly: true },
+      { key: "timeSlot", label: "Time Slot", exportOnly: true },
+      { key: "discountCharge", label: "Charge Discount", format: "money", exportOnly: true },
+      { key: "vatCharge", label: "VAT on Charges", format: "money", exportOnly: true },
+      { key: "receivedBy", label: "Received By", exportOnly: true },
+      { key: "proof", label: "Proof", exportOnly: true },
+      { key: "failureReason", label: "Failure Reason", exportOnly: true },
+      { key: "notes", label: "Notes", exportOnly: true },
+    ],
+    detail: {
+      title: (r: never) => `Delivery ${(r as { deliveryNo: string }).deliveryNo}`,
+      subtitle: (r: never) => {
+        const row = r as { stage: string; branch: string; area: string };
+        return `${row.stage} · ${row.branch} · ${row.area}`;
+      },
+      fields: (r: never) => {
+        const row = r as {
+          customer: string | null; driver: string | null; vehicle: string | null; promisedDate: string;
+          promisedTime: string; deliveredAt: string | null; punctuality: string; weightTons: number;
+          totalCharges: number; receivedBy: string | null; failureReason: string | null;
+        };
+        return [
+          { label: "Customer", value: row.customer ?? "Walk-in" },
+          { label: "Driver", value: row.driver ?? "Unassigned" },
+          { label: "Vehicle", value: row.vehicle ?? "Unassigned" },
+          { label: "Promised", value: `${new Date(row.promisedDate).toLocaleDateString("en-GB")} ${row.promisedTime}`.trim() },
+          { label: "Delivered", value: row.deliveredAt ? new Date(row.deliveredAt).toLocaleString("en-GB") : "—" },
+          { label: "Punctuality", value: row.punctuality },
+          { label: "Tonnage", value: `${row.weightTons} t` },
+          { label: "Charges", value: `${row.totalCharges.toFixed(2)} ر.س` },
+          { label: "Received By", value: row.receivedBy ?? "—" },
+          { label: "Failure Reason", value: row.failureReason ?? "—" },
+        ];
+      },
+      itemsLabel: "Load lines",
+      items: (r: never) => (r as { items: unknown[] }).items,
+      columns: [
+        c("sku", "SKU", "mono"), c("product", "Product"), c("category", "Category"), c("uom", "UOM"),
+        c("ordered", "Ordered", "qty"), c("loaded", "Loaded", "qty"), c("delivered", "Delivered", "qty"),
+        c("missing", "Missing", "qty"), c("damaged", "Damaged", "qty"), c("unitWeight", "Unit Weight", "qty"),
+      ],
+    },
+    emptyLabel: "No deliveries in the selected period for these filters.",
+  },
+  {
+    key: "driver-performance",
+    label: "Driver Performance",
+    desc: "Punctuality, cycle time, tonnage moved and shortfall per driver.",
+    group: "Delivery",
+    icon: RouteIcon,
+    dated: true,
+    filters: [F.branch, F.driver, F.vehicle],
+    tableTitle: "Driver Scorecard",
+    columns: [
+      c("driver", "Driver"), c("branch", "Branch"), c("vehicle", "Vehicle"), c("status", "Status", "status"),
+      c("deliveries", "Assigned", "int"), c("delivered", "Delivered", "int"),
+      c("inFlight", "In Flight", "int"), c("failed", "Failed", "int"), c("cancelled", "Cancelled", "int"),
+      c("onTimePct", "On Time", "pct"), c("avgCycleHours", "Avg Cycle (h)", "qty"),
+      c("avgDaysLate", "Avg Days Late", "qty"),
+      c("tonnageDelivered", "Tonnage", "qty"), c("deliveredValue", "Goods Delivered", "money"),
+      c("feeRevenue", "Charge Revenue", "money"),
+      c("qtyDelivered", "Units Delivered", "qty"), c("qtyMissing", "Missing", "qty"),
+      c("qtyDamaged", "Damaged", "qty"), c("fulfilmentPct", "Fulfilment", "pct"),
+      c("lastDeliveryAt", "Last Delivery", "datetime"),
+      { key: "licenseExpiry", label: "Licence Expiry", format: "date", exportOnly: true },
+    ],
+    emptyLabel: "No driver had a delivery assigned in this period.",
+  },
+
   // ————————————— Returns & Quality —————————————
   {
     key: "customer-returns",
@@ -532,6 +641,30 @@ export const REPORTS: ReportDef[] = [
     emptyLabel: "No damaged returns in this period.",
   },
   {
+    key: "surplus-returns",
+    label: "Surplus Inventory Report",
+    desc: "Unused material brought back into sellable stock — value returned to inventory against the restocking fee recovered.",
+    group: "Returns & Quality",
+    icon: PackageOpen,
+    dated: true,
+    filters: [F.branch, F.customer, F.item, F.category, F.returnStatus, F.refundMethod],
+    tableTitle: "Surplus Returns & Restocking",
+    columns: [
+      c("returnNo", "Return #", "mono"), c("date", "Returned", "datetime"),
+      c("orderNo", "Original Order", "mono"), c("soldAt", "Sold", "date"), c("daysHeld", "Days Held", "int"),
+      c("sku", "SKU", "mono"), c("product", "Product"), c("category", "Category"), c("uom", "UOM"),
+      c("branch", "Branch"), c("customer", "Customer"),
+      c("qty", "Qty Back", "qty"), c("unitPricePaid", "Price Paid", "money"),
+      c("refundAmount", "Refund", "money"),
+      c("unitCost", "Unit Cost", "money"), c("restockValue", "Back Into Stock", "money"),
+      c("restockingFeePct", "Fee Rate", "pct"), c("restockingFee", "Fee Withheld", "money"),
+      c("netCashback", "Net Cashback", "money"),
+      c("refundMethod", "Refund Method"), c("approvedBy", "Approved By"), c("status", "Status", "status"),
+      { key: "reason", label: "Reason", exportOnly: true },
+    ],
+    emptyLabel: "No surplus material came back in this period.",
+  },
+  {
     key: "returns-analysis",
     label: "Returns Analysis",
     desc: "Refunds, VAT reversals and restocking fees by return type.",
@@ -576,7 +709,7 @@ export const REPORTS: ReportDef[] = [
   {
     key: "vat",
     label: "VAT Report",
-    desc: "Output VAT by rate, reversals, and the net position.",
+    desc: "Output VAT by rate, the credit notes reversing it, and the net position.",
     group: "Tax & B2B",
     icon: Scale,
     dated: true,
@@ -605,6 +738,61 @@ export const REPORTS: ReportDef[] = [
   },
 
   // ————————————— People & Audit —————————————
+  {
+    key: "shift-report",
+    label: "Shift Report",
+    desc: "Every till session over the period — opening float through counted cash — so an over/short pattern on one terminal or cashier is visible rather than buried in printed Z-reports.",
+    group: "People & Audit",
+    icon: Coins,
+    dated: true,
+    filters: [F.branch, F.user, F.terminal, F.shiftStatus],
+    tableTitle: "Till Sessions & Cash Reconciliation",
+    columns: [
+      c("openedAt", "Opened", "datetime"), c("closedAt", "Closed", "datetime"),
+      c("durationHours", "Hours", "qty"),
+      c("terminal", "Terminal"), c("branch", "Branch"), c("cashier", "Cashier"),
+      c("openingFloat", "Opening Float", "money"), c("cashSales", "Cash Sales", "money"),
+      c("cashIn", "Cash In", "money"), c("cashOut", "Cash Out", "money"),
+      c("expectedCash", "Expected Drawer", "money"), c("countedCash", "Counted", "money"),
+      c("variance", "Variance", "money"), c("cashResult", "Result", "status"),
+      c("orders", "Orders", "int"), c("grossSales", "Gross", "money"),
+      c("discounts", "Discounts", "money"), c("vat", "VAT", "money"), c("netTakings", "Net Takings", "money"),
+      c("nonCashTakings", "Non-Cash", "money"), c("itemsSold", "Items", "qty"), c("avgBasket", "Avg Basket", "money"),
+      c("voidedOrders", "Voids", "int"), c("voidedValue", "Voided Value", "money"),
+      c("refunds", "Refunds", "int"), c("refundValue", "Refund Value", "money"),
+      c("cashMovements", "Cash Events", "int"), c("status", "Shift", "status"),
+    ],
+    detail: {
+      title: (r: never) => `${(r as { terminal: string }).terminal} · ${new Date((r as { openedAt: string }).openedAt).toLocaleString("en-GB")}`,
+      subtitle: (r: never) => {
+        const row = r as { cashier: string; branch: string; status: string };
+        return `${row.cashier} · ${row.branch} · ${row.status}`;
+      },
+      fields: (r: never) => {
+        const row = r as {
+          openingFloat: number; cashSales: number; cashIn: number; cashOut: number; expectedCash: number;
+          countedCash: number | null; variance: number; cashResult: string; orders: number; netTakings: number;
+        };
+        return [
+          { label: "Opening Float", value: `${row.openingFloat.toFixed(2)} ر.س` },
+          { label: "Cash Sales", value: `${row.cashSales.toFixed(2)} ر.س` },
+          { label: "Cash In / Out", value: `${row.cashIn.toFixed(2)} / ${row.cashOut.toFixed(2)} ر.س` },
+          { label: "Expected Drawer", value: `${row.expectedCash.toFixed(2)} ر.س` },
+          { label: "Counted", value: row.countedCash === null ? "Not counted" : `${row.countedCash.toFixed(2)} ر.س` },
+          { label: "Variance", value: row.countedCash === null ? "—" : `${row.variance.toFixed(2)} ر.س (${row.cashResult})` },
+          { label: "Orders", value: String(row.orders) },
+          { label: "Net Takings", value: `${row.netTakings.toFixed(2)} ر.س` },
+        ];
+      },
+      itemsLabel: "Cash movements",
+      items: (r: never) => (r as { items: unknown[] }).items,
+      columns: [
+        c("at", "When", "datetime"), c("direction", "Direction"), c("amount", "Amount", "money"),
+        c("reason", "Reason"), c("by", "By"),
+      ],
+    },
+    emptyLabel: "No till sessions were opened in this period.",
+  },
   {
     key: "employee-report",
     label: "Employee Report",

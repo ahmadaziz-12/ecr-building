@@ -112,7 +112,11 @@ public record ReportFilterOptionsDto(
     IReadOnlyList<string> ReturnStatuses, IReadOnlyList<string> RefundMethods, IReadOnlyList<string> DamageReasons,
     IReadOnlyList<string> StockCountStatuses, IReadOnlyList<string> PaymentMethods, IReadOnlyList<string> AuditModules,
     IReadOnlyList<string> AuditEvents, IReadOnlyList<string> Brands, IReadOnlyList<string> StockStatuses,
-    IReadOnlyList<string> SupplierTypes);
+    IReadOnlyList<string> SupplierTypes,
+    // Delivery and shift reports: their pickers need the fleet and till dimensions no other report used.
+    IReadOnlyList<FilterOption> Terminals, IReadOnlyList<FilterOption> Drivers, IReadOnlyList<FilterOption> Vehicles,
+    IReadOnlyList<FilterOption> DeliveryZones, IReadOnlyList<string> DeliveryStages,
+    IReadOnlyList<string> DeliveryPriorities, IReadOnlyList<string> ShiftStatuses);
 
 // One round-trip that populates every multi-select in the reports console, so each report doesn't
 // re-fetch its own copy of the branch/category/product lists.
@@ -154,6 +158,16 @@ public class ReportFilterOptionsController(AppDbContext db) : ControllerBase
         var auditModules = await db.AuditLogs.Select(a => a.Module).Distinct().OrderBy(m => m).ToListAsync(ct);
         var auditEvents = await db.AuditLogs.Select(a => a.Event).Distinct().OrderBy(e => e).Take(300).ToListAsync(ct);
         var refundMethods = await db.Returns.Select(r => r.RefundMethod).Distinct().OrderBy(m => m).ToListAsync(ct);
+        var terminals = await db.Terminals.Include(t => t.Branch).OrderBy(t => t.Name)
+            .Select(t => new FilterOption(t.Id.ToString(), t.Name, t.Branch!.NameEn)).ToListAsync(ct);
+        var drivers = await db.Drivers.Include(d => d.Branch).OrderBy(d => d.Name)
+            .Select(d => new FilterOption(d.Id.ToString(), d.Name, d.Branch!.NameEn)).ToListAsync(ct);
+        var vehicles = await db.Vehicles.OrderBy(v => v.Registration)
+            .Select(v => new FilterOption(v.Id.ToString(), v.Registration, v.Type.ToString())).ToListAsync(ct);
+        // Zones filter on DeliveryOrder.Area, which stores the zone NAME rather than an id, so the
+        // option ids are names too — sending an id here would match nothing.
+        var deliveryZones = await db.DeliveryZones.OrderBy(z => z.Name)
+            .Select(z => new FilterOption(z.Name, z.Name, z.City)).ToListAsync(ct);
 
         return Ok(new ReportFilterOptionsDto(
             branches, warehouses, categories, products, suppliers, customers, users, employees, roles,
@@ -163,7 +177,9 @@ public class ReportFilterOptionsController(AppDbContext db) : ControllerBase
             ["Healthy", "Low", "Critical"],
             // Supplier.Type is free text, not an enum, so the only honest option list is what has
             // actually been entered — same treatment as Brand.
-            supplierTypes));
+            supplierTypes,
+            terminals, drivers, vehicles, deliveryZones,
+            Names<DeliveryStage>(), Names<DeliveryPriority>(), Names<CashierShiftStatus>()));
     }
 
     private static List<string> Names<T>() where T : struct, Enum => Enum.GetNames<T>().ToList();
@@ -716,6 +732,13 @@ public record DamagedItemReportRow(
     string Branch, string? Customer, decimal Qty, decimal UnitCost, decimal LossValue, string DamageReason,
     string? Notes, string? PhotoReference, string? ApprovedBy, string Status);
 
+public record SurplusReturnReportRow(
+    int ReturnId, string ReturnNo, DateTime Date, string? OrderNo, DateTime? SoldAt, int? DaysHeld,
+    string Sku, string Product, string Category, string Uom, string Branch, string? Customer,
+    decimal Qty, decimal UnitPricePaid, decimal RefundAmount, decimal UnitCost, decimal RestockValue,
+    decimal RestockingFeePct, decimal RestockingFee, decimal NetCashback, string RefundMethod,
+    string Reason, string? ApprovedBy, string Status);
+
 public record EmployeeAuditRow(
     int Id, DateTime Date, string? UserName, string? EmployeeName, string? Department, string? Designation,
     string? Branch, string Module, string Event, string? RecordId, string? OldValue, string? NewValue,
@@ -823,6 +846,64 @@ public class OperationsReportsController(AppDbContext db) : ReportControllerBase
                         r.DamageReason?.ToString() ?? "Unspecified", r.Reason, r.PhotoReference,
                         r.ApprovedBy?.Name, r.Status.ToString());
                 }))
+            .OrderByDescending(r => r.Date)
+            .ToList();
+
+        return Ok(rows);
+    }
+
+    // Surplus Inventory Returns (BRD §3.2.3) — unused material a contractor brings back, which goes
+    // straight back into sellable stock rather than into quarantine like a damaged return. Line-level,
+    // because the interesting figures are per-SKU: how much stock came back, what it is worth at cost
+    // sitting back on the shelf, and what the restocking fee recovered against it.
+    //
+    // The restocking fee is withheld per TICKET, so it is apportioned across the ticket's lines by
+    // their share of the refund — a per-line fee column that repeated the whole ticket fee on every
+    // row would sum to several times the fee actually collected.
+    [HttpGet("surplus-returns")]
+    public async Task<ActionResult<List<SurplusReturnReportRow>>> SurplusReturns(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to,
+        [FromQuery] int[]? branchId, [FromQuery] int[]? customerId, [FromQuery] int[]? productId,
+        [FromQuery] int[]? categoryId, [FromQuery] string[]? status, [FromQuery] string[]? refundMethod,
+        CancellationToken ct = default)
+    {
+        var (f, t) = Window(from, to, 90);
+        var returns = await db.Returns
+            .Include(r => r.Order).ThenInclude(o => o!.Branch)
+            .Include(r => r.Customer).Include(r => r.ApprovedBy)
+            .Include(r => r.Lines).ThenInclude(l => l.Product).ThenInclude(p => p!.Category)
+            .Where(r => r.Type == ReturnType.Surplus && r.CreatedAt >= f && r.CreatedAt < t)
+            .ToListAsync(ct);
+
+        var rows = returns
+            .Where(r => ReportFilters.Matches(branchId, r.Order?.BranchId)
+                && ReportFilters.Matches(customerId, r.CustomerId)
+                && ReportFilters.Matches(status, r.Status.ToString())
+                && ReportFilters.Matches(refundMethod, r.RefundMethod))
+            .SelectMany(r =>
+            {
+                var refundBase = r.Lines.Sum(l => l.Amount);
+                return r.Lines
+                    .Where(l => ReportFilters.Matches(productId, l.ProductId)
+                        && ReportFilters.Matches(categoryId, l.Product?.CategoryId ?? 0))
+                    .Select(l =>
+                    {
+                        var qty = l.StockQty > 0 ? l.StockQty : l.Qty;
+                        var cost = l.Product?.CostPrice ?? 0;
+                        var share = refundBase == 0 ? 0 : l.Amount / refundBase;
+                        var soldAt = r.Order?.CreatedAt;
+                        return new SurplusReturnReportRow(
+                            r.Id, r.ReturnNo, r.CreatedAt, r.Order?.OrderNo, soldAt,
+                            soldAt is null ? null : (int)(r.CreatedAt - soldAt.Value).TotalDays,
+                            l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Product?.Category?.NameEn ?? "",
+                            l.Product?.StockUom ?? "", r.Order?.Branch?.NameEn ?? "", r.Customer?.NameEn,
+                            qty, l.UnitPricePaid, Math.Round(l.Amount, 2),
+                            cost, Math.Round(qty * cost, 2),
+                            r.RestockingFeePct, Math.Round(r.RestockingFeeAmount * share, 2),
+                            Math.Round((r.NetCashback > 0 ? r.NetCashback : refundBase) * share, 2),
+                            r.RefundMethod, r.Reason, r.ApprovedBy?.Name, r.Status.ToString());
+                    });
+            })
             .OrderByDescending(r => r.Date)
             .ToList();
 

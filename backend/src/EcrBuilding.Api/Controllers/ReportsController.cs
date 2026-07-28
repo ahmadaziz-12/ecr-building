@@ -27,8 +27,12 @@ public record SalesSummaryDto(
     IReadOnlyList<SalesByCategoryRow> ByCategory);
 public record ReturnsAnalysisRow(string Type, int Count, decimal GrossRefund, decimal VatReversed, decimal RestockingFees, decimal NetCashback);
 public record RefundMethodRow(string Method, int Count, decimal Amount);
-public record VatByRateRow(decimal Rate, decimal TaxableAmount, decimal VatCollected);
-public record VatReportDto(IReadOnlyList<VatByRateRow> Collected, decimal TotalCollected, decimal TotalReversed, decimal NetVat);
+public record VatByRateRow(
+    decimal Rate, string RateLabel, int Orders, decimal TaxableAmount, decimal VatCollected,
+    decimal VatReversed, decimal NetVat, decimal SharePct);
+public record VatReportDto(
+    decimal TaxableSales, decimal TotalCollected, decimal TotalReversed, decimal NetVat,
+    IReadOnlyList<VatByRateRow> Collected);
 public record TopProductRow(
     int ProductId, string Sku, string Name, string Category, string? Brand, string? Supplier, string Uom,
     int Orders, decimal Units, decimal GrossRevenue, decimal Discounts, decimal Revenue,
@@ -269,35 +273,78 @@ public class ReportsController(AppDbContext db) : ReportControllerBase
         return Ok(rows);
     }
 
-    // BRD §11.2: VAT collected by rate code (from order lines, which carry per-line rates) and VAT
-    // reversed on returns, netted for the period.
+    // BRD §11.2: output VAT by rate code (from order lines, which carry per-line rates), the credit
+    // notes that reverse it, and the net position.
+    //
+    // Zero-rated lines are reported as their own rate row rather than dropped, because a VAT return
+    // declares zero-rated turnover explicitly — a report that only shows rates that collected
+    // something cannot be filed from.
     [HttpGet("vat")]
     public async Task<ActionResult<VatReportDto>> Vat(
-        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int[]? branchId, CancellationToken ct = default)
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int[]? branchId,
+        CancellationToken ct = default)
     {
         var (f, t) = Window(from, to);
         var orders = await CompletedOrders(f, t, branchId).Include(o => o.Lines).ToListAsync(ct);
-        var collectedByRate = orders.SelectMany(o =>
-            {
-                // Re-derive each order's discount ratio so per-rate taxable amounts sum to the order's
-                // own VatTotal (same math the checkout used).
-                var lineTotalsSum = o.Lines.Sum(l => l.LineTotal);
-                var perLine = o.SubTotal - lineTotalsSum;
-                var orderDiscount = Math.Max(0, o.DiscountTotal - perLine);
-                var ratio = lineTotalsSum == 0 ? 0 : orderDiscount / lineTotalsSum;
-                return o.Lines.Select(l => (l.VatRate, Taxable: l.LineTotal * (1 - ratio)));
-            })
-            .GroupBy(x => x.VatRate)
-            .Select(g => new VatByRateRow(g.Key, Math.Round(g.Sum(x => x.Taxable), 2), Math.Round(g.Sum(x => x.Taxable * x.VatRate / 100), 2)))
-            .OrderByDescending(r => r.VatCollected).ToList();
-        var totalCollected = Math.Round(collectedByRate.Sum(r => r.VatCollected), 2);
-        var reversals = await db.Returns.Include(r => r.Order)
+
+        // Per-line taxable amount, discount-adjusted. Re-deriving the order's discount ratio the way
+        // the checkout did is what makes the per-rate taxable amounts sum back to the order's own
+        // VatTotal; apportioning the order-level discount evenly instead would shift value between
+        // rate bands on a mixed-rate basket.
+        static IEnumerable<(decimal Rate, decimal Taxable)> TaxableLines(Order o)
+        {
+            var lineTotalsSum = o.Lines.Sum(l => l.LineTotal);
+            var perLine = o.SubTotal - lineTotalsSum;
+            var orderDiscount = Math.Max(0, o.DiscountTotal - perLine);
+            var ratio = lineTotalsSum == 0 ? 0 : orderDiscount / lineTotalsSum;
+            return o.Lines.Select(l => (l.VatRate, Taxable: l.LineTotal * (1 - ratio)));
+        }
+
+        var taxable = orders.SelectMany(o => TaxableLines(o).Select(x => (o, x.Rate, x.Taxable))).ToList();
+
+        // Credit notes for the same window. VatReversal is frozen on the ticket at approval, so the
+        // per-rate split is derived from the lines and then scaled to that frozen total — computing it
+        // from the lines alone would leave the rate rows disagreeing with the headline reversal figure.
+        var returns = await db.Returns.Include(r => r.Order).Include(r => r.Lines)
             .Where(r => r.Status == ReturnStatus.Completed && r.CreatedAt >= f && r.CreatedAt < t)
-            .Select(r => new { r.VatReversal, BranchId = r.Order != null ? (int?)r.Order.BranchId : null })
             .ToListAsync(ct);
-        var totalReversed = Math.Round(reversals
-            .Where(r => ReportFilters.Matches(branchId, r.BranchId)).Sum(r => r.VatReversal), 2);
-        return Ok(new VatReportDto(collectedByRate, totalCollected, totalReversed, Math.Round(totalCollected - totalReversed, 2)));
+        returns = returns.Where(r => ReportFilters.Matches(branchId, r.Order?.BranchId)).ToList();
+
+        var reversalLines = returns.SelectMany(r =>
+        {
+            var lineVat = r.Lines.Sum(l => l.Amount * l.VatRate / 100);
+            var scale = lineVat == 0 ? 0 : r.VatReversal / lineVat;
+            return r.Lines.Select(l => (
+                Return: r,
+                l.VatRate,
+                // Fall back to the line's own computed VAT on legacy rows that never froze a reversal.
+                Vat: lineVat == 0 ? 0 : l.Amount * l.VatRate / 100 * (r.VatReversal == 0 ? 1 : scale),
+                Taxable: l.Amount));
+        }).ToList();
+
+        var totalCollected = Math.Round(taxable.Sum(x => x.Taxable * x.Rate / 100), 2);
+        var totalReversed = Math.Round(reversalLines.Sum(x => x.Vat), 2);
+        var taxableSales = Math.Round(taxable.Sum(x => x.Taxable), 2);
+
+        // ————— By rate —————
+        var rateKeys = taxable.Select(x => x.Rate).Concat(reversalLines.Select(x => x.VatRate)).Distinct().ToList();
+        var rateRows = rateKeys.Select(rate =>
+        {
+            var lines = taxable.Where(x => x.Rate == rate).ToList();
+            var rateTaxable = lines.Sum(x => x.Taxable);
+            var collected = lines.Sum(x => x.Taxable * rate / 100);
+            var reversed = reversalLines.Where(x => x.VatRate == rate).Sum(x => x.Vat);
+            return new VatByRateRow(
+                rate, rate == 0 ? "Zero-rated" : $"{rate:0.##}% standard",
+                lines.Select(x => x.o.Id).Distinct().Count(),
+                Math.Round(rateTaxable, 2), Math.Round(collected, 2), Math.Round(reversed, 2),
+                Math.Round(collected - reversed, 2),
+                taxableSales == 0 ? 0 : Math.Round(rateTaxable / taxableSales * 100, 2));
+        }).OrderByDescending(r => r.TaxableAmount).ToList();
+
+        return Ok(new VatReportDto(
+            taxableSales, totalCollected, totalReversed,
+            Math.Round(totalCollected - totalReversed, 2), rateRows));
     }
 
     // Top Products — best sellers by revenue, with the margin, discounting and return rate behind
