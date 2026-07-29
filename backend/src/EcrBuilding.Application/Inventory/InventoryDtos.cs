@@ -57,7 +57,11 @@ public record StockCountDto(
     int Id, string CountNo, int WarehouseId, string WarehouseName, int BranchId, string BranchName,
     string Scope, int? CategoryId, string? CategoryName, string Status,
     DateTime ScheduledFor, DateTime? StartedAt, DateTime? CompletedAt,
-    string? CountedByName, string? ApprovedByName, string? Notes,
+    string? CountedByName,
+    DateTime? ReviewedAt, string? ReviewedByName,
+    DateTime? ApprovedAt, string? ApprovedByName,
+    DateTime? RejectedAt, string? RejectedByName, string? RejectionReason,
+    string? Notes,
     bool AutoFillUncounted, bool BlindCount, int? StockAdjustmentId,
     int LineCount, int CountedLines, int VarianceLines, decimal NetVarianceQty, decimal NetVarianceValue,
     decimal AbsVarianceValue, decimal AccuracyPct, IReadOnlyList<StockCountLineDto> Lines);
@@ -67,4 +71,9 @@ public record GenerateStockCountRequest(
 public record SaveStockCountLinesRequest(List<StockCountLineInput> Lines);
 public record StockCountLineInput(int LineId, decimal? CountedQty, string? Note);
 public record ScanStockCountRequest(string Code, decimal Qty = 1, bool Increment = true);
-public record PostStockCountRequest(int? ApproverUserId, string? Notes);
+// First-stage sign-off: Approved moves PendingReview -> PendingApproval; rejecting needs a Reason
+// and moves straight to Rejected without ever touching stock.
+public record ReviewStockCountRequest(bool Approved, string? Reason);
+// Final sign-off: Approved posts the variance (PendingApproval -> Completed) exactly like the old
+// Post did; rejecting (Reason required) moves to Rejected — still no stock write.
+public record ApproveStockCountRequest(bool Approved, string? Reason, int? ApproverUserId, string? Notes);

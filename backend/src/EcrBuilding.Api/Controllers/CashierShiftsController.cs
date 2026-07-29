@@ -306,6 +306,85 @@ public class PricingRulesController(AppDbContext db, IAuditService audit, IPermi
         return NoContent();
     }
 
+    // The grid's "Test" row action. It doesn't run a fake sale — it checks the same things that
+    // would silently stop the rule from ever firing at checkout (PendingApproval, Expired/Inactive
+    // status, a ValidFrom/ValidUntil window that excludes today, a required field the Create form
+    // would have caught but an older/imported row might be missing) and describes, in plain
+    // language, exactly what the rule does when none of those block it — the same description
+    // CreatePricingRuleDialog's live preview shows while authoring it, so the two never disagree.
+    [HttpPost("{id:int}/test")]
+    [RequireModule("/finance/pricing", PermissionAction.Edit)]
+    public async Task<ActionResult<PricingRuleTestResult>> Test(int id, CancellationToken ct)
+    {
+        var rule = await db.PricingRules.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (rule is null) return NotFound();
+
+        var messages = new List<string>();
+        var passed = true;
+        void Fail(string message) { passed = false; messages.Add(message); }
+
+        if (rule.Status == PricingRuleStatus.PendingApproval)
+            Fail("Still awaiting manager approval — won't apply at checkout until activated.");
+        else if (rule.Status == PricingRuleStatus.Inactive)
+            Fail("Marked Inactive — won't apply at checkout.");
+        else if (rule.Status == PricingRuleStatus.Expired)
+            Fail("Marked Expired — won't apply at checkout.");
+
+        var now = DateTime.UtcNow;
+        if (rule.ValidFrom is DateTime from && from > now)
+            Fail($"Doesn't start until {from:dd MMM yyyy} — not active today.");
+        if (rule.ValidUntil is DateTime until && until < now)
+            Fail($"Valid-until date {until:dd MMM yyyy} has passed.");
+
+        switch (rule.Type)
+        {
+            case "Coupon" when string.IsNullOrWhiteSpace(rule.Code):
+                Fail("Coupon rule has no redemption code set.");
+                break;
+            case "Coupon":
+                messages.Add($"Redeemable at checkout with code \"{rule.Code}\" for {DescribeDiscount(rule)}.");
+                break;
+            case "Quantity" when rule.PalletQty is decimal pallet && pallet > 0:
+                messages.Add($"Pallet pricing: every {pallet:0.##} units of {rule.Sku ?? "any SKU"} priced at {rule.Value:0.##} SAR/unit.");
+                break;
+            case "Quantity" when rule.MinQuantity is decimal minQty && minQty > 0:
+                messages.Add($"Applies {DescribeDiscount(rule)} once a line of {rule.Sku ?? "any SKU"} reaches {minQty:0.##} units.");
+                break;
+            case "Quantity":
+                Fail("Quantity rule has no minimum-quantity (or pallet) threshold set.");
+                break;
+            case "Buy X Get Y" when rule.BuyQty is decimal buy && rule.FreeQty is decimal free && buy > 0 && free > 0:
+                messages.Add($"Buy {buy:0.##} get {free:0.##} free on {rule.Sku ?? "any SKU"}.");
+                break;
+            case "Buy X Get Y":
+                Fail("Buy X Get Y rule is missing its Buy/Free quantities.");
+                break;
+            case "Trade Value" when rule.MinCartTotal is decimal minCart && minCart > 0:
+                messages.Add($"Applies {DescribeDiscount(rule)} off the whole order once a Contractor cart reaches {minCart:0.##} SAR.");
+                break;
+            case "Trade Value":
+                Fail("Trade Value rule has no cart-total threshold set.");
+                break;
+            case "Fee" or "Bundle":
+                messages.Add($"Recorded for staff reference on {rule.Scope} — this type isn't auto-applied at checkout.");
+                break;
+            default: // Trade Tier, Promotional
+                messages.Add($"Applies {DescribeDiscount(rule)} on {rule.Scope}{(rule.BranchId is null ? ", every branch" : "")}.");
+                break;
+        }
+
+        await audit.LogAsync("finance", "PRICING_RULE_TESTED", id.ToString(), newValue: new { passed, messages }, cancellationToken: ct);
+        return Ok(new PricingRuleTestResult(passed, messages));
+    }
+
+    private static string DescribeDiscount(PricingRule r) => r.DiscountType switch
+    {
+        RuleDiscountType.Percentage => $"{r.Value:0.##}% off",
+        RuleDiscountType.Fixed => $"{r.Value:0.##} SAR off",
+        RuleDiscountType.FixedUnitPrice => $"a fixed {r.Value:0.##} SAR/unit price",
+        _ => $"{r.Value:0.##}",
+    };
+
     private static PricingRuleDto Map(PricingRule r) => new(
         r.Id, r.Name, r.Type, r.Scope, r.Condition, r.Action, r.Priority, r.ValidUntil, r.Status.ToString(), r.Code, r.DiscountType.ToString(), r.Value,
         r.BranchId, r.Branch?.NameEn, r.MinQuantity, r.Sku, r.ValidFrom,

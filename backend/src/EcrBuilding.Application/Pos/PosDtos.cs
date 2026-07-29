@@ -165,6 +165,10 @@ public record PricingRuleDto(int Id, string Name, string Type, string Scope, str
 public record UpsertPricingRuleRequest(string Name, string Type, string Scope, string Condition, string Action, int Priority, DateTime? ValidUntil, string? Code, string DiscountType, decimal Value, int? BranchId = null, decimal? MinQuantity = null, string? Sku = null, DateTime? ValidFrom = null,
     decimal? PalletQty = null, decimal? BuyQty = null, decimal? FreeQty = null, decimal? MinCartTotal = null);
 public record ValidateCouponResponse(bool Valid, string? Code, string? Name, string DiscountType, decimal Value, string? Reason);
+// The Pricing/Discounts/Coupons grid's row-level "Test" action — checks the rule's own fields and
+// approval/date state and reports, in plain language, whether and how it will actually fire at
+// checkout (see PricingEngine for the real application logic this describes).
+public record PricingRuleTestResult(bool Passed, IReadOnlyList<string> Messages);
 
 public record ParkedLineDto(int ProductId, string Sku, string ProductName, decimal Qty, decimal UnitPrice);
 public record ParkedSaleDto(int Id, string TicketNo, int BranchId, int? TerminalId, string CashierName, int? CustomerId, string? CustomerName, string? Notes, DateTime CreatedAt, decimal Total, IReadOnlyList<ParkedLineDto> Lines);

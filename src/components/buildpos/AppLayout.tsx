@@ -60,8 +60,10 @@ import {
   ClipboardCheck,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
+import { toast } from "sonner";
 import { BrandLogo } from "@/components/buildpos/BrandLogo";
 import { statusBar } from "@/lib/buildpos/data";
+import { useFilters, categoryToFilter } from "@/lib/buildpos/filter-context";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useAuth } from "@/lib/api/auth";
 import { SetPinDialog } from "@/components/buildpos/SetPinDialog";
@@ -126,7 +128,7 @@ const nav: Group[] = [
       { to: "/stock/warehouses", label: "Warehouse Directory", icon: Warehouse },
       { to: "/stock/stocks", label: "Warehouse Stock", icon: Boxes },
       { to: "/stock/branch-stock", label: "Branch Stock", icon: Store },
-      { to: "/stock/stock-count", label: "Stock Count", icon: ClipboardCheck },
+      { to: "/stock/stock-count", label: "Stock Taking", icon: ClipboardCheck },
       { to: "/stock/movements", label: "Stock Movements", icon: History },
       { to: "/stock/expiry", label: "Material Validity", icon: CalendarClock },
       { to: "/stock/transfers", label: "Stock Transfers", icon: ArrowLeftRight },
@@ -215,6 +217,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const { user, hasAccess, logout } = useAuth();
+  const { setValue: setDashboardFilter, setActiveTab: setDashboardTab } = useFilters();
+  const onDashboard = pathname === "/dashboard";
 
   const [search, setSearch] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
@@ -224,12 +228,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const canSearchOrders = hasAccess("/operate/orders");
   const searching = search.trim().length > 0;
   const { data: searchProducts } = useProducts(canSearchProducts && searching);
-  const { data: searchCustomers } = useCustomers(canSearchCustomers && searching);
-  // Orders and quotations are searchable from here too — an order number is the single most common
-  // thing anyone types into a global search box, and leaving it out is what made a valid
+  // On the Dashboard, search only ever surfaces what the Dashboard itself can answer in place
+  // (categories/products, via the Category filter + Inventory tab below) — an order, quotation or
+  // customer result can only ever be reached by leaving the page, which is exactly what this box
+  // should NOT do here. These three simply aren't fetched while on the Dashboard.
+  const { data: searchCustomers } = useCustomers(canSearchCustomers && searching && !onDashboard);
+  // Orders and quotations are searchable from every OTHER page — an order number is the single most
+  // common thing anyone types into a global search box, and leaving it out is what made a valid
   // "ORD-2026-0024" come back as "No matches".
-  const { data: searchOrders } = useOrders(canSearchOrders && searching);
-  const { data: searchQuotations } = useQuotations(canSearchOrders && searching);
+  const { data: searchOrders } = useOrders(canSearchOrders && searching && !onDashboard);
+  const { data: searchQuotations } = useQuotations(canSearchOrders && searching && !onDashboard);
   const { data: notifications } = useNotifications();
   const { data: terminals } = useTerminals(hasAccess("/network/terminals"));
   const { data: cashierShifts } = useCashierShifts(hasAccess("/operate/cashier-shift"));
@@ -256,11 +264,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
     () =>
       globalSearch(search, {
         products: searchProducts,
-        customers: searchCustomers,
-        orders: searchOrders,
-        quotations: searchQuotations,
+        // Explicitly dropped (not just left unfetched) so a result set already sitting in the
+        // react-query cache from a page visited earlier this session can't leak into the Dashboard's
+        // dropdown — `enabled: false` above only skips the fetch, it doesn't hide cached data.
+        customers: onDashboard ? undefined : searchCustomers,
+        orders: onDashboard ? undefined : searchOrders,
+        quotations: onDashboard ? undefined : searchQuotations,
       }),
-    [search, searchProducts, searchCustomers, searchOrders, searchQuotations],
+    [search, searchProducts, searchCustomers, searchOrders, searchQuotations, onDashboard],
   );
   const hasSearchResults = hasGlobalSearchResults(searchResults);
 
@@ -275,6 +286,40 @@ export function AppLayout({ children }: { children: ReactNode }) {
     navigate({ to, search: searchParams });
     setSearch("");
     setSearchFocused(false);
+  }
+
+  // A broad term ("wire") can span several product categories, and the requirement is to answer
+  // that IN PLACE — "display all relevant wire categories" — not by bouncing the dashboard reader
+  // over to the separate Product Catalog page. This reuses the exact same Category-filter + Inventory
+  // tab mechanism the dashboard's own "Top Material Categories" cards already drive (sections.tsx),
+  // so a category picked from search and one picked from that grid behave identically.
+  function filterDashboardByCategory(categoryName: string, description?: string) {
+    const catValue = categoryToFilter(categoryName) ?? categoryName;
+    setDashboardFilter("Category", [catValue]);
+    setDashboardTab("inventory");
+    setSearch("");
+    setSearchFocused(false);
+    toast.success(`Filtered by ${catValue}`, {
+      description: description ?? "Inventory & stock alerts updated.",
+    });
+  }
+
+  // Used when the matched products don't share one obvious category (or a free-text Enter press
+  // has no single category to pick for the reader) — falls back to clearing the filter rather than
+  // guessing wrong, so "refine using the options below" stays true.
+  function filterDashboardBySearchTerm(term: string) {
+    const primaryCategory = searchResults.categories[0]?.name;
+    if (primaryCategory) {
+      filterDashboardByCategory(primaryCategory);
+      return;
+    }
+    setDashboardFilter("Category", []);
+    setDashboardTab("inventory");
+    setSearch("");
+    setSearchFocused(false);
+    toast.info(`No single category matched "${term}"`, {
+      description: "Showing full inventory — refine with the Category filter.",
+    });
   }
 
   // Leaving the page clears the box. A term left behind from a previous screen keeps reopening its
@@ -293,9 +338,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
     if (searchResults.orders.length > 0) goToSearchResult("/operate/orders", { orderNo: term });
     else if (searchResults.quotations.length > 0)
       goToSearchResult("/operate/orders", { quoteNo: term });
-    else if (searchResults.products.length > 0 || searchResults.categories.length > 0)
-      goToSearchResult("/stock/inventory", { sku: term });
-    else if (searchResults.customers.length > 0) goToSearchResult("/operate/customers");
+    else if (searchResults.products.length > 0 || searchResults.categories.length > 0) {
+      // From the Dashboard, a category/product match answers in place — see filterDashboardByCategory
+      // — rather than leaving the dashboard for the separate Product Catalog page.
+      if (onDashboard) filterDashboardBySearchTerm(term);
+      else goToSearchResult("/stock/inventory", { sku: term });
+    } else if (searchResults.customers.length > 0) goToSearchResult("/operate/customers");
   }
 
   const visibleNav = nav
@@ -533,7 +581,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 onFocus={() => setSearchFocused(true)}
                 onBlur={() => window.setTimeout(() => setSearchFocused(false), 150)}
                 onKeyDown={handleSearchEnter}
-                placeholder="Search order #, product, category, customer…"
+                placeholder={
+                  onDashboard
+                    ? "Search products, categories…"
+                    : "Search order #, product, category, customer…"
+                }
                 className="h-9 w-64 rounded-lg border border-black/10 bg-canvas pl-8 pr-3 text-sm outline-none focus:border-brand"
               />
               {searchFocused && search.trim() !== "" && (
@@ -546,9 +598,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 >
                   {!hasSearchResults && (
                     <p className="px-2.5 py-2 text-xs text-muted-foreground">
-                      {!canSearchProducts && !canSearchCustomers && !canSearchOrders
-                        ? "Search needs access to Product Catalog, Orders, or Customers."
-                        : `No matches for "${search.trim()}"`}
+                      {!canSearchProducts && onDashboard
+                        ? "Search needs access to Product Catalog."
+                        : !canSearchProducts && !canSearchCustomers && !canSearchOrders
+                          ? "Search needs access to Product Catalog, Orders, or Customers."
+                          : `No matches for "${search.trim()}"`}
                     </p>
                   )}
                   {/* Orders lead: an order number is the most common thing typed here, and it
@@ -612,7 +666,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       {searchResults.categories.map((c) => (
                         <button
                           key={c.name}
-                          onClick={() => goToSearchResult("/stock/inventory", { category: c.name })}
+                          onClick={() =>
+                            onDashboard
+                              ? filterDashboardByCategory(c.name)
+                              : goToSearchResult("/stock/inventory", { category: c.name })
+                          }
                           className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
                         >
                           <span className="truncate">{c.name}</span>
@@ -631,7 +689,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       {searchResults.products.map((p) => (
                         <button
                           key={p.id}
-                          onClick={() => goToSearchResult("/stock/inventory", { sku: p.sku })}
+                          onClick={() =>
+                            onDashboard
+                              ? filterDashboardByCategory(
+                                  p.categoryName ?? "Uncategorized",
+                                  `Look for ${p.nameEn} (${p.sku}) in Inventory Health below.`,
+                                )
+                              : goToSearchResult("/stock/inventory", { sku: p.sku })
+                          }
                           className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
                         >
                           <span className="truncate">{p.nameEn}</span>
@@ -643,7 +708,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       {searchResults.productTotal > searchResults.products.length && (
                         <button
                           onClick={() =>
-                            goToSearchResult("/stock/inventory", { sku: search.trim() })
+                            onDashboard
+                              ? filterDashboardBySearchTerm(search.trim())
+                              : goToSearchResult("/stock/inventory", { sku: search.trim() })
                           }
                           className="w-full rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-brand hover:bg-canvas"
                         >

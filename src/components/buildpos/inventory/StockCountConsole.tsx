@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  ArrowLeft, Ban, CheckCheck, ClipboardCheck, Download, EyeOff, Loader2, Plus, ScanLine, Send, Wand2,
+  ArrowLeft, Ban, CheckCheck, ClipboardCheck, Download, Eye, EyeOff, Loader2, Plus, ScanLine, Send, Wand2, XCircle,
 } from "lucide-react";
 import { PageHeader, KpiGrid } from "@/components/buildpos/PageHeader";
 import { Pill, SectionCard } from "@/components/buildpos/sections";
@@ -18,15 +18,17 @@ import { useWarehouses } from "@/lib/api/inventory";
 import { useCategories } from "@/lib/api/catalog";
 import { CurrencyText } from "@/lib/buildpos/currency";
 import {
-  useAutoFillStockCount, useCancelStockCount, useGenerateStockCount, usePostStockCount,
-  useSaveStockCountLines, useScanStockCount, useStockCount, useStockCounts, useSubmitStockCount,
+  useApproveStockCount, useAutoFillStockCount, useCancelStockCount, useGenerateStockCount,
+  useReviewStockCount, useSaveStockCountLines, useScanStockCount, useStockCount, useStockCounts, useSubmitStockCount,
   type StockCountDto, type StockCountLineDto, type StockCountScope,
 } from "@/lib/api/stock-counts";
 
-// Automatic Stock Count. A session is generated from live stock for a chosen scope — nobody types
-// a count sheet — then counted by keyboard or barcode, submitted for review, and posted. Posting
-// writes one StockAdjustment plus the matching StockMovements, so a stocktake reconciles through
-// exactly the same ledger as any other stock correction.
+// Automatic Stock Taking. A session is generated from live stock for a chosen scope — nobody types
+// a count sheet — then counted by keyboard or barcode, and submitted into a two-stage
+// maker-checker: Review is the first sign-off, Approve is the only step that ever writes stock —
+// it posts one StockAdjustment plus the matching StockMovements, so a stocktake reconciles through
+// exactly the same ledger as any other stock correction. Either stage can reject instead, which
+// ends the session without ever touching stock.
 
 const money = (n: number) => `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
 const qty = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -44,6 +46,8 @@ function statusTone(status: string): Severity {
   switch (status) {
     case "Completed": return "success";
     case "Cancelled": return "muted";
+    case "Rejected": return "critical";
+    case "PendingReview": return "warning";
     case "PendingApproval": return "warning";
     case "InProgress": return "info";
     default: return "warning";
@@ -94,7 +98,7 @@ function StockCountList({ onOpen }: { onOpen: (id: number) => void }) {
   }, [counts, warehouseIds, statuses, range, search]);
 
   const open = filtered.filter((c) => c.status === "InProgress" || c.status === "Draft");
-  const pending = filtered.filter((c) => c.status === "PendingApproval");
+  const pending = filtered.filter((c) => c.status === "PendingReview" || c.status === "PendingApproval");
   const completed = filtered.filter((c) => c.status === "Completed");
   const anyFilter = warehouseIds.length > 0 || statuses.length > 0 || !!range.preset || !!search.trim();
 
@@ -102,16 +106,16 @@ function StockCountList({ onOpen }: { onOpen: (id: number) => void }) {
     <div className="space-y-4">
       <PageHeader
         group="Stock"
-        title="Stock Count"
+        title="Stock Taking"
         desc="Automatic stocktakes: generate a count sheet from live stock, count it by keyboard or scanner, and post the variance straight into the stock ledger."
-        primary="New Stock Count"
+        primary="New Stock Taking"
         onPrimary={() => setGenerateOpen(true)}
       />
 
       <KpiGrid
         items={[
           { label: "Open Counts", value: int(open.length), sub: "Being counted now", tone: "info" },
-          { label: "Awaiting Approval", value: int(pending.length), sub: "Counted, not yet posted", tone: "warning" },
+          { label: "Awaiting Sign-off", value: int(pending.length), sub: "In review or awaiting final approval", tone: "warning" },
           { label: "Posted", value: int(completed.length), sub: "Variance applied to stock", tone: "success" },
           {
             label: "Shrinkage Exposure",
@@ -143,7 +147,7 @@ function StockCountList({ onOpen }: { onOpen: (id: number) => void }) {
         <MultiSelectFilter
           label="Status"
           allLabel="All Statuses"
-          options={["Draft", "InProgress", "PendingApproval", "Completed", "Cancelled"]}
+          options={["Draft", "InProgress", "PendingReview", "PendingApproval", "Completed", "Rejected", "Cancelled"]}
           selected={statuses}
           onChange={setStatuses}
           triggerClassName="w-auto"
@@ -295,7 +299,7 @@ function GenerateDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>New Stock Count</DialogTitle>
+          <DialogTitle>New Stock Taking</DialogTitle>
           <DialogDescription>
             The count sheet is generated from live stock — pick a warehouse and a scope, and every matching SKU
             comes onto the sheet with its system quantity and cost already snapshotted.
@@ -421,7 +425,8 @@ function StockCountSheet({ id, onBack }: { id: number; onBack: () => void }) {
   const scan = useScanStockCount();
   const autoFill = useAutoFillStockCount();
   const submit = useSubmitStockCount();
-  const post = usePostStockCount();
+  const review = useReviewStockCount();
+  const approve = useApproveStockCount();
   const cancel = useCancelStockCount();
 
   const [scanCode, setScanCode] = useState("");
@@ -431,10 +436,12 @@ function StockCountSheet({ id, onBack }: { id: number; onBack: () => void }) {
   // Local edits are kept out of the server state until blur, so typing doesn't fire a request per
   // keystroke and a slow save can't clobber what's being typed next.
   const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [rejectStage, setRejectStage] = useState<"review" | "approve" | null>(null);
   const scanRef = useRef<HTMLInputElement>(null);
 
   const editable = count?.status === "Draft" || count?.status === "InProgress";
-  const postable = count?.status === "InProgress" || count?.status === "PendingApproval";
+  const awaitingReview = count?.status === "PendingReview";
+  const awaitingApproval = count?.status === "PendingApproval";
 
   const categories = useMemo(
     () => Array.from(new Set((count?.lines ?? []).map((l) => l.categoryName).filter(Boolean))).sort(),
@@ -536,20 +543,38 @@ function StockCountSheet({ id, onBack }: { id: number; onBack: () => void }) {
           )}
           {editable && (
             <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={submit.isPending}
-              onClick={() => run(() => submit.mutateAsync({ id }), "Submitted for approval.")}>
-              <Send className="h-4 w-4" /> Submit for Approval
+              onClick={() => run(() => submit.mutateAsync({ id }), "Submitted for review.")}>
+              <Send className="h-4 w-4" /> Submit for Review
             </Button>
           )}
-          {postable && (
-            <Button size="sm" className="h-9 gap-1.5 bg-brand text-brand-foreground hover:bg-brand/90" disabled={post.isPending}
-              onClick={() => {
-                if (!window.confirm(`Post ${count.countNo}? This sets stock to the counted quantities and can't be undone.`)) return;
-                void run(() => post.mutateAsync({ id }), "Variance posted — stock updated.");
-              }}>
-              {post.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="h-4 w-4" />} Post Variance
-            </Button>
+          {awaitingReview && (
+            <>
+              <Button size="sm" className="h-9 gap-1.5 bg-brand text-brand-foreground hover:bg-brand/90" disabled={review.isPending}
+                onClick={() => void run(() => review.mutateAsync({ id, approved: true }), "Reviewed — awaiting final approval.")}>
+                {review.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />} Mark Reviewed
+              </Button>
+              <Button variant="outline" size="sm" className="h-9 gap-1.5 border-critical/30 text-critical hover:bg-critical/5"
+                onClick={() => setRejectStage("review")}>
+                <XCircle className="h-4 w-4" /> Reject
+              </Button>
+            </>
           )}
-          {count.status !== "Completed" && count.status !== "Cancelled" && (
+          {awaitingApproval && (
+            <>
+              <Button size="sm" className="h-9 gap-1.5 bg-brand text-brand-foreground hover:bg-brand/90" disabled={approve.isPending}
+                onClick={() => {
+                  if (!window.confirm(`Approve ${count.countNo}? This sets stock to the counted quantities and can't be undone.`)) return;
+                  void run(() => approve.mutateAsync({ id, approved: true }), "Variance posted — stock updated.");
+                }}>
+                {approve.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="h-4 w-4" />} Approve &amp; Reconcile
+              </Button>
+              <Button variant="outline" size="sm" className="h-9 gap-1.5 border-critical/30 text-critical hover:bg-critical/5"
+                onClick={() => setRejectStage("approve")}>
+                <XCircle className="h-4 w-4" /> Reject
+              </Button>
+            </>
+          )}
+          {count.status !== "Completed" && count.status !== "Cancelled" && count.status !== "Rejected" && (
             <Button variant="outline" size="sm" className="h-9 gap-1.5 border-critical/30 text-critical hover:bg-critical/5"
               onClick={() => {
                 if (!window.confirm(`Cancel ${count.countNo}? The counts entered so far are kept but nothing is posted.`)) return;
@@ -708,14 +733,89 @@ function StockCountSheet({ id, onBack }: { id: number; onBack: () => void }) {
       </SectionCard>
 
       {count.status === "Completed" && (
-        <SectionCard title="Posted" desc={`Approved by ${count.approvedByName ?? "—"} on ${count.completedAt ? new Date(count.completedAt).toLocaleString("en-GB") : "—"}`}>
+        <SectionCard title="Posted" desc={`Approved by ${count.approvedByName ?? "—"} on ${count.approvedAt ? new Date(count.approvedAt).toLocaleString("en-GB") : "—"}`}>
           <p className="px-1 text-sm leading-relaxed text-muted-foreground">
             This count set both the warehouse and branch stock pools to the counted quantities and wrote stock
             adjustment #{count.stockAdjustmentId ?? "—"}, plus one stock movement per non-zero variance. The same
-            figures appear in the Stock Count Report and the Stock Movements ledger.
+            figures appear in the Stock Taking Report and the Stock Movements ledger.
+            {count.reviewedByName && ` Reviewed by ${count.reviewedByName} before it was approved.`}
           </p>
         </SectionCard>
       )}
+
+      {count.status === "Rejected" && (
+        <SectionCard title="Rejected" desc={`By ${count.rejectedByName ?? "—"} on ${count.rejectedAt ? new Date(count.rejectedAt).toLocaleString("en-GB") : "—"}`}>
+          <p className="px-1 text-sm leading-relaxed text-muted-foreground">
+            {count.rejectionReason ? `"${count.rejectionReason}"` : "No reason was given."} Stock was never touched —
+            there's nothing to reverse.
+          </p>
+        </SectionCard>
+      )}
+
+      <RejectDialog
+        stage={rejectStage}
+        countNo={count.countNo}
+        isPending={review.isPending || approve.isPending}
+        onOpenChange={(open) => { if (!open) setRejectStage(null); }}
+        onConfirm={(reason) => {
+          const stage = rejectStage;
+          void (async () => {
+            if (stage === "review") await run(() => review.mutateAsync({ id, approved: false, reason }), "Count rejected at review.");
+            else if (stage === "approve") await run(() => approve.mutateAsync({ id, approved: false, reason }), "Count rejected at final approval.");
+            setRejectStage(null);
+          })();
+        }}
+      />
     </div>
+  );
+}
+
+// ————————————————————————— Reject dialog —————————————————————————
+
+function RejectDialog({
+  stage, countNo, isPending, onOpenChange, onConfirm,
+}: {
+  stage: "review" | "approve" | null;
+  countNo: string;
+  isPending: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+
+  useEffect(() => {
+    if (stage === null) setReason("");
+  }, [stage]);
+
+  return (
+    <Dialog open={stage !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Reject {countNo}</DialogTitle>
+          <DialogDescription>
+            {stage === "approve"
+              ? "This sends the count back without ever touching stock — nothing has been written yet, so there's nothing to reverse."
+              : "This stops the count before it reaches final approval. A reason is required so whoever counted knows what to fix."}
+          </DialogDescription>
+        </DialogHeader>
+        <Input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Why is this being rejected?"
+          className="h-9"
+          autoFocus
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            className="gap-1.5 bg-critical text-critical-foreground hover:bg-critical/90"
+            disabled={!reason.trim() || isPending}
+            onClick={() => onConfirm(reason.trim())}
+          >
+            {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />} Reject
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

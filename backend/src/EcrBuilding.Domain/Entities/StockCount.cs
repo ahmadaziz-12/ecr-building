@@ -3,6 +3,9 @@ using EcrBuilding.Domain.Common;
 namespace EcrBuilding.Domain.Entities;
 
 // Numeric values are load-bearing (stored as ints in the DB) — append new members, never renumber.
+// The maker-checker flow is Draft/InProgress -> PendingReview -> PendingApproval -> Completed, with
+// Rejected reachable from either PendingReview or PendingApproval. PendingApproval therefore no
+// longer means "submitted" — it means "reviewed, awaiting the final approver".
 public enum StockCountStatus
 {
     Draft = 0,
@@ -10,6 +13,8 @@ public enum StockCountStatus
     PendingApproval = 2,
     Completed = 3,
     Cancelled = 4,
+    PendingReview = 5,
+    Rejected = 6,
 }
 
 // What the generator pulls onto the sheet. The whole point of the feature is that nobody types a
@@ -44,8 +49,19 @@ public class StockCount : BaseEntity
     public DateTime? CompletedAt { get; set; }
     public int? CountedByUserId { get; set; }
     public User? CountedBy { get; set; }
+    // First-stage sign-off: the sheet is complete and the variances look right. Doesn't touch stock.
+    public DateTime? ReviewedAt { get; set; }
+    public int? ReviewedByUserId { get; set; }
+    public User? ReviewedBy { get; set; }
+    // Final sign-off. Only this step (StockCountsController.Approve) writes the StockAdjustment.
+    public DateTime? ApprovedAt { get; set; }
     public int? ApprovedByUserId { get; set; }
     public User? ApprovedBy { get; set; }
+    // Set whichever stage rejected it — Reviewed*/Approved* above stay null for that stage.
+    public DateTime? RejectedAt { get; set; }
+    public int? RejectedByUserId { get; set; }
+    public User? RejectedBy { get; set; }
+    public string? RejectionReason { get; set; }
     public string? Notes { get; set; }
 
     // Uncounted lines are treated as "matches the system" at post time instead of blocking the

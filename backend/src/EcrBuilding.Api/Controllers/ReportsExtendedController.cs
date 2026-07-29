@@ -210,7 +210,8 @@ public record StockCountVarianceLine(
     decimal UnitCost, decimal VarianceValue, string LineStatus, string? Note);
 public record StockCountVarianceRow(
     int Id, string CountNo, DateTime Date, string Warehouse, string Branch, string Scope, string? Category,
-    string Status, string? CountedBy, string? ApprovedBy, int Lines, int Counted, int VarianceLines,
+    string Status, string? CountedBy, string? ReviewedBy, string? ApprovedBy, string? RejectedBy, string? RejectionReason,
+    int Lines, int Counted, int VarianceLines,
     decimal NetVarianceQty, decimal NetVarianceValue, decimal AbsVarianceValue, decimal AccuracyPct,
     IReadOnlyList<StockCountVarianceLine> Items);
 
@@ -451,7 +452,7 @@ public class InventoryReportsController(AppDbContext db) : ReportControllerBase
         var counts = await db.StockCounts
             .Include(c => c.Warehouse).ThenInclude(w => w!.Branch)
             .Include(c => c.Category)
-            .Include(c => c.CountedBy).Include(c => c.ApprovedBy)
+            .Include(c => c.CountedBy).Include(c => c.ReviewedBy).Include(c => c.ApprovedBy).Include(c => c.RejectedBy)
             .Include(c => c.Lines).ThenInclude(l => l.Product).ThenInclude(p => p!.Category)
             .Where(c => c.ScheduledFor >= f && c.ScheduledFor < t)
             .ToListAsync(ct);
@@ -480,7 +481,8 @@ public class InventoryReportsController(AppDbContext db) : ReportControllerBase
             var varianceLines = lines.Count(l => l.Variance != 0);
             return new StockCountVarianceRow(
                 c.Id, c.CountNo, c.ScheduledFor, c.Warehouse?.Name ?? "", c.Warehouse?.Branch?.NameEn ?? "",
-                c.Scope.ToString(), c.Category?.NameEn, c.Status.ToString(), c.CountedBy?.Name, c.ApprovedBy?.Name,
+                c.Scope.ToString(), c.Category?.NameEn, c.Status.ToString(), c.CountedBy?.Name,
+                c.ReviewedBy?.Name, c.ApprovedBy?.Name, c.RejectedBy?.Name, c.RejectionReason,
                 lines.Count, counted, varianceLines,
                 Math.Round(lines.Sum(l => l.Variance), 2),
                 Math.Round(lines.Sum(l => l.VarianceValue), 2),
