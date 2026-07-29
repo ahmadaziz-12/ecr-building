@@ -53,6 +53,7 @@ import {
   Menu,
   Globe,
   QrCode,
+  Fingerprint,
   Warehouse,
   Wrench,
   History,
@@ -110,6 +111,7 @@ const nav: Group[] = [
       { to: "/operate/customers", label: "Customers & Contractors", icon: Users },
       { to: "/operate/cashier-workspace", label: "Cashier Workspace", icon: UserSquare2 },
       { to: "/operate/cashier-shift", label: "Cashier Shifts", icon: ClipboardList },
+      { to: "/operate/approval-center", label: "Approval Center", icon: ShieldCheck },
       // Control Tower is still fully mock/static data with no backend behind it — hidden from
       // nav until it's wired, rather than shipping a dead link (see /operate/control-tower).
       // { to: "/operate/control-tower", label: "Control Tower", icon: Activity },
@@ -122,6 +124,7 @@ const nav: Group[] = [
       { to: "/stock/variant-groups", label: "Variant Groups", icon: Copy },
       { to: "/admin/categories", label: "Categories & Attributes", icon: Layers },
       { to: "/stock/bundles", label: "Bundles & Systems", icon: Blocks },
+      { to: "/stock/serial-tracking", label: "Serial Number Tracking", icon: Fingerprint },
     ],
   },
   {

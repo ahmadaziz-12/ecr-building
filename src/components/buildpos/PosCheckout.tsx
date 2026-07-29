@@ -104,7 +104,8 @@ import {
 import { useCreateQuotation } from "@/lib/api/pos";
 import { apiPost } from "@/lib/api/client";
 import { CurrencyText, SARIcon } from "@/lib/buildpos/currency";
-import { useTerminals, useBranches } from "@/lib/api/admin";
+import { useTerminals, useBranches, useDevices } from "@/lib/api/admin";
+import { useScaleWeight } from "@/lib/scaleBridge";
 import {
   useCustomers,
   useCheckout,
@@ -127,6 +128,7 @@ import { ApiError } from "@/lib/api/client";
 import { BundleOverrideDialog } from "@/components/buildpos/pos/BundleOverrideDialog";
 import { PaymentDialog } from "@/components/buildpos/pos/PaymentDialog";
 import { PrinterSetupDialog } from "@/components/buildpos/pos/PrinterSetupDialog";
+import { ScaleSetupDialog } from "@/components/buildpos/pos/ScaleSetupDialog";
 import { ReceiptDialog } from "@/components/buildpos/pos/ReceiptDialog";
 import { RequestApprovalDialog } from "@/components/buildpos/pos/RequestApprovalDialog";
 import type { OrderDto } from "@/lib/api/pos";
@@ -196,6 +198,14 @@ type CartLine = {
   conversions: ProductUomConversionDto[];
   isCutToSize: boolean;
   cutToSizeUnit: CutToSizeUnit;
+  // Weighing Scale integration: qty comes from a live scale reading (captured via the button next to
+  // the line, fed by useScaleWeight) instead of manual entry or cut-to-size dimensions — starts at 0
+  // ("not weighed yet") and blocks checkout until captured (see hasUncapturedWeight).
+  isSoldByWeight?: boolean;
+  // Serial Number Tracking: one serial number per unit sold — entered inline on the line, must match
+  // qty exactly before checkout (see hasMissingSerials).
+  requiresSerialTracking?: boolean;
+  serialNumbers?: string[];
   lengthM?: number;
   widthM?: number;
   heightM?: number;
@@ -477,6 +487,14 @@ export function PosCheckout() {
   // branch/terminal mismatch at checkout. No terminal in this branch → checkout proceeds untilled.
   const terminal = terminals?.find((t) => t.branchId === effectiveBranchId);
 
+  // Weighing Scale integration: the scale's serial port is stored in the same Device.qzPrinterName
+  // field a printer Device uses for its QZ printer name — repurposed here as a generic "QZ target
+  // identifier" string (see ScaleSetupDialog). Only one scale is read at a time, shared by whichever
+  // cart line currently needs a weight captured.
+  const { data: devices } = useDevices(true);
+  const scaleDevice = devices?.find((d) => d.type === "WeighingScale" && d.terminalId === terminal?.id);
+  const scaleReading = useScaleWeight(scaleDevice?.qzPrinterName ?? null);
+
   // BRD §7 (CR-038): resolve the CURRENT customer's assigned price list against each product's own
   // Contractor/Wholesale/Project override — null on the product means "not configured," fall back
   // to sellingPrice (Retail), mirroring OrdersController.Checkout's resolution exactly so the cart
@@ -516,6 +534,8 @@ export function PosCheckout() {
         isCutToSize: p.isCutToSize ?? false,
         cutToSizeUnit: p.cutToSizeUnit ?? "Area",
         minCutQty: p.minCutQty ?? null,
+        isSoldByWeight: p.isSoldByWeight ?? false,
+        requiresSerialTracking: p.requiresSerialTracking ?? false,
         weight: p.weight,
         imageUrl: p.imageUrl,
         // Carried through so lineDiscountPct can tell whether THIS line actually got a distinct list
@@ -651,11 +671,26 @@ export function PosCheckout() {
       toast.info(`${p.name} is already in the cart — adjust its dimensions on the line.`);
       return;
     }
+    // A sold-by-weight line's qty comes from the scale, not "scan it again" — same one-line-per-
+    // product reasoning as cut-to-size above.
+    if (line?.isSoldByWeight) {
+      setLastAdded(p.sku);
+      toast.info(`${p.name} is already in the cart — capture its weight on the line.`);
+      return;
+    }
+    // A serial-tracked line's qty is however many serial numbers have been entered — "scan it again"
+    // should add another unit needing its own serial, not just bump qty blindly past what's entered.
+    if (line?.requiresSerialTracking) {
+      setCart((c) => c.map((l) => (l.sku === p.sku ? { ...l, qty: l.qty + 1 } : l)));
+      setLastAdded(p.sku);
+      toast.info(`${p.name} qty increased — enter the additional serial number on the line.`);
+      return;
+    }
     // Stock is tracked in stock UOM — a line sold by the Pallet consumes factor × qty of it, so the
     // availability check must compare stock-UOM demand, not raw line quantities (BRD §2.3 item 7).
     const currentStockDemand = line ? toStockQty(line.qty, line.factorToStock) : 0;
     const addedStockDemand = line ? line.factorToStock : 1;
-    if (currentStockDemand + addedStockDemand > p.stock) {
+    if (!p.isSoldByWeight && currentStockDemand + addedStockDemand > p.stock) {
       toast.error(`Only ${p.stock} ${p.uom} available at this branch.`);
       return;
     }
@@ -674,13 +709,18 @@ export function PosCheckout() {
           uom: p.uom,
           price: p.price,
           vatRate: p.vatRate,
-          qty: 1,
+          // Sold-by-weight starts at 0 — "not weighed yet" — until the cashier captures a scale
+          // reading on the line; every other product starts at 1 as before.
+          qty: p.isSoldByWeight ? 0 : 1,
           stockUom: p.uom,
           basePrice: p.price,
           factorToStock: 1,
           conversions: p.conversions,
           isCutToSize: isCut,
           cutToSizeUnit: p.cutToSizeUnit,
+          isSoldByWeight: p.isSoldByWeight,
+          requiresSerialTracking: p.requiresSerialTracking,
+          serialNumbers: p.requiresSerialTracking ? [] : undefined,
           lengthM: isCut ? 1 : undefined,
           widthM: isCut && p.cutToSizeUnit !== "Length" ? 1 : undefined,
           heightM: isCut && p.cutToSizeUnit === "Volume" ? 1 : undefined,
@@ -830,6 +870,13 @@ export function PosCheckout() {
   function setLineDiscountPct(sku: string, raw: string) {
     const value = raw === "" ? undefined : Math.max(0, Math.min(100, Number(raw) || 0));
     setCart((c) => c.map((l) => (l.sku === sku ? { ...l, manualDiscountPct: value } : l)));
+  }
+
+  // Serial Number Tracking: raw text (comma or newline separated) parsed into the array checkout
+  // sends — actual availability (InStock, belongs to this product/branch) is validated server-side.
+  function setLineSerialsText(sku: string, raw: string) {
+    const serials = raw.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
+    setCart((c) => c.map((l) => (l.sku === sku ? { ...l, serialNumbers: serials } : l)));
   }
 
   // BRD §7 (CR-039): an absolute per-line price override — a DIFFERENT authorization ceiling from
@@ -1500,6 +1547,14 @@ export function PosCheckout() {
 
   const idle = query === "" && cart.length === 0 && bundleCart.length === 0;
   const cartIsEmpty = cart.length === 0 && bundleCart.length === 0;
+  // Weighing Scale integration: a sold-by-weight line starts at qty 0 until the cashier captures a
+  // reading (see the scale UI in the cart line render) — checkout must wait for that, same idea as
+  // deliveryDetailsComplete gating on the delivery panel below.
+  const hasUncapturedWeight = cart.some((l) => l.isSoldByWeight && l.qty <= 0);
+  // Serial Number Tracking: exactly one serial per unit before checkout — mirrors the backend's own
+  // count check in OrdersController.Checkout, surfaced here so the cashier sees it before Charge
+  // rejects the sale.
+  const hasMissingSerials = cart.some((l) => l.requiresSerialTracking && (l.serialNumbers ?? []).filter((s) => s.trim()).length !== l.qty);
 
   // Customer auto-suggest: name/phone substring match against the already-loaded customer list —
   // shown live under the find box (2+ characters, max 6 matches).
@@ -1600,6 +1655,7 @@ export function PosCheckout() {
               notes: l.notes?.trim() || null,
               manualDiscountPct: l.manualDiscountPct ?? null,
               manualUnitPrice: l.manualUnitPrice ?? null,
+              serialNumbers: l.requiresSerialTracking ? l.serialNumbers ?? [] : undefined,
             },
       ),
       payments,
@@ -1778,7 +1834,10 @@ export function PosCheckout() {
               </span>
             )}
           </div>
-          <PrinterSetupDialog terminalId={terminal?.id} />
+          <div className="flex items-center gap-2">
+            <PrinterSetupDialog terminalId={terminal?.id} />
+            <ScaleSetupDialog terminalId={terminal?.id} />
+          </div>
         </div>
 
         {/* Scanner hero — the ONLY primary surface */}
@@ -2427,7 +2486,7 @@ export function PosCheckout() {
                   </span>
                   <button
                     type="button"
-                    disabled={!canRedeemPoints || cartIsEmpty}
+                    disabled={!canRedeemPoints || cartIsEmpty || hasUncapturedWeight || hasMissingSerials}
                     onClick={() => {
                       setPayInitialTab("points");
                       setPayOpen(true);
@@ -2779,7 +2838,41 @@ export function PosCheckout() {
                   )}
                 </div>
               )}
-              {l.isCutToSize ? (
+              {l.isSoldByWeight ? (
+                // Weighing Scale integration: qty comes from a live reading off the paired scale
+                // instead of manual entry — "Capture" locks the current reading into the line via
+                // setQtyDirect, same validation (stock availability, > 0) as a manual qty edit.
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs">
+                    {!scaleDevice ? (
+                      <span className="text-muted-foreground">
+                        No scale paired to this terminal — pair one from Network → Devices.
+                      </span>
+                    ) : !scaleReading.connected ? (
+                      <span className="text-warning">Connecting to scale…</span>
+                    ) : (
+                      <span className={scaleReading.stable ? "text-foreground" : "text-warning"}>
+                        Reading: <span className="font-mono font-semibold">{scaleReading.weightKg?.toFixed(3) ?? "—"}</span> kg
+                        {!scaleReading.stable && " (settling…)"}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      disabled={scaleReading.weightKg == null}
+                      onClick={() => setQtyDirect(l.sku, String(scaleReading.weightKg))}
+                      className="rounded-md border border-brand/30 bg-brand/10 px-2 py-1 font-medium text-brand transition hover:bg-brand/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Capture
+                    </button>
+                    <span className="font-medium text-muted-foreground">
+                      = {l.qty > 0 ? `${l.qty.toFixed(3)} ${l.stockUom}` : "not weighed yet"}
+                    </span>
+                  </div>
+                  <p className="font-mono text-sm font-semibold text-foreground">
+                    <CurrencyText value={money(l.price * l.qty)} />
+                  </p>
+                </div>
+              ) : l.isCutToSize ? (
                 // BRD §2.3 items 5-6: cut-to-size lines take dimension entry instead of a plain qty —
                 // the computed length/area/volume (per the product's cut-to-size unit) becomes the
                 // billed quantity at the per-stock-UOM price. Length needs just one input, Area two,
@@ -3006,6 +3099,23 @@ export function PosCheckout() {
                       <CurrencyText value={money(l.price * l.qty)} />
                     </p>
                   )}
+                </div>
+              )}
+              {l.requiresSerialTracking && (
+                // Serial Number Tracking: one serial per unit — count must match qty exactly before
+                // checkout (see hasMissingSerials), validated for real availability server-side.
+                <div className="mt-1.5 space-y-1">
+                  <input
+                    type="text"
+                    defaultValue={(l.serialNumbers ?? []).join(", ")}
+                    onChange={(e) => setLineSerialsText(l.sku, e.target.value)}
+                    placeholder={`Serial number(s), comma-separated (need ${l.qty})`}
+                    aria-label={`${l.sku} serial numbers`}
+                    className="h-7 w-full rounded-md border border-black/10 bg-white px-2 text-xs font-mono outline-none focus:border-brand"
+                  />
+                  <p className={`text-[11px] font-medium ${(l.serialNumbers ?? []).filter((s) => s.trim()).length === l.qty ? "text-success" : "text-warning"}`}>
+                    {(l.serialNumbers ?? []).filter((s) => s.trim()).length} of {l.qty} serial(s) entered
+                  </p>
                 </div>
               )}
             </div>
@@ -3419,7 +3529,12 @@ export function PosCheckout() {
               setPayInitialTab("cash");
               setPayOpen(true);
             }}
-            disabled={cartIsEmpty || !deliveryDetailsComplete}
+            disabled={cartIsEmpty || !deliveryDetailsComplete || hasUncapturedWeight || hasMissingSerials}
+            title={
+              hasUncapturedWeight ? "Capture a weight reading for every sold-by-weight line first."
+                : hasMissingSerials ? "Enter a serial number for every unit on each serial-tracked line first."
+                : undefined
+            }
             className="flex items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition hover:bg-brand/90 hover:shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-brand"
           >
             <ReceiptText className="h-4 w-4" /> Charge{" "}

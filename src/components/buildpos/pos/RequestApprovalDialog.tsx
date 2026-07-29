@@ -9,14 +9,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCreateApproval, type ApprovalRequestDto } from "@/lib/api/pos";
 import { SARIcon } from "@/lib/buildpos/currency";
 
-const TYPES = ["Discount", "PriceOverride", "Refund", "CreditOverride"];
+const TYPES = ["Discount", "PriceOverride", "Refund", "CreditOverride", "InvoiceDeletion", "PaymentMethodChange", "ItemDeletion"];
 const TYPE_LABELS: Record<string, string> = {
   Discount: "Discount above limit", PriceOverride: "Price override", Refund: "Refund",
   CreditOverride: "B2B credit limit override",
+  InvoiceDeletion: "Delete invoice", PaymentMethodChange: "Change payment method", ItemDeletion: "Delete item",
 };
 
 export function RequestApprovalDialog({
-  open, onOpenChange, branchId, defaultType, defaultAmount, defaultReason, onCreated,
+  open, onOpenChange, branchId, defaultType, defaultAmount, defaultReason, relatedOrderId, relatedOrderLineId, onCreated,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -24,6 +25,11 @@ export function RequestApprovalDialog({
   defaultType?: string;
   defaultAmount?: string;
   defaultReason?: string;
+  // Approval Center types (InvoiceDeletion/PaymentMethodChange/ItemDeletion): the order (and, for
+  // ItemDeletion, the specific line) this request is scoped to — OrdersController's Delete/
+  // ChangePaymentMethod/DeleteLine endpoints only honor an approval tied to the exact record.
+  relatedOrderId?: number;
+  relatedOrderLineId?: number;
   // Fires with the created (still Pending) request — e.g. so a POS screen can hold onto its id and
   // pass it back to checkout once a supervisor approves it, without the cashier re-typing anything.
   onCreated?: (approval: ApprovalRequestDto) => void;
@@ -51,7 +57,9 @@ export function RequestApprovalDialog({
   async function submit() {
     if (!branchId || !reason.trim() || !amountValid) return;
     try {
-      const created = await createApproval.mutateAsync({ type, branchId, amount: Number(amount), reason: reason.trim() });
+      const created = await createApproval.mutateAsync({
+        type, branchId, amount: Number(amount), reason: reason.trim(), relatedOrderId, relatedOrderLineId,
+      });
       toast.success("Approval requested", { description: "A supervisor will review this shortly." });
       onCreated?.(created);
       reset();

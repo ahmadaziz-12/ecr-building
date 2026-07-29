@@ -84,6 +84,15 @@ public class Product : BaseEntity
     // cost. Null = no minimum, billed qty is the exact measured dimension (pre-existing behavior).
     // Meaningless when IsCutToSize is false.
     public decimal? MinCutQty { get; set; }
+    // Weighing Scale integration: sold-by-weight products (produce, bulk cement, scrap metal) take
+    // their qty from a live scale reading at the POS instead of manual entry or cut-to-size dimension
+    // input — mutually exclusive with IsCutToSize in the POS UI. Priced at SellingPrice per stock UOM
+    // (assumed kg), same as a cut-to-size line is priced per stock UOM.
+    public bool IsSoldByWeight { get; set; }
+    // Serial Number Tracking: opt-in per product (power tools, generators, appliances — anything with
+    // an individually warrantied unit) — when set, checkout requires one SerializedUnit serial number
+    // per unit sold instead of just decrementing a quantity.
+    public bool RequiresSerialTracking { get; set; }
     // BRD §2.2: supplier link and physical bin/aisle reference, surfaced at the POS.
     public int? SupplierId { get; set; }
     public Supplier? Supplier { get; set; }

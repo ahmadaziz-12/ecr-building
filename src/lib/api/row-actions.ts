@@ -179,6 +179,11 @@ export function useRowActions(
   // text-field "Approve Return" flow every other return type uses.
   openApproveExchange?: (ret: ReturnDto) => void,
   openBundleEditor?: (bundle: BundleDto) => void,
+  // Opens PrintBarcodeDialog / PrintLabelDialog (copies + QZ target picker, label also gets a price
+  // override) for the given product instead of silently firing a default print — see
+  // src/components/buildpos/pos/PrintBarcodeDialog.tsx / PrintLabelDialog.tsx.
+  openPrintBarcode?: (product: { id: number; sku: string; name: string; barcode: string | null }) => void,
+  openPrintLabel?: (product: { id: number; sku: string; name: string; sellingPrice: number }) => void,
 ): (id: number | undefined, row: (string | number)[], statusText: string) => RowAction[] {
   const navigate = useNavigate();
 
@@ -413,6 +418,8 @@ export function useRowActions(
                   uomConversions: formatUomConversions(product.uomConversions),
                   cutToSizeMode: formatCutToSizeMode(product.isCutToSize, product.cutToSizeUnit),
                   minCutQty: product.minCutQty != null ? String(product.minCutQty) : "",
+                  soldByWeight: product.isSoldByWeight ? "on" : "",
+                  requiresSerialTracking: product.requiresSerialTracking ? "on" : "",
                   weight: String(product.weight),
                   returnable: product.returnable ? "on" : "",
                   cost: String(product.costPrice),
@@ -474,6 +481,8 @@ export function useRowActions(
                       isCutToSize,
                       cutToSizeUnit,
                       minCutQty: values.minCutQty ? Number(values.minCutQty) : null,
+                      isSoldByWeight: values.soldByWeight === "on",
+                      requiresSerialTracking: values.requiresSerialTracking === "on",
                       attributes: parseAttributeRows(values.attributes),
                       variantGroupId: resolveVariantGroupId(values.variantGroup),
                     },
@@ -498,11 +507,22 @@ export function useRowActions(
                 ),
               },
           {
+            label: "Print Barcode",
+            onClick: openPrintBarcode
+              ? () => openPrintBarcode({ id: product.id, sku: product.sku, name: product.nameEn, barcode: product.barcode ?? null })
+              : guarded(
+                  () => printLabel.mutateAsync({ productId: product.id, terminalId: null, template: "Barcode" }),
+                  "Barcode sent to print queue",
+                ),
+          },
+          {
             label: "Print Label",
-            onClick: guarded(
-              () => printLabel.mutateAsync({ productId: product.id, terminalId: null }),
-              "Label sent to print queue",
-            ),
+            onClick: openPrintLabel
+              ? () => openPrintLabel({ id: product.id, sku: product.sku, name: product.nameEn, sellingPrice: product.sellingPrice })
+              : guarded(
+                  () => printLabel.mutateAsync({ productId: product.id, terminalId: null, template: "Label" }),
+                  "Label sent to print queue",
+                ),
           },
           {
             label: "View Category",

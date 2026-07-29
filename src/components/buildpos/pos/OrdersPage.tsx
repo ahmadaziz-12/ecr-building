@@ -12,6 +12,8 @@ import {
 import { resolveDateRangeBounds, type DateRangeValue } from "@/components/buildpos/FilterControls";
 import { OrderDetailDialog } from "./OrderDetailDialog";
 import { VoidOrderDialog } from "./VoidOrderDialog";
+import { DeleteInvoiceDialog } from "./DeleteInvoiceDialog";
+import { ChangePaymentMethodDialog } from "./ChangePaymentMethodDialog";
 import { CreateReturnDialog } from "./CreateReturnDialog";
 import { QuotationFormDialog } from "./QuotationFormDialog";
 import { QuotationDetailDialog } from "./QuotationDetailDialog";
@@ -74,6 +76,8 @@ export function OrdersPage() {
   const [tab, setTab] = useState<Tab>("All Orders");
   const [detailOrder, setDetailOrder] = useState<OrderDto | null>(null);
   const [voidTarget, setVoidTarget] = useState<OrderDto | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<OrderDto | null>(null);
+  const [changeMethodTarget, setChangeMethodTarget] = useState<OrderDto | null>(null);
   const [returnTarget, setReturnTarget] = useState<OrderDto | null>(null);
   const [creatingQuote, setCreatingQuote] = useState(false);
   const [editingQuote, setEditingQuote] = useState<QuotationDto | null>(null);
@@ -371,8 +375,16 @@ export function OrdersPage() {
                             ? [{ label: "Take Payment", onClick: () => setPayTarget(o) }]
                             : []),
                           "separator",
-                          ...(canReturn ? [{ label: "Create Return", onClick: () => setReturnTarget(o), disabled: o.status === "Voided" || o.status === "Returned" }] : []),
-                          { label: "Void Order", onClick: () => setVoidTarget(o), destructive: true, disabled: o.status === "Voided" || o.status === "Returned" },
+                          // A completed sale can only be refunded (money already changed hands — a
+                          // return is the correct undo); a still-pending sale can only be voided (no
+                          // payment settled yet, nothing to refund) — each action is removed from the
+                          // menu entirely rather than shown disabled, since it's simply not a valid
+                          // action for this order's status, not a permission/state gate to explain.
+                          ...(canReturn && o.status === "Completed" ? [{ label: "Create Return", onClick: () => setReturnTarget(o) }] : []),
+                          ...(o.status === "Pending" ? [{ label: "Void Order", onClick: () => setVoidTarget(o), destructive: true }] : []),
+                          "separator",
+                          { label: "Change Payment Method", onClick: () => setChangeMethodTarget(o), disabled: o.payments.length === 0 },
+                          { label: "Delete Invoice", onClick: () => setDeleteTarget(o), destructive: true, disabled: o.status === "Voided" || o.status === "Deleted" },
                         ]}
                       />
                     </TableCell>
@@ -392,6 +404,8 @@ export function OrdersPage() {
 
       <OrderDetailDialog order={detailOrder} onClose={() => setDetailOrder(null)} />
       <VoidOrderDialog order={voidTarget} onClose={() => setVoidTarget(null)} />
+      <DeleteInvoiceDialog order={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      <ChangePaymentMethodDialog order={changeMethodTarget} onClose={() => setChangeMethodTarget(null)} />
       <CreateReturnDialog order={returnTarget} onClose={() => setReturnTarget(null)} />
       <QuotationFormDialog open={creatingQuote} onOpenChange={setCreatingQuote} branchId={effectiveBranchId} />
       <QuotationFormDialog

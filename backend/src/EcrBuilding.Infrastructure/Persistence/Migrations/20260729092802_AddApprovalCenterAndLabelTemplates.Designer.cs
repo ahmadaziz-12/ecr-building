@@ -4,6 +4,7 @@ using EcrBuilding.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EcrBuilding.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260729092802_AddApprovalCenterAndLabelTemplates")]
+    partial class AddApprovalCenterAndLabelTemplates
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2607,9 +2610,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsCutToSize")
                         .HasColumnType("tinyint(1)");
 
-                    b.Property<bool>("IsSoldByWeight")
-                        .HasColumnType("tinyint(1)");
-
                     b.Property<decimal?>("MinCutQty")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
@@ -2630,9 +2630,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("ReorderQty")
                         .HasColumnType("int");
-
-                    b.Property<bool>("RequiresSerialTracking")
-                        .HasColumnType("tinyint(1)");
 
                     b.Property<bool>("Returnable")
                         .HasColumnType("tinyint(1)");
@@ -3712,64 +3709,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("SavedDashboardViews");
-                });
-
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.SerializedUnit", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("BranchId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("longtext");
-
-                    b.Property<int>("ProductId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("ReceivedDate")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("SerialNo")
-                        .IsRequired()
-                        .HasColumnType("varchar(255)");
-
-                    b.Property<int?>("SoldOrderId")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("SoldOrderLineId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<DateTime?>("WarrantyExpiresAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BranchId");
-
-                    b.HasIndex("SoldOrderId");
-
-                    b.HasIndex("SoldOrderLineId");
-
-                    b.HasIndex("ProductId", "SerialNo")
-                        .IsUnique();
-
-                    b.ToTable("SerializedUnits");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Setting", b =>
@@ -6069,39 +6008,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.SerializedUnit", b =>
-                {
-                    b.HasOne("EcrBuilding.Domain.Entities.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("EcrBuilding.Domain.Entities.Product", "Product")
-                        .WithMany()
-                        .HasForeignKey("ProductId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("EcrBuilding.Domain.Entities.Order", "SoldOrder")
-                        .WithMany()
-                        .HasForeignKey("SoldOrderId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("EcrBuilding.Domain.Entities.OrderLine", "SoldOrderLine")
-                        .WithMany()
-                        .HasForeignKey("SoldOrderLineId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("Product");
-
-                    b.Navigation("SoldOrder");
-
-                    b.Navigation("SoldOrderLine");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockAdjustment", b =>

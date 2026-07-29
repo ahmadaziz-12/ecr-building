@@ -367,7 +367,7 @@ public static class DbSeeder
                 ApprovalCap = def.ApprovalCap,
                 IsSystem = true,
             };
-            role.Permissions = BuildPagePermissions(def.SectionLevels, def.ApprovePages);
+            role.Permissions = BuildPagePermissions(def.SectionLevels, def.ApprovePages, def.DenyApprovePages);
             def.PosCeilings(role);
             db.Roles.Add(role);
         }
@@ -397,6 +397,38 @@ public static class DbSeeder
         return PermissionCatalog.ValidKeys.All(keys.Contains);
     }
 
+    // One-time repair for databases seeded before the Approval Center's own CanApprove gate existed:
+    // it used to just mirror the coarse Sec.Pos section level (Full => true), so Cashier/Senior
+    // Cashier — Full on Pos for register work — could approve peers' price-override/deletion
+    // requests, while Store Manager (Edit on Pos) couldn't approve anything at all. That's backwards
+    // from the BRD §10.1 ladder. RoleDefinitions()/BuildPagePermissions now encode the right defaults
+    // via ApprovePages/DenyApprovePages, but HasCompletePageGrid only rebuilds a role whose grid is
+    // missing a page — "/operate/approval-center" already existed, so an already-seeded role's stale
+    // CanApprove value would otherwise never get corrected. Runs exactly once (guarded by the
+    // marker audit log below) so an admin's own later change to this cell is never re-clobbered.
+    private static async Task RepairApprovalCenterApprovalGateAsync(AppDbContext db, List<Role> existingRoles)
+    {
+        const string marker = "APPROVAL_CENTER_PERMISSION_REPAIR";
+        if (await db.AuditLogs.AnyAsync(a => a.Module == "admin" && a.Event == marker)) return;
+
+        var intendedApprovers = new HashSet<string> { "System Admin", "Store Manager", "Supervisor" };
+        foreach (var role in existingRoles)
+        {
+            var perm = role.Permissions.FirstOrDefault(p => p.ModuleKey == "/operate/approval-center");
+            if (perm is null) continue;
+            perm.CanApprove = intendedApprovers.Contains(role.Name);
+        }
+
+        db.AuditLogs.Add(new AuditLog
+        {
+            Module = "admin",
+            Event = marker,
+            Reason = "One-time repair: Approval Center's CanApprove now follows the BRD §10.1 ladder (Store Manager/Supervisor/System Admin can approve; Cashier/Senior Cashier can only request) instead of the coarse Sec.Pos section level.",
+            Severity = AuditSeverity.Info,
+        });
+        await db.SaveChangesAsync();
+    }
+
     // BRD §10.1 caps the roster at exactly 5 roles. Runs on EVERY startup: creates the 5 canonical
     // roles if missing, repairs POS ceilings still at untouched migration defaults, rebuilds any
     // role's page-permission grid that isn't yet complete (covers both the old Module/Level schema
@@ -422,7 +454,7 @@ public static class DbSeeder
                     Description = def.Description,
                     ApprovalCap = def.ApprovalCap,
                     IsSystem = true,
-                    Permissions = BuildPagePermissions(def.SectionLevels, def.ApprovePages),
+                    Permissions = BuildPagePermissions(def.SectionLevels, def.ApprovePages, def.DenyApprovePages),
                 };
                 def.PosCeilings(role);
                 db.Roles.Add(role);
@@ -439,7 +471,7 @@ public static class DbSeeder
                 if (!HasCompletePageGrid(role))
                 {
                     db.RolePermissions.RemoveRange(role.Permissions);
-                    role.Permissions = BuildPagePermissions(def.SectionLevels, def.ApprovePages);
+                    role.Permissions = BuildPagePermissions(def.SectionLevels, def.ApprovePages, def.DenyApprovePages);
                     changed = true;
                 }
             }
@@ -449,6 +481,8 @@ public static class DbSeeder
         {
             await db.SaveChangesAsync();
         }
+
+        await RepairApprovalCenterApprovalGateAsync(db, existingRoles);
 
         // Non-canonical roles: the pre-consolidation 10-role roster (Owner/Admin/Branch
         // Manager/Warehouse Staff/Delivery Driver/HR Officer/Accountant), or anything a store admin
@@ -537,7 +571,12 @@ public static class DbSeeder
     // specific pages regardless of that page's section level — e.g. Supervisor/Store Manager get
     // Finance:Edit generally but still need CanApprove specifically on Returns to authorize refunds
     // (ReturnsController.Approve requires PermissionAction.Approve on "/finance/returns").
-    private static List<RolePermission> BuildPagePermissions(Dictionary<string, AccessLevel> sectionLevels, string[]? approvePages = null)
+    // denyApprovePages is the inverse: revokes CanApprove on specific pages even though the page's
+    // section level is Full — needed for the Approval Center, where Cashier/Senior Cashier hold Full
+    // on Sec.Pos (so they can void/delete/etc. at the register) but must NOT be able to approve their
+    // own peers' price-override/deletion requests; only Store Manager/Supervisor/System Admin can
+    // (BRD §10.1 ladder — see ApprovalsController's "different, higher-tier user" self-approval note).
+    private static List<RolePermission> BuildPagePermissions(Dictionary<string, AccessLevel> sectionLevels, string[]? approvePages = null, string[]? denyApprovePages = null)
     {
         var perms = PermissionCatalog.Pages.Select(page =>
         {
@@ -564,13 +603,22 @@ public static class DbSeeder
             }
         }
 
+        foreach (var key in denyApprovePages ?? [])
+        {
+            var perm = perms.FirstOrDefault(p => p.ModuleKey == key);
+            if (perm is not null)
+            {
+                perm.CanApprove = false;
+            }
+        }
+
         return perms;
     }
 
-    private static (string Name, string Description, decimal ApprovalCap, Dictionary<string, AccessLevel> SectionLevels, string[]? ApprovePages, Action<Role> PosCeilings)[] RoleDefinitions() =>
-        new (string, string, decimal, Dictionary<string, AccessLevel>, string[]?, Action<Role>)[]
+    private static (string Name, string Description, decimal ApprovalCap, Dictionary<string, AccessLevel> SectionLevels, string[]? ApprovePages, string[]? DenyApprovePages, Action<Role> PosCeilings)[] RoleDefinitions() =>
+        new (string, string, decimal, Dictionary<string, AccessLevel>, string[]?, string[]?, Action<Role>)[]
         {
-            ("System Admin", "Full access across every module.", 999_999m, AllSections(AccessLevel.Full), null, PosTier.Admin),
+            ("System Admin", "Full access across every module.", 999_999m, AllSections(AccessLevel.Full), null, null, PosTier.Admin),
             ("Store Manager", "Runs day-to-day branch operations.", 20_000m, new Dictionary<string, AccessLevel>
             {
                 [Sec.Dashboard] = AccessLevel.View,
@@ -584,7 +632,7 @@ public static class DbSeeder
                 [Sec.Hr] = AccessLevel.View,
                 [Sec.Network] = AccessLevel.View,
                 [Sec.Admin] = AccessLevel.None,
-            }, new[] { "/finance/returns" }, PosTier.Manager),
+            }, new[] { "/finance/returns", "/operate/approval-center" }, null, PosTier.Manager),
             ("Cashier", "Runs the point-of-sale register.", 500m, new Dictionary<string, AccessLevel>
             {
                 [Sec.Dashboard] = AccessLevel.View,
@@ -600,7 +648,7 @@ public static class DbSeeder
                 // Printer Setup dialog; cashiers still can't manage branches/terminals/devices.
                 [Sec.Network] = AccessLevel.View,
                 [Sec.Admin] = AccessLevel.None,
-            }, null, PosTier.Cashier),
+            }, null, new[] { "/operate/approval-center" }, PosTier.Cashier),
             ("Senior Cashier", "Cashier plus higher discount/return authorization.", 1_000m, new Dictionary<string, AccessLevel>
             {
                 [Sec.Dashboard] = AccessLevel.View,
@@ -614,7 +662,7 @@ public static class DbSeeder
                 [Sec.Hr] = AccessLevel.None,
                 [Sec.Network] = AccessLevel.View,
                 [Sec.Admin] = AccessLevel.None,
-            }, null, PosTier.SeniorCashier),
+            }, null, new[] { "/operate/approval-center" }, PosTier.SeniorCashier),
             ("Supervisor", "Authorizes damaged/surplus returns, voids, and X-reports.", 10_000m, new Dictionary<string, AccessLevel>
             {
                 [Sec.Dashboard] = AccessLevel.View,
@@ -628,7 +676,7 @@ public static class DbSeeder
                 [Sec.Hr] = AccessLevel.None,
                 [Sec.Network] = AccessLevel.View,
                 [Sec.Admin] = AccessLevel.None,
-            }, new[] { "/finance/returns" }, PosTier.Supervisor),
+            }, new[] { "/finance/returns" }, null, PosTier.Supervisor),
         };
 
     // Old ModuleArea bucket names, now used only as the lookup key inside RoleDefinitions'

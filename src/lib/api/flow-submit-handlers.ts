@@ -214,6 +214,8 @@ export function useFlowSubmitHandlers(): Record<
         isCutToSize,
         cutToSizeUnit,
         minCutQty: values.minCutQty ? Number(values.minCutQty) : null,
+        isSoldByWeight: values.soldByWeight === "on",
+        requiresSerialTracking: values.requiresSerialTracking === "on",
         attributes: parseAttributeRows(values.attributes),
         variantGroupId: resolveVariantGroupId(values.variantGroup),
       });

@@ -77,3 +77,11 @@ public record ReviewStockCountRequest(bool Approved, string? Reason);
 // Final sign-off: Approved posts the variance (PendingApproval -> Completed) exactly like the old
 // Post did; rejecting (Reason required) moves to Rejected — still no stock write.
 public record ApproveStockCountRequest(bool Approved, string? Reason, int? ApproverUserId, string? Notes);
+
+// Serial Number Tracking (electrical tools, equipment, warranty items): one row per physical unit.
+public record SerializedUnitDto(
+    int Id, int ProductId, string Sku, string ProductName, string SerialNo, string Status,
+    int BranchId, string BranchName, DateTime ReceivedDate, int? SoldOrderId, string? SoldOrderNo,
+    DateTime? WarrantyExpiresAt, string? Notes, DateTime CreatedAt);
+public record RegisterSerializedUnitsRequest(int ProductId, int BranchId, List<string> SerialNumbers, DateTime? WarrantyExpiresAt = null, string? Notes = null);
+public record UpdateSerialStatusRequest(string Status, string? Notes = null);
