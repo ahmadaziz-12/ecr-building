@@ -50,9 +50,22 @@ public class CashierShiftsController(AppDbContext db, IAuditService audit) : Con
     [HttpGet("terminals")]
     public async Task<ActionResult<List<ShiftTerminalDto>>> Terminals(CancellationToken ct)
     {
-        var query = db.Terminals.Include(t => t.Branch).AsQueryable();
+        var callerId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var caller = await db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == callerId, ct);
+        // Same BRD §10.1 ladder OrdersController's void-authorization check uses: Supervisor and up
+        // may open a shift on behalf of another cashier (Open below auto-attributes to whoever the
+        // terminal is assigned to). A plain Cashier/Senior Cashier only ever opens their OWN shift, so
+        // a till assigned to someone else is hidden from their picker entirely — showing it let them
+        // pick it, fill in a float, and have the shift silently open under a stranger's name.
+        var canOpenForOthers = caller?.Role is { CanVoidTransactions: true };
+
+        var query = db.Terminals.Include(t => t.Branch).Include(t => t.Operator).AsQueryable();
         if (this.GetScopedBranchId() is int scopedBranchId) query = query.Where(t => t.BranchId == scopedBranchId);
         var terminals = await query.OrderBy(t => t.Branch!.NameEn).ThenBy(t => t.Code).ToListAsync(ct);
+        if (!canOpenForOthers)
+        {
+            terminals = terminals.Where(t => t.OperatorUserId is null || t.OperatorUserId == callerId).ToList();
+        }
 
         // GroupBy, not ToDictionary: the Open endpoint below rejects a second concurrent shift, but a
         // duplicate left by older data would turn this picker into a 500 instead of a list.
@@ -63,21 +76,39 @@ public class CashierShiftsController(AppDbContext db, IAuditService audit) : Con
 
         return Ok(terminals.Select(t => new ShiftTerminalDto(
             t.Id, t.Code, t.Name, t.BranchId, t.Branch?.NameEn ?? "—", t.Status.ToString(),
-            openShifts.TryGetValue(t.Id, out var cashier) ? cashier : null)).ToList());
+            openShifts.TryGetValue(t.Id, out var cashier) ? cashier : null,
+            t.OperatorUserId, t.Operator?.Name)).ToList());
     }
 
     [HttpPost("open")]
     [RequireModule("/operate/cashier-shift", PermissionAction.Create)]
     public async Task<ActionResult<CashierShiftDto>> Open(OpenShiftRequest request, CancellationToken ct)
     {
-        var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        if (!await db.Terminals.AnyAsync(t => t.Id == request.TerminalId, ct))
+        var callerId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var terminal = await db.Terminals.FirstOrDefaultAsync(t => t.Id == request.TerminalId, ct);
+        if (terminal is null)
         {
             return BadRequest(new { error = "Unknown terminal." });
         }
+        // A terminal with an assigned cashier (Network > Terminals > Assign Cashier) always opens its
+        // shift under THAT cashier — even when a Supervisor/Store Manager/System Admin is the one who
+        // clicks Open Shift on their behalf — so drawer-cash accountability lands on whoever actually
+        // works the till, never on whichever manager happened to press the button. An unassigned
+        // terminal still opens under the caller (self-service, the common case).
+        var cashierId = terminal.OperatorUserId ?? callerId;
         if (await db.CashierShifts.AnyAsync(s => s.TerminalId == request.TerminalId && s.Status == CashierShiftStatus.Open, ct))
         {
             return BadRequest(new { error = "This terminal already has an open shift." });
+        }
+        // One cashier, one terminal at a time — unlike AssignCashier (an admin re-pointing a terminal
+        // record), this is the cashier's own drawer float/cash tally, so a second concurrent shift is
+        // rejected rather than silently moved: auto-closing the old one would abandon its cash count.
+        var existingOpenShift = await db.CashierShifts.Include(s => s.Terminal)
+            .FirstOrDefaultAsync(s => s.CashierUserId == cashierId && s.Status == CashierShiftStatus.Open, ct);
+        if (existingOpenShift is not null)
+        {
+            var whose = cashierId == callerId ? "You already have" : "This cashier already has";
+            return BadRequest(new { error = $"{whose} an open shift on {existingOpenShift.Terminal?.Name ?? "another terminal"} — close it before opening a new one." });
         }
 
         var shift = new CashierShift { TerminalId = request.TerminalId, CashierUserId = cashierId, OpeningFloat = request.OpeningFloat };
@@ -188,7 +219,7 @@ public class CashierShiftsController(AppDbContext db, IAuditService audit) : Con
         var variance = s.CountedCash is null ? (decimal?)null : s.CountedCash - expectedCash;
         return new(
             s.Id, s.TerminalId, s.Terminal?.Name ?? "", s.Cashier?.Name ?? "", s.OpenedAt, s.ClosedAt, s.OpeningFloat,
-            cashSales, s.CashIn, s.CashOut, expectedCash, s.CountedCash, variance, s.Status.ToString());
+            cashSales, s.CashIn, s.CashOut, expectedCash, s.CountedCash, variance, s.Status.ToString(), s.CashierUserId);
     }
 }
 

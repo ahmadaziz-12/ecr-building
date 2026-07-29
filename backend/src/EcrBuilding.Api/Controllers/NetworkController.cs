@@ -112,6 +112,22 @@ public class TerminalsController(AppDbContext db, IAuditService audit, IPassword
     [RequireModule("/network/terminals", PermissionAction.Create)]
     public async Task<ActionResult<TerminalDto>> Create(UpsertTerminalRequest request, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(request.Code))
+        {
+            return BadRequest(new { error = "Terminal code is required." });
+        }
+        if (!await db.Branches.AnyAsync(b => b.Id == request.BranchId, ct))
+        {
+            return BadRequest(new { error = "Unknown branch." });
+        }
+        // Terminal.Code carries a DB-level unique index (see AppDbContext) — checked here too so a
+        // duplicate returns a clean 409 like every other Code-keyed create in this app (products,
+        // bundles, variant groups), instead of surfacing the raw unique-constraint DB exception.
+        if (await db.Terminals.AnyAsync(t => t.Code == request.Code, ct))
+        {
+            return Conflict(new { error = "A terminal with this code already exists." });
+        }
+
         var terminal = new Terminal
         {
             Code = request.Code, Name = request.Name, BranchId = request.BranchId,
@@ -132,6 +148,37 @@ public class TerminalsController(AppDbContext db, IAuditService audit, IPassword
     {
         var terminal = await db.Terminals.Include(t => t.Branch).Include(t => t.Devices).Include(t => t.Operator).FirstOrDefaultAsync(t => t.Id == id, ct);
         if (terminal is null) return NotFound();
+        if (string.IsNullOrWhiteSpace(request.Code))
+        {
+            return BadRequest(new { error = "Terminal code is required." });
+        }
+        if (!await db.Branches.AnyAsync(b => b.Id == request.BranchId, ct))
+        {
+            return BadRequest(new { error = "Unknown branch." });
+        }
+        if (await db.Terminals.AnyAsync(t => t.Code == request.Code && t.Id != id, ct))
+        {
+            return Conflict(new { error = "A terminal with this code already exists." });
+        }
+
+        // Same rule as AssignCashier: an open shift pins both this terminal's branch and its
+        // cashier. Changing the branch out from under it would attribute whatever the cashier
+        // rings up next to a branch the shift never actually opened under; changing the cashier is
+        // the identical hazard AssignCashier already blocks, just reachable through this form's
+        // "Default Cashier" field instead.
+        var openShift = await db.CashierShifts.Include(s => s.Cashier)
+            .FirstOrDefaultAsync(s => s.TerminalId == id && s.Status == CashierShiftStatus.Open, ct);
+        if (openShift is not null)
+        {
+            if (request.BranchId != terminal.BranchId)
+            {
+                return BadRequest(new { error = $"This terminal has an open shift under {openShift.Cashier?.Name ?? "another cashier"} — close it before changing its branch." });
+            }
+            if (request.AssignedCashierId != openShift.CashierUserId)
+            {
+                return BadRequest(new { error = $"This terminal has an open shift under {openShift.Cashier?.Name ?? "another cashier"} — close it before reassigning." });
+            }
+        }
 
         var old = Map(terminal);
         terminal.Code = request.Code;
@@ -170,9 +217,38 @@ public class TerminalsController(AppDbContext db, IAuditService audit, IPassword
     {
         var terminal = await db.Terminals.Include(t => t.Branch).Include(t => t.Devices).Include(t => t.Operator).FirstOrDefaultAsync(t => t.Id == id, ct);
         if (terminal is null) return NotFound();
-        if (request.CashierUserId is int cashierId && !await db.Users.AnyAsync(u => u.Id == cashierId, ct))
+
+        // Reassigning out from under a currently-open shift would leave the terminal card and the
+        // live Shift Ledger disagreeing about who's actually running the till — and since Open Shift
+        // auto-attributes to whoever the terminal is assigned to, changing it mid-shift would even
+        // block the real cashier's own OWN reassignment from ever opening (the terminal already has
+        // an open shift, just under the wrong name). A same-cashier "reassignment" is a no-op, so it
+        // isn't blocked.
+        var openShift = await db.CashierShifts.Include(s => s.Cashier)
+            .FirstOrDefaultAsync(s => s.TerminalId == id && s.Status == CashierShiftStatus.Open, ct);
+        if (openShift is not null && openShift.CashierUserId != request.CashierUserId)
         {
-            return BadRequest(new { error = "Unknown cashier." });
+            return BadRequest(new { error = $"This terminal has an open shift under {openShift.Cashier?.Name ?? "another cashier"} — close it before reassigning." });
+        }
+
+        if (request.CashierUserId is int cashierId)
+        {
+            var cashier = await db.Users.FirstOrDefaultAsync(u => u.Id == cashierId, ct);
+            if (cashier is null) return BadRequest(new { error = "Unknown cashier." });
+            // A branch-scoped cashier can only run a till in their own branch — a null BranchId is an
+            // unscoped/HQ user (e.g. System Admin covering a till), who can be assigned anywhere.
+            if (cashier.BranchId is int cashierBranchId && cashierBranchId != terminal.BranchId)
+            {
+                return BadRequest(new { error = "This cashier belongs to a different branch than this terminal." });
+            }
+
+            // One cashier, one terminal at a time — re-assigning them here MOVES them off whatever
+            // other terminal they were on rather than leaving both rows pointing at the same person.
+            var previousTerminal = await db.Terminals.FirstOrDefaultAsync(t => t.Id != id && t.OperatorUserId == cashierId, ct);
+            if (previousTerminal is not null)
+            {
+                previousTerminal.OperatorUserId = null;
+            }
         }
 
         terminal.OperatorUserId = request.CashierUserId;

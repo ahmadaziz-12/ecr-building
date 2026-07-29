@@ -42,6 +42,9 @@ import {
   PenLine,
   Play,
   MoreVertical,
+  MonitorSmartphone,
+  Copy,
+  Gift,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -106,6 +109,14 @@ import { apiPost } from "@/lib/api/client";
 import { CurrencyText, SARIcon } from "@/lib/buildpos/currency";
 import { useTerminals, useBranches } from "@/lib/api/admin";
 import {
+  usePosSessionBroadcaster,
+  customerDisplayPath,
+  type CustomerDisplayAmountLine,
+  type CustomerDisplayLine,
+  type CustomerDisplaySnapshot,
+  type CustomerDisplayStatus,
+} from "@/lib/buildpos/pos-session-hub";
+import {
   useCustomers,
   useCheckout,
   useHoldSale,
@@ -114,6 +125,7 @@ import {
   useCreateCustomer,
   useLoyaltyConfig,
   usePricingRules,
+  useCashierShifts,
   lookupCustomerByPhone,
   validateCoupon,
   type CustomerDto,
@@ -125,6 +137,8 @@ import { useZonesApi, useDriversApi, useVehiclesApi } from "@/lib/api/delivery";
 import { useAuth } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { BundleOverrideDialog } from "@/components/buildpos/pos/BundleOverrideDialog";
+import { CheckoutRedeemDialog } from "@/components/buildpos/pos/CheckoutRedeemDialog";
+import { OpenShiftDialog } from "@/components/buildpos/pos/OpenShiftDialog";
 import { PaymentDialog } from "@/components/buildpos/pos/PaymentDialog";
 import { PrinterSetupDialog } from "@/components/buildpos/pos/PrinterSetupDialog";
 import { ReceiptDialog } from "@/components/buildpos/pos/ReceiptDialog";
@@ -243,6 +257,9 @@ type BundleCartEntry = {
 };
 // BRD §10.2 default: auto-lock after 3 minutes of inactivity (Module 15).
 const IDLE_LOCK_MS = 3 * 60 * 1000;
+// Roles that can use POS Checkout without opening a formal shift first — everyone else (Cashier,
+// Senior Cashier) is gated by shiftLocked below until Open Shift succeeds.
+const SHIFT_EXEMPT_ROLES = new Set(["Supervisor", "Store Manager", "System Admin"]);
 // sessionStorage key the Cashier Workspace uses to hand a parked-sale id to this screen for resume.
 export const RESUME_HOLD_KEY = "buildpos.resume-hold-id";
 const money = (n: number) =>
@@ -276,12 +293,22 @@ export function PosCheckout() {
   // Module 15: idle auto-lock state.
   const [locked, setLocked] = useState(false);
   const [unlockPin, setUnlockPin] = useState("");
+  // Module 15 extension: the no-open-shift overlay's own Open Shift dialog.
+  const [openShiftDialogOpen, setOpenShiftDialogOpen] = useState(false);
   const [lastAdded, setLastAdded] = useState<string | null>(null);
   const [lastOrderNo, setLastOrderNo] = useState<string | null>(null);
   const [payOpen, setPayOpen] = useState(false);
-  const [payInitialTab, setPayInitialTab] = useState<"cash" | "points">("cash");
+  // BRD §4.3.3: redeemed as a cart-level tender BEFORE Charge (see CheckoutRedeemDialog) — SAR
+  // amount, clamped against the live total/balance/max-% wherever it's actually used, so a cart edit
+  // after redeeming never lets a stale figure exceed what's currently valid.
+  const [pointsRedeemed, setPointsRedeemed] = useState(0);
+  const [redeemDialogOpen, setRedeemDialogOpen] = useState(false);
   const [receiptOrder, setReceiptOrder] = useState<OrderDto | null>(null);
   const [lastCompletedOrder, setLastCompletedOrder] = useState<OrderDto | null>(null);
+  // Customer display: while set (a short window after a successful charge), the reactive cart-sync
+  // effect below backs off so the "Approved" thank-you push it made isn't immediately overwritten by
+  // the post-reset (now empty) cart.
+  const [thankYouUntil, setThankYouUntil] = useState<number | null>(null);
 
   const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
 
@@ -336,8 +363,14 @@ export function PosCheckout() {
   // cashier doesn't have to scroll up to the header search to attach/change the sale's customer.
   const [deliveryCustomerSearch, setDeliveryCustomerSearch] = useState("");
 
-  const { user } = useAuth();
+  const { user, hasAccess } = useAuth();
   const { data: terminals } = useTerminals();
+  // Module 15 (BRD §10.2) extension: which till this cashier is actually working right now — the
+  // self-declared source of truth from Open Shift, not just the admin-set "assigned" terminal below.
+  // No open shift for this user (on any terminal) means they haven't started their register yet, so
+  // checkout stays fully locked (see shiftLocked/OpenShiftDialog further down) regardless of role.
+  const { data: cashierShifts, isLoading: shiftsLoading } = useCashierShifts();
+  const myOpenShift = cashierShifts?.find((s) => s.status === "Open" && s.cashierUserId === user?.id);
   const { data: customers } = useCustomers();
   const { data: branches } = useBranches(user?.branchId === null);
   const { data: deliveryZones } = useZonesApi();
@@ -475,7 +508,34 @@ export function PosCheckout() {
   // Only ever bind a terminal that belongs to the effective branch — falling back to ANY terminal
   // would attribute sales (and drawer cash) to another branch's till, and the server hard-rejects a
   // branch/terminal mismatch at checkout. No terminal in this branch → checkout proceeds untilled.
-  const terminal = terminals?.find((t) => t.branchId === effectiveBranchId);
+  // A branch with more than one physical register resolves, in order: (1) the till this cashier
+  // actually opened a shift on today — the live, self-declared source of truth, since a cashier can
+  // cover a different till than their long-term admin assignment; (2) the admin-set "assigned"
+  // terminal (Network > Terminals > Assign Cashier) as a fallback before any shift is open; (3) any
+  // terminal in the branch. Without this, every cashier at a multi-till branch would resolve to the
+  // SAME terminal record (whichever the list returns first), colliding both order/drawer attribution
+  // and the customer-display broadcast group (see PosSessionHub) between registers that are supposed
+  // to be independent.
+  // Every clause is ALSO re-checked against effectiveBranchId (not just the first match) — an HQ
+  // role (System Admin/Store Manager/Supervisor, whose effectiveBranchId comes from the branch
+  // switcher, not a fixed home branch) can have an open shift on one branch's till and then switch
+  // the dropdown to a different branch; without this the shift's terminal stayed "stuck" pinned to
+  // the old branch and the server rejected checkout with "Terminal does not belong to the specified
+  // branch" the instant the branch was switched.
+  const terminal =
+    terminals?.find((t) => t.id === myOpenShift?.terminalId && t.branchId === effectiveBranchId) ??
+    terminals?.find((t) => t.assignedCashierId === user?.id && t.branchId === effectiveBranchId) ??
+    terminals?.find((t) => t.branchId === effectiveBranchId);
+  const { pushSnapshot: pushDisplaySnapshot, connected: displayConnected } = usePosSessionBroadcaster(
+    terminal?.id ?? null,
+  );
+
+  // Module 15 (BRD §10.2) extension: a Cashier/Senior Cashier must open a shift on a specific
+  // register before ringing anything up — the till's cash float and sales attribution are theirs to
+  // account for. Supervisor/Store Manager/System Admin use POS Checkout freely (covering a till,
+  // testing, ad hoc sales) without that self-service step. Held off until the shifts query actually
+  // resolves so a fresh page load doesn't flash the lock before it's known whether one exists.
+  const shiftLocked = !shiftsLoading && !myOpenShift && !SHIFT_EXEMPT_ROLES.has(user?.role ?? "");
 
   // BRD §7 (CR-038): resolve the CURRENT customer's assigned price list against each product's own
   // Contractor/Wholesale/Project override — null on the product means "not configured," fall back
@@ -598,7 +658,7 @@ export function PosCheckout() {
     // disable scan capture — otherwise keystrokes/scans leak into the hidden query buffer (items
     // could even be added behind the LOCKED screen, and a PIN typed while the field is unfocused
     // would be swallowed as a search).
-    if (payOpen || receiptOrder || locked || approvalDialogOpen || creditApprovalDialogOpen) return;
+    if (payOpen || receiptOrder || locked || shiftLocked || approvalDialogOpen || creditApprovalDialogOpen) return;
 
     function isTypingElsewhere() {
       const el = document.activeElement as HTMLElement | null;
@@ -634,6 +694,7 @@ export function PosCheckout() {
     payOpen,
     receiptOrder,
     locked,
+    shiftLocked,
     approvalDialogOpen,
     creditApprovalDialogOpen,
     query,
@@ -1048,6 +1109,7 @@ export function PosCheckout() {
     setAppliedCoupon(null);
     setDiscountType("");
     setDiscountValue("");
+    setPointsRedeemed(0);
     setCustomFees([]);
     setDeliveryContactName("");
     setDeliveryContactMobile("");
@@ -1477,6 +1539,100 @@ export function PosCheckout() {
   );
   const total = taxableTotal + vat + feesTotal;
 
+  // BRD §4.3.3: redeemed points as a cart-level tender — mirrors CheckoutRedeemDialog's own
+  // min/max math exactly. Re-clamped against the LIVE total/balance every render (not just at the
+  // moment the cashier redeemed) so a cart edit afterward — a removed line, a bigger discount —
+  // never lets a stale redemption exceed what's currently valid; the difference is silently absorbed
+  // back into Amount Due rather than surfacing a separate error banner.
+  const maxRedeemSar =
+    customer && loyaltyConfig
+      ? Math.min(customer.loyaltyPoints / loyaltyConfig.pointsPerSarRedeemed, total * (loyaltyConfig.maxRedeemPctOfTotal / 100))
+      : 0;
+  const effectivePointsRedeemed = Math.max(0, Math.min(pointsRedeemed, maxRedeemSar, total));
+  const amountDue = Math.max(0, total - effectivePointsRedeemed);
+
+  // Customer display: the exact same breakdown rows the summary panel below renders (subtotal,
+  // contractor/trade-value/coupon discounts, fees, VAT, total) — kept as one function so the live
+  // push and the post-charge "Approved" snapshot never drift apart from each other.
+  const buildDisplaySnapshot = (
+    status: CustomerDisplayStatus,
+    orderNo: string | null = null,
+  ): CustomerDisplaySnapshot => {
+    const discounts: CustomerDisplayAmountLine[] = [];
+    if (contractorDiscount > 0) {
+      discounts.push({
+        label:
+          contractorDiscountPct > 0 && !hasQuantityRuleDiscount
+            ? `Contractor discount ${contractorDiscountPct}%`
+            : "Pricing rule discount",
+        amount: contractorDiscount,
+      });
+    }
+    if (tradeValueAmount > 0) {
+      discounts.push({ label: `Trade Value ${tradeValuePct}%`, amount: tradeValueAmount });
+    }
+    if (couponAmount + manualAmount > 0) {
+      discounts.push({ label: "Coupon / manual discount", amount: couponAmount + manualAmount });
+    }
+    if (effectivePointsRedeemed > 0) {
+      discounts.push({ label: "Points redeemed", amount: effectivePointsRedeemed });
+    }
+    // Prefixed "Fee — " so a cashier's free-text custom-fee label (e.g. "a", "Handling") reads as a
+    // fee to the customer instead of an unexplained word next to a dollar amount.
+    const fees = allFees
+      .map((f) => ({ label: `Fee — ${f.label}`, amount: freeDelivery && /delivery/i.test(f.label) ? 0 : f.amount }))
+      .filter((f) => f.amount > 0);
+    const lines: CustomerDisplayLine[] = [
+      ...cart.map((l) => ({ name: l.name, qty: l.qty, uom: l.uom, unitPrice: lineUnitPrice(l), lineTotal: lineChargeTotal(l) })),
+      ...bundleCart.map((b) => ({ name: b.name, qty: b.qty, uom: "bundle", unitPrice: b.bundlePrice, lineTotal: b.bundlePrice * b.qty })),
+    ];
+    return {
+      status,
+      lines,
+      subtotal,
+      discounts,
+      fees,
+      vat,
+      // The amount the customer is actually being charged — Total minus whatever points already
+      // covered — not the pre-redemption order total.
+      total: amountDue,
+      customerName: customer?.nameEn ?? null,
+      orderNo,
+      customerLoyaltyTier: customer?.loyaltyEnrolled ? customer.loyaltyTier : null,
+      customerLoyaltyPoints: customer?.loyaltyEnrolled ? customer.loyaltyPoints : null,
+      customerLoyaltyPointsSarValue: customer?.loyaltyEnrolled && loyaltyConfig ? loyaltyBalanceSar : null,
+    };
+  };
+
+  // Pushes the live cart to a paired customer display as it changes. Backs off while thankYouUntil
+  // is in the future so it doesn't stomp the "Approved" snapshot handleCharge just pushed with the
+  // now-empty post-reset cart. displayConnected is in the dependency list on purpose, not just cart
+  // state: the SignalR join is async, so on a fresh page load/refresh this effect's first run fires
+  // before the connection is actually up and the push is silently dropped — once `connected` flips
+  // true a moment later, this re-runs and sends the display the current (real) state instead of
+  // leaving it stuck on whatever it last showed before the refresh.
+  useEffect(() => {
+    if (thankYouUntil && Date.now() < thankYouUntil) return;
+    const status: CustomerDisplayStatus = checkout.isPending
+      ? "Processing"
+      : cart.length + bundleCart.length === 0
+        ? "Idle"
+        : "Building";
+    pushDisplaySnapshot(buildDisplaySnapshot(status));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    cart,
+    bundleCart,
+    subtotal,
+    vat,
+    total,
+    customer,
+    checkout.isPending,
+    thankYouUntil,
+    pushDisplaySnapshot,
+    displayConnected,
+  ]);
+
   // BRD §4.2 credit limit — informational until the cashier actually picks Account Credit in
   // PaymentDialog (the backend only enforces this when that payment method is used), but shown eagerly
   // here so a B2B customer's exposure is visible while building the cart, not just at payment time.
@@ -1486,6 +1642,9 @@ export function PosCheckout() {
 
   useEffect(() => {
     setCreditApprovalId(null);
+    // A redemption belongs to the customer it was redeemed against — switching customers mid-sale
+    // must not silently carry a stale points-based discount over to whoever's attached now.
+    setPointsRedeemed(0);
   }, [customer?.id]);
 
   // Convenience prefill only — never overwrites a value the cashier already typed.
@@ -1602,7 +1761,14 @@ export function PosCheckout() {
               manualUnitPrice: l.manualUnitPrice ?? null,
             },
       ),
-      payments,
+      // Points redeemed in the cart (CheckoutRedeemDialog) are a tender the cashier already locked
+      // in — folded in here as their own "Loyalty" payment alongside whatever PaymentDialog just
+      // collected for the (already-reduced) Amount Due, so the server sees one payments array that
+      // sums to the FULL order total, same shape it always expected.
+      payments:
+        effectivePointsRedeemed > 0
+          ? [{ method: "Loyalty", amount: effectivePointsRedeemed }, ...payments]
+          : payments,
       couponCode: appliedCoupon?.code ?? null,
       manualDiscount:
         discountType && manualValue > 0 ? { type: discountType, value: manualValue } : null,
@@ -1631,6 +1797,12 @@ export function PosCheckout() {
       setLastOrderNo(order.orderNo);
       setReceiptOrder(order);
       setLastCompletedOrder(order);
+      // Freezes the just-charged cart on the customer display with a thank-you state, before
+      // resetSale() below clears it back to an empty ticket for the next customer.
+      pushDisplaySnapshot(buildDisplaySnapshot("Approved", order.orderNo));
+      const thankYouDeadline = Date.now() + 5_000;
+      setThankYouUntil(thankYouDeadline);
+      setTimeout(() => setThankYouUntil(null), 5_000);
       resetSale();
     } catch (err) {
       // Module 10 (BRD §13): a NETWORK failure queues the sale locally and clears the register —
@@ -1802,9 +1974,38 @@ export function PosCheckout() {
                 <p className="font-display text-lg font-semibold">Scanner Ready</p>
               </div>
             </div>
-            <div className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-medium ring-1 ring-white/15">
-              <span className={`h-1.5 w-1.5 rounded-full bg-success ${idle ? "pos-blink" : ""}`} />
-              {idle ? "Awaiting scan" : "Active"}
+            <div className="flex items-center gap-2">
+              {hasAccess("/operate/customer-display") && (
+                <div className="flex items-center overflow-hidden rounded-full bg-white/10 ring-1 ring-white/15">
+                  <button
+                    onClick={() =>
+                      window.open(
+                        terminal ? customerDisplayPath(terminal.id) : "/operate/customer-display",
+                        "customer-display",
+                      )
+                    }
+                    className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium transition hover:bg-white/20"
+                    title="Open the customer-facing display in a new window"
+                  >
+                    <MonitorSmartphone className="h-3 w-3" /> Customer Display
+                  </button>
+                  <button
+                    onClick={() => {
+                      const url = `${window.location.origin}${terminal ? customerDisplayPath(terminal.id) : "/operate/customer-display"}`;
+                      navigator.clipboard.writeText(url);
+                      toast.success("Link copied", { description: url });
+                    }}
+                    className="flex items-center border-l border-white/15 px-2.5 py-1 transition hover:bg-white/20"
+                    title="Copy the customer display's link — paste it into the tablet's browser to pair it"
+                  >
+                    <Copy className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+              <div className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-medium ring-1 ring-white/15">
+                <span className={`h-1.5 w-1.5 rounded-full bg-success ${idle ? "pos-blink" : ""}`} />
+                {idle ? "Awaiting scan" : "Active"}
+              </div>
             </div>
           </div>
 
@@ -2409,8 +2610,9 @@ export function PosCheckout() {
                 </div>
               )}
               {/* BRD §4.3.3: points balance + SAR equivalent must be visible at checkout, with a
-                  direct shortcut into the Charge dialog's Points tab — not just discoverable once
-                  the cashier is already inside Charge. */}
+                  direct shortcut into the cart-level redeem dialog — not just discoverable once the
+                  cashier is already inside Charge. Redeeming here (not inside Charge) is what makes
+                  it show up as its own row in the summary panel below, same as any other discount. */}
               {customer.loyaltyEnrolled && (
                 <div className="flex items-center justify-between rounded-lg bg-canvas px-2.5 py-1 text-[11px]">
                   <span className="text-muted-foreground">
@@ -2428,10 +2630,7 @@ export function PosCheckout() {
                   <button
                     type="button"
                     disabled={!canRedeemPoints || cartIsEmpty}
-                    onClick={() => {
-                      setPayInitialTab("points");
-                      setPayOpen(true);
-                    }}
+                    onClick={() => setRedeemDialogOpen(true)}
                     title={
                       cartIsEmpty
                         ? "Add an item to the cart first"
@@ -2441,7 +2640,7 @@ export function PosCheckout() {
                     }
                     className="font-medium text-brand hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline"
                   >
-                    Redeem Points
+                    {effectivePointsRedeemed > 0 ? "Edit redemption" : "Redeem Points"}
                   </button>
                 </div>
               )}
@@ -3404,6 +3603,26 @@ export function PosCheckout() {
               <CurrencyText value={money(Math.max(0, total))} />
             </span>
           </div>
+          {/* BRD §4.3.3: a redeemed-points tender — not a discount, so it sits below Total rather
+              than inside the subtotal/VAT stack above; Amount Due is what Charge actually asks for. */}
+          {effectivePointsRedeemed > 0 && (
+            <>
+              <div className="flex items-center justify-between text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <Gift className="h-3.5 w-3.5" /> Points redeemed
+                </span>
+                <span>
+                  -<CurrencyText value={money(effectivePointsRedeemed)} />
+                </span>
+              </div>
+              <div className="flex items-center justify-between border-t border-black/10 pt-1.5">
+                <span className="font-display text-sm font-semibold text-foreground">Amount Due</span>
+                <span key={amountDue} className="pos-pop font-display text-xl font-bold text-brand">
+                  <CurrencyText value={money(amountDue)} />
+                </span>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-2 border-t border-black/5 p-3">
@@ -3415,15 +3634,12 @@ export function PosCheckout() {
             <Printer className="h-4 w-4" /> Reprint
           </button>
           <button
-            onClick={() => {
-              setPayInitialTab("cash");
-              setPayOpen(true);
-            }}
+            onClick={() => setPayOpen(true)}
             disabled={cartIsEmpty || !deliveryDetailsComplete}
             className="flex items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition hover:bg-brand/90 hover:shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-brand"
           >
             <ReceiptText className="h-4 w-4" /> Charge{" "}
-            <CurrencyText value={money(Math.max(0, total))} />
+            <CurrencyText value={money(amountDue)} />
           </button>
         </div>
       </aside>
@@ -3431,11 +3647,22 @@ export function PosCheckout() {
       <PaymentDialog
         open={payOpen}
         onOpenChange={setPayOpen}
-        total={Math.max(0, total)}
+        total={amountDue}
         onCharge={handleCharge}
         customer={customer}
-        initialTab={payInitialTab}
       />
+      {customer && loyaltyConfig && (
+        <CheckoutRedeemDialog
+          open={redeemDialogOpen}
+          onOpenChange={setRedeemDialogOpen}
+          customer={customer}
+          loyaltyConfig={loyaltyConfig}
+          total={total}
+          currentRedeemed={effectivePointsRedeemed}
+          onConfirm={setPointsRedeemed}
+          onClear={() => setPointsRedeemed(0)}
+        />
+      )}
       <ReceiptDialog
         order={receiptOrder}
         terminalId={terminal?.id ?? null}
@@ -3490,6 +3717,30 @@ export function PosCheckout() {
           .join(", ")}`}
         onCreated={(approval) => setPriceOverrideApprovalId(approval.id)}
       />
+
+      <OpenShiftDialog open={openShiftDialogOpen} onOpenChange={setOpenShiftDialogOpen} />
+
+      {/* Module 15 (BRD §10.2) extension: no open shift for this cashier yet — the screen itself
+          stays visible (prices/stock are still readable) but every action is blocked until Open
+          Shift succeeds, at which point useOpenShift's cache invalidation flips shiftLocked off
+          automatically with no extra wiring here. */}
+      {!locked && shiftLocked && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-sm">
+          <div className="w-80 rounded-2xl bg-white p-6 text-center shadow-2xl">
+            <p className="text-lg font-semibold text-foreground">Shift not started</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Open your shift on a register before ringing up sales — pick a terminal and count your
+              opening float to get started.
+            </p>
+            <button
+              onClick={() => setOpenShiftDialogOpen(true)}
+              className="mt-4 w-full rounded-lg bg-brand px-3 py-2.5 text-sm font-semibold text-brand-foreground hover:bg-brand/90"
+            >
+              Open Shift
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Module 15 (BRD §10.2): idle auto-lock overlay — the register stays exactly as it was; the
           cashier re-enters their PIN to resume. */}

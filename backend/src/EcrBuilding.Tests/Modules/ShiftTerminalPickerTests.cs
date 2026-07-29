@@ -77,4 +77,47 @@ public class ShiftTerminalPickerTests : IAsyncLifetime
         Assert.Equal("Mona Al-Harbi", rows.Single(t => t.Id == busy.Id).OpenShiftBlockedBy);
         Assert.Null(rows.Single(t => t.Id == free.Id).OpenShiftBlockedBy);
     }
+
+    [Fact]
+    public async Task A_plain_cashier_does_not_see_a_till_assigned_to_a_different_cashier()
+    {
+        using var db = _factory.CreateDbContext();
+        var branch = TestDataSeeder.AddBranch(db);
+        var role = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos]);
+        var me = TestDataSeeder.AddUser(db, role, "me@test.local", "Yousef Al-Malki", branch.Id);
+        var someoneElse = TestDataSeeder.AddUser(db, role, "other@test.local", "Mona Al-Harbi", branch.Id);
+        var mine = new Terminal { Code = "TRM-01", Name = "Till 1", BranchId = branch.Id, OperatorUserId = me.Id };
+        var theirs = new Terminal { Code = "TRM-02", Name = "Till 2", BranchId = branch.Id, OperatorUserId = someoneElse.Id };
+        var unassigned = new Terminal { Code = "TRM-03", Name = "Till 3", BranchId = branch.Id };
+        db.Terminals.AddRange(mine, theirs, unassigned);
+        db.SaveChanges();
+
+        var client = _factory.CreateAuthenticatedClient(me);
+        var rows = await client.GetFromJsonAsync<List<TerminalRow>>("/api/pos/cashier-shifts/terminals");
+
+        var ids = rows!.Select(r => r.Id).ToHashSet();
+        Assert.Contains(mine.Id, ids);
+        Assert.Contains(unassigned.Id, ids);
+        Assert.DoesNotContain(theirs.Id, ids);
+    }
+
+    [Fact]
+    public async Task A_supervisor_sees_every_till_including_ones_assigned_to_other_cashiers()
+    {
+        using var db = _factory.CreateDbContext();
+        var branch = TestDataSeeder.AddBranch(db);
+        var cashierRole = TestDataSeeder.AddRole(db, "Cashier", fullAccessModules: [ModuleArea.Pos]);
+        var supervisorRole = TestDataSeeder.AddRole(db, "Supervisor", fullAccessModules: [ModuleArea.Pos]);
+        supervisorRole.CanVoidTransactions = true;
+        var cashier = TestDataSeeder.AddUser(db, cashierRole, "cashier@test.local", branchId: branch.Id);
+        var supervisor = TestDataSeeder.AddUser(db, supervisorRole, "supervisor@test.local", branchId: branch.Id);
+        var theirs = new Terminal { Code = "TRM-01", Name = "Till 1", BranchId = branch.Id, OperatorUserId = cashier.Id };
+        db.Terminals.Add(theirs);
+        db.SaveChanges();
+
+        var client = _factory.CreateAuthenticatedClient(supervisor);
+        var rows = await client.GetFromJsonAsync<List<TerminalRow>>("/api/pos/cashier-shifts/terminals");
+
+        Assert.Contains(rows!, r => r.Id == theirs.Id);
+    }
 }

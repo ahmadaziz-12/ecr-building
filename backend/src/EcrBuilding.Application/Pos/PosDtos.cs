@@ -109,13 +109,21 @@ public record CreateOrderRequest(
     // CR-039) — the id of an already-Approved ApprovalRequest (Type=PriceOverride).
     int? PriceOverrideApprovalRequestId = null);
 
-public record CashierShiftDto(int Id, int TerminalId, string TerminalName, string CashierName, DateTime OpenedAt, DateTime? ClosedAt, decimal OpeningFloat, decimal CashSales, decimal CashIn, decimal CashOut, decimal ExpectedCash, decimal? CountedCash, decimal? Variance, string Status);
+public record CashierShiftDto(int Id, int TerminalId, string TerminalName, string CashierName, DateTime OpenedAt, DateTime? ClosedAt, decimal OpeningFloat, decimal CashSales, decimal CashIn, decimal CashOut, decimal ExpectedCash, decimal? CountedCash, decimal? Variance, string Status,
+    // PosCheckout's own "do I have an open shift" check needs the id, not just the display name —
+    // matching on CashierName would misidentify (or fail to identify) a shift on a name collision.
+    int CashierUserId = 0);
 // The till picker for "Open Shift". Deliberately served by the cashier-shift module rather than
 // reusing /api/network/terminals: that endpoint needs Network→Terminals View, which a cashier's role
 // may not carry, and a 403 there emptied the dropdown — the terminal looked unregistered when it was
 // only unreadable. OpenShiftBlockedBy names the cashier already on the till so a busy one reads as
 // busy instead of silently missing.
-public record ShiftTerminalDto(int Id, string Code, string Name, int BranchId, string BranchName, string Status, string? OpenShiftBlockedBy);
+public record ShiftTerminalDto(int Id, string Code, string Name, int BranchId, string BranchName, string Status, string? OpenShiftBlockedBy,
+    // A terminal with an assigned cashier (Network > Terminals > Assign Cashier) always opens its
+    // shift under THAT cashier, even when a supervisor/manager is the one clicking Open Shift — so
+    // the dialog can show who it's really opening for instead of silently attributing it to whoever
+    // happened to press the button.
+    int? AssignedCashierId = null, string? AssignedCashierName = null);
 public record OpenShiftRequest(int TerminalId, decimal OpeningFloat);
 public record CloseShiftRequest(decimal CountedCash);
 public record CashMovementRequest(decimal Amount, string Reason);

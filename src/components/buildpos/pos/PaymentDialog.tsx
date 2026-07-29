@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
-import { Banknote, Building2, Check, CreditCard, Gift, Loader2, Split } from "lucide-react";
+import { Banknote, Building2, Check, CreditCard, Loader2, Split } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CustomerDto, PaymentInput } from "@/lib/api/pos";
-import { useLoyaltyConfig } from "@/lib/api/pos";
-import { CurrencyText, SARIcon } from "@/lib/buildpos/currency";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 const QUICK_CASH = [50, 100, 200, 500, 1000];
 const CARD_METHODS = [
@@ -20,13 +19,16 @@ const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 
 
 const B2B_TYPES = new Set(["Contractor", "B2B"]);
 
+// BRD §4.3.3: points redemption happens BEFORE Charge now (see CheckoutRedeemDialog, opened from the
+// cart's own "Redeem Points" control) — it shows up as its own row in the cart summary and reduces
+// `total` here to Amount Due. This dialog only ever collects a real payment method for whatever's
+// left, the same way it always has for Cash/Card/Split/Account — there is no Points tab anymore.
 export function PaymentDialog({
   open,
   onOpenChange,
   total,
   onCharge,
   customer,
-  initialTab = "cash",
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -35,11 +37,8 @@ export function PaymentDialog({
   // Account Credit (BRD §4.2) is only offered when a B2B/Contractor customer is attached — the
   // backend enforces the credit-limit check regardless, this just hides the tab otherwise.
   customer?: CustomerDto | null;
-  // The cart's own "Redeem Points" shortcut (BRD §4.3.3: the redeem control must be visible at
-  // checkout, not buried behind a generic Charge button) opens straight to the Points tab.
-  initialTab?: "cash" | "card" | "split" | "account" | "points";
 }) {
-  const [tab, setTab] = useState<"cash" | "card" | "split" | "account" | "points">(initialTab);
+  const [tab, setTab] = useState<"cash" | "card" | "split" | "account">("cash");
   const accountEligible = Boolean(customer && B2B_TYPES.has(customer.type));
   const availableCredit = customer ? customer.creditLimit - customer.outstanding : 0;
   // The raw prop is an unrounded float sum (e.g. 11.5345). Every user-facing amount — including the
@@ -60,38 +59,17 @@ export function PaymentDialog({
   const [processing, setProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // BRD §4.3.3: points redemption as a distinct, partial-payment line — the leftover (if any) is
-  // covered by a second real payment method, same pattern as the Split tab.
-  const { data: loyaltyConfig } = useLoyaltyConfig(open);
-  const pointsPerSar = loyaltyConfig?.pointsPerSarRedeemed ?? 100;
-  const minRedeemPoints = loyaltyConfig?.minRedeemPoints ?? 500;
-  const maxRedeemPct = loyaltyConfig?.maxRedeemPctOfTotal ?? 20;
-  const pointsEligible = Boolean(customer?.loyaltyEnrolled);
-  const balanceSar = customer ? customer.loyaltyPoints / pointsPerSar : 0;
-  const minRedeemSar = minRedeemPoints / pointsPerSar;
-  const maxRedeemSar = Math.min(balanceSar, totalDue * (maxRedeemPct / 100));
-  const [redeemAmount, setRedeemAmount] = useState("");
-  const [redeemRemainderMethod, setRedeemRemainderMethod] = useState<"Cash" | "Mada">("Cash");
-
   useEffect(() => {
     if (open) {
-      setTab(initialTab);
+      setTab("cash");
       setCashGiven("");
       setCardMethod("");
       setCardStatus("idle");
       setSplitCash("");
       setSplitCard("");
-      setRedeemAmount("");
-      setRedeemRemainderMethod("Cash");
       setErrorMsg(null);
     }
-  }, [open, totalDue, initialTab]);
-
-  const redeemAmt = Number(redeemAmount) || 0;
-  const redeemRemainder = Math.max(0, Math.round((totalDue - redeemAmt) * 100) / 100);
-  const redeemBelowMin = redeemAmt > 0 && redeemAmt < minRedeemSar;
-  const redeemAboveMax = redeemAmt > maxRedeemSar + 0.001;
-  const redeemValid = redeemAmt > 0 && !redeemBelowMin && !redeemAboveMax;
+  }, [open, totalDue]);
 
   const exactCash = totalDue.toFixed(2);
   const cashEntered = cashGiven.trim() !== "";
@@ -129,19 +107,12 @@ export function PaymentDialog({
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-          <TabsList
-            className={`grid w-full ${
-              accountEligible && pointsEligible ? "grid-cols-5" : accountEligible || pointsEligible ? "grid-cols-4" : "grid-cols-3"
-            }`}
-          >
+          <TabsList className={`grid w-full ${accountEligible ? "grid-cols-4" : "grid-cols-3"}`}>
             <TabsTrigger value="cash" className="gap-1.5"><Banknote className="h-3.5 w-3.5" /> Cash</TabsTrigger>
             <TabsTrigger value="card" className="gap-1.5"><CreditCard className="h-3.5 w-3.5" /> Card</TabsTrigger>
             <TabsTrigger value="split" className="gap-1.5"><Split className="h-3.5 w-3.5" /> Split</TabsTrigger>
             {accountEligible && (
               <TabsTrigger value="account" className="gap-1.5"><Building2 className="h-3.5 w-3.5" /> Account</TabsTrigger>
-            )}
-            {pointsEligible && (
-              <TabsTrigger value="points" className="gap-1.5"><Gift className="h-3.5 w-3.5" /> Points</TabsTrigger>
             )}
           </TabsList>
 
@@ -287,82 +258,6 @@ export function PaymentDialog({
               >
                 {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Charge to Account
               </Button>
-            </TabsContent>
-          )}
-
-          {pointsEligible && customer && (
-            <TabsContent value="points" className="mt-4 space-y-3">
-              <div className="rounded-lg border border-black/10 bg-canvas p-3 text-xs">
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Points balance</span><span>{customer.loyaltyPoints.toLocaleString("en-US")} pts (<CurrencyText value={money(balanceSar)} />)</span>
-                </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Redeemable this sale</span><span>Up to <CurrencyText value={money(maxRedeemSar)} /> ({maxRedeemPct}% of total)</span>
-                </div>
-              </div>
-
-              {customer.loyaltyPoints < minRedeemPoints ? (
-                <p className="text-xs text-muted-foreground">
-                  {customer.nameEn} needs at least {minRedeemPoints.toLocaleString("en-US")} points (<CurrencyText value={money(minRedeemSar)} />) to redeem.
-                </p>
-              ) : (
-                <>
-                  <div>
-                    <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Redeem (<SARIcon />) — min <CurrencyText value={money(minRedeemSar)} />
-                    </label>
-                    <div className="flex gap-1.5">
-                      <Input type="number" value={redeemAmount} onChange={(e) => setRedeemAmount(e.target.value)} className="h-10" />
-                      <button
-                        type="button"
-                        onClick={() => setRedeemAmount(maxRedeemSar.toFixed(2))}
-                        className="shrink-0 rounded-lg border border-brand/30 bg-brand/5 px-3 text-xs font-medium text-brand hover:bg-brand/10"
-                      >
-                        Max
-                      </button>
-                    </div>
-                    {redeemBelowMin && <p className="mt-1 text-[11px] text-critical">Minimum redemption is <CurrencyText value={money(minRedeemSar)} />.</p>}
-                    {redeemAboveMax && <p className="mt-1 text-[11px] text-critical">Maximum redemption is <CurrencyText value={money(maxRedeemSar)} />.</p>}
-                  </div>
-
-                  {redeemValid && redeemRemainder > 0 && (
-                    <div>
-                      <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Remaining <CurrencyText value={money(redeemRemainder)} /> via
-                      </label>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {(["Cash", "Mada"] as const).map((m) => (
-                          <button
-                            key={m}
-                            type="button"
-                            onClick={() => setRedeemRemainderMethod(m)}
-                            className={`rounded-lg border px-3 py-2 text-xs font-medium transition ${
-                              redeemRemainderMethod === m ? "border-brand bg-brand text-brand-foreground" : "border-black/10 bg-white hover:border-brand/40"
-                            }`}
-                          >
-                            {m === "Cash" ? "Cash" : "Card (Mada)"}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {errorMsg && <p className="text-xs text-critical">{errorMsg}</p>}
-                  <Button
-                    className="h-11 w-full gap-2 bg-brand text-brand-foreground hover:bg-brand/90"
-                    disabled={!redeemValid || processing}
-                    onClick={() =>
-                      charge(
-                        redeemRemainder > 0
-                          ? [{ method: "Loyalty", amount: redeemAmt }, { method: redeemRemainderMethod, amount: redeemRemainder }]
-                          : [{ method: "Loyalty", amount: redeemAmt }],
-                      )
-                    }
-                  >
-                    {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Confirm Points Payment
-                  </Button>
-                </>
-              )}
             </TabsContent>
           )}
         </Tabs>
