@@ -82,6 +82,10 @@ public static class DbSeeder
         // touching anything an admin may have edited.
         await EnsureBrdCategoriesAsync(db);
 
+        // Same drift class as the Ensure* calls above — a database seeded before Product Variants
+        // existed has no demo variant group at all.
+        await EnsureSteelRebarVariantGroupAsync(db);
+
         if (!await db.Customers.AnyAsync())
         {
             await SeedPosDataAsync(db);
@@ -244,14 +248,14 @@ public static class DbSeeder
     {
         var brdCategories = new[]
         {
-            new Category { Code = "CAT-AGG", NameEn = "Aggregates & Sand", NameAr = "الركام والرمل", DefaultUom = "Ton", VatRate = 15 },
-            new Category { Code = "CAT-TMB", NameEn = "Timber & Boards", NameAr = "الأخشاب والألواح", DefaultUom = "Sheet", VatRate = 15 },
-            new Category { Code = "CAT-INS", NameEn = "Insulation", NameAr = "العزل", DefaultUom = "Roll", VatRate = 15 },
+            new Category { Code = "CAT-AGG", NameEn = "Aggregates & Sand", NameAr = "الركام والرمل" },
+            new Category { Code = "CAT-TMB", NameEn = "Timber & Boards", NameAr = "الأخشاب والألواح" },
+            new Category { Code = "CAT-INS", NameEn = "Insulation", NameAr = "العزل" },
             // Cut-to-size by nature — non-returnable per BRD §3.2.3.
-            new Category { Code = "CAT-GLS", NameEn = "Glass & Windows", NameAr = "الزجاج والنوافذ", DefaultUom = "m²", VatRate = 15, Returnable = false, ReturnRule = "Non-Returnable" },
-            new Category { Code = "CAT-HRD", NameEn = "Hardware & Fasteners", NameAr = "العدد والمثبتات", DefaultUom = "Piece", VatRate = 15 },
-            new Category { Code = "CAT-WPF", NameEn = "Waterproofing", NameAr = "العزل المائي", DefaultUom = "Litre", VatRate = 15 },
-            new Category { Code = "CAT-LND", NameEn = "Landscaping", NameAr = "تنسيق المواقع", DefaultUom = "m²", VatRate = 15 },
+            new Category { Code = "CAT-GLS", NameEn = "Glass & Windows", NameAr = "الزجاج والنوافذ", Returnable = false },
+            new Category { Code = "CAT-HRD", NameEn = "Hardware & Fasteners", NameAr = "العدد والمثبتات" },
+            new Category { Code = "CAT-WPF", NameEn = "Waterproofing", NameAr = "العزل المائي" },
+            new Category { Code = "CAT-LND", NameEn = "Landscaping", NameAr = "تنسيق المواقع" },
         };
 
         var existingCodes = await db.Categories.Select(c => c.Code).ToListAsync();
@@ -298,6 +302,56 @@ public static class DbSeeder
         if (missing.Count > 0)
         {
             db.ProductUomConversions.AddRange(missing);
+            await db.SaveChangesAsync();
+        }
+    }
+
+    // Same drift class as EnsureUomConversionsAsync: demo Product Variants group linking the two
+    // existing rebar SKUs (the one seeded pair that varies on a single dimension — Diameter — with
+    // shared category/brand/UOM), so a database seeded before this feature existed still gets one
+    // example group + attribute values to show in POS/catalog. Keyed by group Code and by
+    // (ProductId, Name) for the attribute rows, so re-running never duplicates or overwrites an
+    // admin's own edits (e.g. moving a SKU to a different group, or renaming the attribute).
+    internal static async Task EnsureSteelRebarVariantGroupAsync(AppDbContext db)
+    {
+        var rebarSkus = new List<string> { "STEEL-RBR-12MM", "STEEL-RBR-16MM" };
+        var products = await db.Products.Where(p => rebarSkus.Contains(p.Sku)).ToListAsync();
+        if (products.Count == 0) return;
+
+        var group = await db.ProductVariantGroups.FirstOrDefaultAsync(g => g.Code == "STEEL-RBR");
+        if (group is null)
+        {
+            group = new ProductVariantGroup
+            {
+                Code = "STEEL-RBR", NameEn = "Steel Rebar", NameAr = "حديد التسليح",
+                CategoryId = products[0].CategoryId,
+            };
+            db.ProductVariantGroups.Add(group);
+            await db.SaveChangesAsync();
+        }
+
+        var unlinked = products.Where(p => p.VariantGroupId is null).ToList();
+        foreach (var product in unlinked)
+        {
+            product.VariantGroupId = group.Id;
+        }
+        if (unlinked.Count > 0)
+        {
+            await db.SaveChangesAsync();
+        }
+
+        var diameterBySku = new Dictionary<string, string> { ["STEEL-RBR-12MM"] = "12MM", ["STEEL-RBR-16MM"] = "16MM" };
+        var productIds = products.Select(p => p.Id).ToList();
+        var existingAttrProductIds = await db.ProductAttributes
+            .Where(a => productIds.Contains(a.ProductId) && a.Name == "Diameter")
+            .Select(a => a.ProductId).ToListAsync();
+        var missingAttrs = products
+            .Where(p => !existingAttrProductIds.Contains(p.Id) && diameterBySku.ContainsKey(p.Sku))
+            .Select(p => new ProductAttribute { ProductId = p.Id, Name = "Diameter", Value = diameterBySku[p.Sku] })
+            .ToList();
+        if (missingAttrs.Count > 0)
+        {
+            db.ProductAttributes.AddRange(missingAttrs);
             await db.SaveChangesAsync();
         }
     }
@@ -828,14 +882,14 @@ public static class DbSeeder
 
         var categories = new[]
         {
-            new Category { Code = "CAT-CEM", NameEn = "Cement", NameAr = "الأسمنت", DefaultUom = "Bag", VatRate = 15, Returnable = false, ReturnRule = "Non-Returnable" },
-            new Category { Code = "CAT-STL", NameEn = "Steel", NameAr = "الحديد", DefaultUom = "Bundle", VatRate = 15 },
+            new Category { Code = "CAT-CEM", NameEn = "Cement", NameAr = "الأسمنت", Returnable = false },
+            new Category { Code = "CAT-STL", NameEn = "Steel", NameAr = "الحديد" },
             // 5% surplus restocking fee (BRD §3.2.3) — the demo category for fee-bearing returns.
-            new Category { Code = "CAT-TIL", NameEn = "Tiles", NameAr = "البلاط", DefaultUom = "Box", VatRate = 15, SurplusRestockingFeePct = 5m },
-            new Category { Code = "CAT-PNT", NameEn = "Paint", NameAr = "الطلاء", DefaultUom = "Can", VatRate = 15, Returnable = false, ReturnRule = "Non-Returnable" },
-            new Category { Code = "CAT-PLM", NameEn = "Plumbing", NameAr = "السباكة", DefaultUom = "Piece", VatRate = 15 },
-            new Category { Code = "CAT-ELC", NameEn = "Electrical", NameAr = "الكهرباء", DefaultUom = "Piece", VatRate = 15 },
-            new Category { Code = "CAT-TLS", NameEn = "Tools", NameAr = "العدد اليدوية", DefaultUom = "Piece", VatRate = 15 },
+            new Category { Code = "CAT-TIL", NameEn = "Tiles", NameAr = "البلاط", SurplusRestockingFeePct = 5m },
+            new Category { Code = "CAT-PNT", NameEn = "Paint", NameAr = "الطلاء", Returnable = false },
+            new Category { Code = "CAT-PLM", NameEn = "Plumbing", NameAr = "السباكة" },
+            new Category { Code = "CAT-ELC", NameEn = "Electrical", NameAr = "الكهرباء" },
+            new Category { Code = "CAT-TLS", NameEn = "Tools", NameAr = "العدد اليدوية" },
         };
         db.Categories.AddRange(categories);
         await db.SaveChangesAsync();

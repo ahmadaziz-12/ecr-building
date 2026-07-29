@@ -74,7 +74,14 @@ export type Field = {
    *  top-level category is currently picked in `dependsOn`, users → name, roles → name). Any
    *  static `options` are kept as leading entries, so restrict them to special placeholders like
    *  "Unassigned" / "— This is a Main Category —". */
-  optionsSource?: "branches" | "terminals" | "topCategories" | "subcategories" | "users" | "roles";
+  optionsSource?:
+    | "branches"
+    | "terminals"
+    | "topCategories"
+    | "subcategories"
+    | "users"
+    | "roles"
+    | "variantGroups";
   /** For optionsSource "subcategories": the name of the sibling field whose live value (a
    *  top-level category name) narrows this select's options to that category's children. */
   dependsOn?: string;
@@ -117,6 +124,20 @@ export type Flow = {
   successTitle?: string;
   successMsg?: string;
 };
+
+// Product Variants: the common "what differs between versions of this product" names — reused by
+// the "Add Product with Variants" wizard's "Varies by" picker AND the plain Add/Edit SKU flows'
+// Attributes rows, so a non-technical user picks from the same short list everywhere instead of
+// typing a name freehand.
+const COMMON_ATTRIBUTE_NAMES = [
+  { value: "Size", label: "Size" },
+  { value: "Diameter", label: "Diameter" },
+  { value: "Thickness", label: "Thickness" },
+  { value: "Length", label: "Length" },
+  { value: "Grade", label: "Grade" },
+  { value: "Color", label: "Color" },
+  { value: "Model", label: "Model" },
+];
 
 export const flows: Record<string, Flow> = {
   "New Sale": {
@@ -285,6 +306,72 @@ export const flows: Record<string, Flow> = {
     ],
   },
 
+  // One-screen wizard for a non-technical user: fill in the shared product info ONCE, pick what
+  // makes each version different (e.g. Diameter), then just list a value + price per version — no
+  // SKU codes, no "Name=Value" typing, no separate "create the group first" step. Creates the
+  // Variant Group and every SKU together (CatalogController.ProductsController.CreateFamily).
+  "Add Product with Variants": {
+    key: "add-product-family",
+    title: "Add Product with Variants",
+    subtitle: "Create one product in several sizes, colors or grades at once",
+    icon: Layers,
+    steps: [
+      {
+        name: "Product",
+        desc: "This info is shared by every version you add below.",
+        fields: [
+          { name: "nameEn", label: "Product Name (English)", type: "text", required: true, placeholder: "e.g. Steel Rebar" },
+          { name: "nameAr", label: "Product Name (Arabic)", type: "text" },
+          { name: "category", label: "Category", type: "select", optionsSource: "topCategories", required: true },
+          {
+            name: "subcategory",
+            label: "Subcategory (optional)",
+            type: "select",
+            optionsSource: "subcategories",
+            dependsOn: "category",
+          },
+          { name: "brand", label: "Brand", type: "text", placeholder: "e.g. Al Noor" },
+          { name: "imageUrl", label: "Product Photo", type: "image", full: true },
+          {
+            name: "stockUom",
+            label: "Stock UOM",
+            type: "select",
+            options: ["Bag", "Piece", "Box", "Bundle", "Kg", "Ton", "m²", "m³", "m", "Can", "Roll"],
+            default: "Piece",
+          },
+          { name: "vat", label: "VAT Rate", type: "select", options: ["15%", "0% (Export)", "Exempt"], default: "15%" },
+        ],
+      },
+      {
+        name: "Versions",
+        desc: 'Pick what makes each version different, then add one row per version — just its value and price. Everything else above is reused automatically.',
+        fields: [
+          {
+            name: "attributeName",
+            label: "What makes each version different?",
+            type: "select",
+            options: COMMON_ATTRIBUTE_NAMES.map((a) => a.value),
+            required: true,
+            hint: 'Picking "Diameter" means every row below is a different diameter (12MM, 16MM, …).',
+          },
+          {
+            name: "variants",
+            label: "Versions",
+            type: "lineItems",
+            full: true,
+            required: true,
+            lineItemColumns: [
+              { key: "value", label: "Value", type: "text", placeholder: "e.g. 12MM" },
+              { key: "cost", label: "Cost (ر.س)", type: "number", placeholder: "0.00" },
+              { key: "price", label: "Selling Price (ر.س)", type: "number", placeholder: "0.00" },
+            ],
+            hint: "Add a row for every version you sell — e.g. 12MM, 16MM, 20MM.",
+          },
+        ],
+      },
+    ],
+  },
+
   "Add SKU": {
     key: "add-sku",
     title: "Add SKU",
@@ -325,15 +412,27 @@ export const flows: Record<string, Flow> = {
             dependsOn: "category",
             hint: 'Pick one if this product belongs to a specific subcategory, e.g. "Pipe" under "Electric".',
           },
+          {
+            name: "variantGroup",
+            label: "Variant Group (optional)",
+            type: "select",
+            optionsSource: "variantGroups",
+            options: ["— Standalone SKU —"],
+            default: "— Standalone SKU —",
+            hint: "Group this SKU with its siblings (e.g. Rebar 12MM/16MM) so POS shows one tile with a size picker. Create new groups from Variant Groups.",
+          },
           { name: "brand", label: "Brand", type: "text", placeholder: "e.g. Al Noor" },
           { name: "imageUrl", label: "Product Photo", type: "image", full: true },
           {
             name: "attributes",
             label: "Attributes (Grade, Size, Colour, Diameter…)",
-            type: "text",
+            type: "lineItems",
             full: true,
-            placeholder: "Grade=A36; Diameter=12mm; Color=Grey",
-            hint: "Match the category's Attribute Template names (Categories & Attributes) so they filter/search consistently.",
+            hint: "Add one row per attribute this SKU has — e.g. Diameter, 12mm.",
+            lineItemColumns: [
+              { key: "name", label: "Attribute", type: "select", options: COMMON_ATTRIBUTE_NAMES },
+              { key: "value", label: "Value", type: "text", placeholder: "e.g. 12mm" },
+            ],
           },
         ],
       },
@@ -442,15 +541,26 @@ export const flows: Record<string, Flow> = {
             dependsOn: "category",
             hint: 'Pick one if this product belongs to a specific subcategory, e.g. "Pipe" under "Electric".',
           },
+          {
+            name: "variantGroup",
+            label: "Variant Group (optional)",
+            type: "select",
+            optionsSource: "variantGroups",
+            options: ["— Standalone SKU —"],
+            hint: "Group this SKU with its siblings (e.g. Rebar 12MM/16MM) so POS shows one tile with a size picker. Create new groups from Variant Groups.",
+          },
           { name: "brand", label: "Brand", type: "text" },
           { name: "imageUrl", label: "Product Photo", type: "image", full: true },
           {
             name: "attributes",
             label: "Attributes (Grade, Size, Colour, Diameter…)",
-            type: "text",
+            type: "lineItems",
             full: true,
-            placeholder: "Grade=A36; Diameter=12mm; Color=Grey",
-            hint: "Match the category's Attribute Template names (Categories & Attributes) so they filter/search consistently.",
+            hint: "Add one row per attribute this SKU has — e.g. Diameter, 12mm.",
+            lineItemColumns: [
+              { key: "name", label: "Attribute", type: "select", options: COMMON_ATTRIBUTE_NAMES },
+              { key: "value", label: "Value", type: "text", placeholder: "e.g. 12mm" },
+            ],
           },
         ],
       },
@@ -532,7 +642,7 @@ export const flows: Record<string, Flow> = {
   "Create Category": {
     key: "create-category",
     title: "Create Category",
-    subtitle: "Group SKUs and apply attribute templates",
+    subtitle: "Group SKUs under a shared category",
     icon: Layers,
     steps: [
       {
@@ -550,34 +660,12 @@ export const flows: Record<string, Flow> = {
             hint: 'Pick an existing category to make this a subcategory of it — e.g. pick "Electric" to create "Pipe" as Electric → Pipe.',
           },
           {
-            name: "attributes",
-            label: "Attribute Template",
-            type: "tags",
-            placeholder: "Grade, Size, Colour",
-            full: true,
+            name: "returnable",
+            label: "Returnable by default",
+            type: "toggle",
+            default: "on",
+            hint: "Turn off if NOTHING in this category can be returned (e.g. custom-cut glass) — a single SKU can still be marked non-returnable on its own even if the category allows returns.",
           },
-          {
-            name: "returnRule",
-            label: "Return Rule",
-            type: "select",
-            options: ["Standard 15 days", "Non-Returnable"],
-            default: "Standard 15 days",
-          },
-          {
-            name: "defaultUom",
-            label: "Default UOM",
-            type: "select",
-            options: ["Piece", "Bag", "Box", "Bundle", "Can", "m²"],
-            default: "Piece",
-          },
-          {
-            name: "vat",
-            label: "Default VAT",
-            type: "select",
-            options: ["15%", "0%", "Exempt"],
-            default: "15%",
-          },
-          { name: "returnable", label: "Returnable by default", type: "toggle", default: "on" },
         ],
       },
     ],
@@ -586,7 +674,7 @@ export const flows: Record<string, Flow> = {
   "Edit Category": {
     key: "edit-category",
     title: "Edit Category",
-    subtitle: "Update name, parent, attributes and return rule",
+    subtitle: "Update name, parent and return eligibility",
     icon: Layers,
     steps: [
       {
@@ -604,26 +692,49 @@ export const flows: Record<string, Flow> = {
             hint: 'Pick an existing category to make this a subcategory of it — e.g. pick "Electric" to create "Pipe" as Electric → Pipe.',
           },
           {
-            name: "attributes",
-            label: "Attribute Template",
-            type: "tags",
-            placeholder: "Grade, Size, Colour",
-            full: true,
+            name: "returnable",
+            label: "Returnable by default",
+            type: "toggle",
+            hint: "Turn off if NOTHING in this category can be returned (e.g. custom-cut glass) — a single SKU can still be marked non-returnable on its own even if the category allows returns.",
           },
-          {
-            name: "returnRule",
-            label: "Return Rule",
-            type: "select",
-            options: ["Standard 15 days", "Non-Returnable"],
-          },
-          {
-            name: "defaultUom",
-            label: "Default UOM",
-            type: "select",
-            options: ["Piece", "Bag", "Box", "Bundle", "Can", "m²"],
-          },
-          { name: "vat", label: "Default VAT", type: "select", options: ["15%", "0%", "Exempt"] },
-          { name: "returnable", label: "Returnable by default", type: "toggle" },
+        ],
+      },
+    ],
+  },
+
+  "Add Group": {
+    key: "add-variant-group",
+    title: "Add Variant Group",
+    subtitle: "Create a family SKUs can be grouped under (e.g. Steel Rebar)",
+    icon: Layers,
+    steps: [
+      {
+        name: "Group",
+        fields: [
+          { name: "code", label: "Code", type: "text", placeholder: "STEEL-RBR", required: true },
+          { name: "nameEn", label: "Name (English)", type: "text", required: true },
+          { name: "nameAr", label: "Name (Arabic)", type: "text" },
+          { name: "category", label: "Category (optional)", type: "select", optionsSource: "topCategories" },
+          { name: "imageUrl", label: "Group Photo", type: "image", full: true },
+        ],
+      },
+    ],
+  },
+
+  "Edit Group": {
+    key: "edit-variant-group",
+    title: "Edit Variant Group",
+    subtitle: "Update name, category and photo",
+    icon: Layers,
+    steps: [
+      {
+        name: "Group",
+        fields: [
+          { name: "code", label: "Code", type: "text", required: true },
+          { name: "nameEn", label: "Name (English)", type: "text", required: true },
+          { name: "nameAr", label: "Name (Arabic)", type: "text" },
+          { name: "category", label: "Category (optional)", type: "select", optionsSource: "topCategories" },
+          { name: "imageUrl", label: "Group Photo", type: "image", full: true },
         ],
       },
     ],

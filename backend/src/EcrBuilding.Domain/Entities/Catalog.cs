@@ -10,10 +10,9 @@ public class Category : BaseEntity
     public string? NameAr { get; set; }
     public int? ParentId { get; set; }
     public Category? Parent { get; set; }
-    public string AttributesJson { get; set; } = "[]";
-    public string ReturnRule { get; set; } = "Standard 15 days";
-    public string DefaultUom { get; set; } = "Piece";
-    public decimal VatRate { get; set; } = 15m;
+    // BRD §3.2: category-wide return eligibility fallback — checked when a Product's OWN Returnable
+    // isn't itself set false, so an admin can mark a whole category non-returnable (e.g. "Glass &
+    // Windows") without touching every SKU in it. Read by FinanceController's return flows.
     public bool Returnable { get; set; } = true;
     // BRD §4.3.1: loyalty points accrual rate per product category (e.g. 2x on featured categories
     // during a promotional period). 1 = standard rate; read by OrdersController.Checkout.
@@ -25,6 +24,24 @@ public class Category : BaseEntity
     public EntityStatus Status { get; set; } = EntityStatus.Active;
 
     public ICollection<Product> Products { get; set; } = new List<Product>();
+}
+
+// Groups several independent Product SKUs (e.g. Steel Rebar 12MM/16MM) into one browsable family
+// for POS/catalog display. Each variant SKU keeps its own price/stock/barcode/ProductAttribute
+// rows exactly as a standalone product would — this is purely a display/grouping link, not a new
+// pricing or stock unit, so all existing stock/movement/bundle code (keyed on Product.Id) is
+// untouched. VariantGroupId is nullable: most products remain standalone.
+public class ProductVariantGroup : BaseEntity
+{
+    public string Code { get; set; } = string.Empty;
+    public string NameEn { get; set; } = string.Empty;
+    public string? NameAr { get; set; }
+    public int? CategoryId { get; set; }
+    public Category? Category { get; set; }
+    public string? ImageUrl { get; set; }
+    public EntityStatus Status { get; set; } = EntityStatus.Active;
+
+    public ICollection<Product> Variants { get; set; } = new List<Product>();
 }
 
 public class Product : BaseEntity
@@ -71,6 +88,9 @@ public class Product : BaseEntity
     public int? SupplierId { get; set; }
     public Supplier? Supplier { get; set; }
     public string? BinLocation { get; set; }
+    // Optional family link (see ProductVariantGroup) — null for standalone SKUs.
+    public int? VariantGroupId { get; set; }
+    public ProductVariantGroup? VariantGroup { get; set; }
     public EntityStatus Status { get; set; } = EntityStatus.Active;
 
     public ICollection<StockLevel> StockLevels { get; set; } = new List<StockLevel>();

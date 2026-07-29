@@ -7,7 +7,6 @@ import {
   formatCutToSizeMode,
   parseCutToSizeMode,
 } from "@/lib/buildpos/uom";
-import { formatAttributes, parseAttributes } from "@/lib/buildpos/attributes";
 import {
   resolveParentCategory,
   resolveProductCategoryId,
@@ -16,8 +15,11 @@ import {
   useProducts,
   useSetCategoryStatus,
   useSetProductStatus,
+  useSetVariantGroupStatus,
   useUpdateCategory,
   useUpdateProduct,
+  useUpdateVariantGroup,
+  useVariantGroups,
 } from "./catalog";
 import { useBundles, useSetBundleStatus, type BundleDto } from "./bundles";
 import {
@@ -136,6 +138,19 @@ function downloadCsv(filename: string, rows: (string | number)[][]) {
 
 export type RowAction = { label: string; onClick: () => void; tone?: "default" | "critical" };
 
+// The Add/Edit SKU "Attributes" field is a lineItems table (Attribute + Value per row), whose value
+// is a JSON array of row objects — drops any row missing either half rather than failing the save.
+function parseAttributeRows(raw: string | undefined): { name: string; value: string }[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((r) => r?.name && r?.value).map((r) => ({ name: r.name, value: r.value }));
+  } catch {
+    return [];
+  }
+}
+
 function guarded(fn: () => Promise<unknown>, okMsg: string): () => void {
   return () => {
     fn()
@@ -177,10 +192,27 @@ export function useRowActions(
   const printLabel = usePrintLabel();
 
   const { data: categories } = useCategories(
-    pathname === "/admin/categories" || pathname === "/stock/inventory",
+    pathname === "/admin/categories" ||
+      pathname === "/stock/inventory" ||
+      pathname === "/stock/variant-groups",
   );
   const setCategoryStatus = useSetCategoryStatus();
   const updateCategory = useUpdateCategory();
+
+  const { data: variantGroups } = useVariantGroups(
+    pathname === "/stock/inventory" || pathname === "/stock/variant-groups",
+  );
+  const updateVariantGroup = useUpdateVariantGroup();
+  const setVariantGroupStatus = useSetVariantGroupStatus();
+
+  // "— Standalone SKU —" (the default) or blank means no group; anything else must match an
+  // existing group's name — same convention as flow-submit-handlers.ts's add-sku handler.
+  function resolveVariantGroupId(label: string | undefined): number | null {
+    if (!label || label === "— Standalone SKU —") return null;
+    const group = variantGroups?.find((g) => g.nameEn.toLowerCase() === label.toLowerCase());
+    if (!group) throw new Error(`Unknown variant group "${label}" — create it first in Variant Groups.`);
+    return group.id;
+  }
 
   const { data: warehouses } = useWarehouses(
     pathname === "/stock/stocks" ||
@@ -373,9 +405,10 @@ export function useRowActions(
                   nameEn: product.nameEn,
                   nameAr: product.nameAr ?? "",
                   ...splitProductCategory(categories, product.categoryId),
+                  variantGroup: product.variantGroupName ?? "— Standalone SKU —",
                   brand: product.brand ?? "",
                   imageUrl: product.imageUrl ?? "",
-                  attributes: formatAttributes(product.attributes ?? []),
+                  attributes: JSON.stringify((product.attributes ?? []).map((a) => ({ name: a.name, value: a.value }))),
                   stockUom: product.stockUom,
                   uomConversions: formatUomConversions(product.uomConversions),
                   cutToSizeMode: formatCutToSizeMode(product.isCutToSize, product.cutToSizeUnit),
@@ -441,7 +474,8 @@ export function useRowActions(
                       isCutToSize,
                       cutToSizeUnit,
                       minCutQty: values.minCutQty ? Number(values.minCutQty) : null,
-                      attributes: parseAttributes(values.attributes),
+                      attributes: parseAttributeRows(values.attributes),
+                      variantGroupId: resolveVariantGroupId(values.variantGroup),
                     },
                   });
                 },
@@ -492,10 +526,6 @@ export function useRowActions(
                   nameEn: category.nameEn,
                   nameAr: category.nameAr ?? "",
                   parent: category.parentName ?? "— This is a Main Category —",
-                  attributes: category.attributes.join(", "),
-                  returnRule: category.returnRule,
-                  defaultUom: category.defaultUom,
-                  vat: category.vatRate === 0 ? "0%" : category.vatRate === 15 ? "15%" : "Exempt",
                   returnable: category.returnable ? "on" : "",
                 },
                 async (values) => {
@@ -508,8 +538,6 @@ export function useRowActions(
                   const parent = parentName
                     ? resolveParentCategory(categories, parentName, category.id)
                     : undefined;
-                  const vatRate =
-                    values.vat === "Exempt" ? 0 : values.vat?.startsWith("0%") ? 0 : 15;
                   await updateCategory.mutateAsync({
                     id: category.id,
                     request: {
@@ -517,15 +545,6 @@ export function useRowActions(
                       nameEn: values.nameEn,
                       nameAr: values.nameAr || null,
                       parentId: parent?.id ?? null,
-                      attributes: values.attributes
-                        ? values.attributes
-                            .split(",")
-                            .map((s) => s.trim())
-                            .filter(Boolean)
-                        : [],
-                      returnRule: values.returnRule || category.returnRule,
-                      defaultUom: values.defaultUom || category.defaultUom,
-                      vatRate,
                       returnable: values.returnable === "on",
                     },
                   });
@@ -551,6 +570,64 @@ export function useRowActions(
                 onClick: guarded(
                   () => setCategoryStatus.mutateAsync({ id: category.id, status: "Active" }),
                   "Category activated",
+                ),
+              },
+        ];
+      }
+
+      case "/stock/variant-groups": {
+        const group = variantGroups?.find((g) => g.id === id);
+        if (!group) return [];
+        return [
+          {
+            label: "Edit",
+            onClick: () =>
+              openFlow(
+                "Edit Group",
+                {
+                  code: group.code,
+                  nameEn: group.nameEn,
+                  nameAr: group.nameAr ?? "",
+                  category: group.categoryName ?? "",
+                  imageUrl: group.imageUrl ?? "",
+                },
+                async (values) => {
+                  if (!values.code || !values.nameEn)
+                    throw new Error("Code and Name (English) are required.");
+                  const categoryId = values.category
+                    ? resolveProductCategoryId(categories, values.category)
+                    : null;
+                  await updateVariantGroup.mutateAsync({
+                    id: group.id,
+                    request: {
+                      code: values.code,
+                      nameEn: values.nameEn,
+                      nameAr: values.nameAr || null,
+                      categoryId,
+                      imageUrl: values.imageUrl || null,
+                    },
+                  });
+                },
+              ),
+          },
+          {
+            label: "View SKUs",
+            onClick: () => navigate({ to: "/stock/inventory", search: { sku: group.code } }),
+          },
+          group.status === "Active"
+            ? {
+                label: "Deactivate",
+                onClick: guarded(
+                  () => setVariantGroupStatus.mutateAsync({ id: group.id, status: "Inactive" }),
+                  "Variant group deactivated",
+                ),
+                tone: "critical",
+              }
+            : {
+                label: "Activate",
+                onClick: guarded(
+                  () => setVariantGroupStatus.mutateAsync({ id: group.id, status: "Active" }),
+                  "Variant group activated",
                 ),
               },
         ];

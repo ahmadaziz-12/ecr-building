@@ -30,7 +30,7 @@ public class Module5CutToSizeRemnantTests : IAsyncLifetime
         AppDbContext db, string cutToSizeUnit = "Area", decimal? minCutQty = null, decimal onHand = 100m, decimal sellingPrice = 180m)
     {
         var branch = TestDataSeeder.AddBranch(db);
-        var category = TestDataSeeder.AddCategory(db, code: "GLS", nameEn: "Glass", defaultUom: "m²");
+        var category = TestDataSeeder.AddCategory(db, code: "GLS", nameEn: "Glass");
         var product = TestDataSeeder.AddProduct(db, category, sku: "GLASS-REMNANT", nameEn: "Clear Glass 6mm",
             sellingPrice: sellingPrice, vatRate: 0m, stockUom: cutToSizeUnit == "Length" ? "m" : "m²",
             isCutToSize: true, cutToSizeUnit: cutToSizeUnit, minCutQty: minCutQty);

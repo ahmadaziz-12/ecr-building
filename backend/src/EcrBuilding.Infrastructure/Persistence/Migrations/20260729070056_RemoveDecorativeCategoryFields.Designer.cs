@@ -4,6 +4,7 @@ using EcrBuilding.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EcrBuilding.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260729070056_RemoveDecorativeCategoryFields")]
+    partial class RemoveDecorativeCategoryFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -3891,9 +3894,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<DateTime?>("ApprovedAt")
-                        .HasColumnType("datetime(6)");
-
                     b.Property<int?>("ApprovedByUserId")
                         .HasColumnType("int");
 
@@ -3921,21 +3921,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Notes")
                         .HasColumnType("longtext");
-
-                    b.Property<DateTime?>("RejectedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<int?>("RejectedByUserId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("RejectionReason")
-                        .HasColumnType("longtext");
-
-                    b.Property<DateTime?>("ReviewedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<int?>("ReviewedByUserId")
-                        .HasColumnType("int");
 
                     b.Property<DateTime>("ScheduledFor")
                         .HasColumnType("datetime(6)");
@@ -3972,10 +3957,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("CountedByUserId");
-
-                    b.HasIndex("RejectedByUserId");
-
-                    b.HasIndex("ReviewedByUserId");
 
                     b.HasIndex("StockAdjustmentId");
 
@@ -6061,16 +6042,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .HasForeignKey("CountedByUserId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("EcrBuilding.Domain.Entities.User", "RejectedBy")
-                        .WithMany()
-                        .HasForeignKey("RejectedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("EcrBuilding.Domain.Entities.User", "ReviewedBy")
-                        .WithMany()
-                        .HasForeignKey("ReviewedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("EcrBuilding.Domain.Entities.StockAdjustment", "StockAdjustment")
                         .WithMany()
                         .HasForeignKey("StockAdjustmentId")
@@ -6087,10 +6058,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("Category");
 
                     b.Navigation("CountedBy");
-
-                    b.Navigation("RejectedBy");
-
-                    b.Navigation("ReviewedBy");
 
                     b.Navigation("StockAdjustment");
 

@@ -1,7 +1,7 @@
 namespace EcrBuilding.Application.Catalog;
 
-public record CategoryDto(int Id, string Code, string NameEn, string? NameAr, int? ParentId, string? ParentName, string[] Attributes, string ReturnRule, string DefaultUom, decimal VatRate, bool Returnable, decimal LoyaltyAccrualMultiplier, string Status, int SkuCount, decimal SurplusRestockingFeePct = 0);
-public record UpsertCategoryRequest(string Code, string NameEn, string? NameAr, int? ParentId, string[] Attributes, string ReturnRule, string DefaultUom, decimal VatRate, bool Returnable, decimal LoyaltyAccrualMultiplier = 1m, decimal SurplusRestockingFeePct = 0);
+public record CategoryDto(int Id, string Code, string NameEn, string? NameAr, int? ParentId, string? ParentName, bool Returnable, decimal LoyaltyAccrualMultiplier, string Status, int SkuCount, decimal SurplusRestockingFeePct = 0);
+public record UpsertCategoryRequest(string Code, string NameEn, string? NameAr, int? ParentId, bool Returnable, decimal LoyaltyAccrualMultiplier = 1m, decimal SurplusRestockingFeePct = 0);
 
 // BRD §2.3: "1 {Uom} = {FactorToStock} {StockUom}" — the POS UOM dropdown and checkout conversion
 // both read these rows; SellUoms remains display labels only.
@@ -18,10 +18,31 @@ public record ProductDto(int Id, string Sku, string? Barcode, string NameEn, str
     // checkout falls back to SellingPrice (the Retail price) for that segment.
     decimal? ContractorPrice = null, decimal? WholesalePrice = null, decimal? ProjectPrice = null,
     // BRD §2.3 enhancement: minimum billable qty (stock UOM) for a cut-to-size line — null = no minimum.
-    decimal? MinCutQty = null);
+    decimal? MinCutQty = null,
+    // Product Variants: optional family link (e.g. Steel Rebar 12MM/16MM) — null for standalone SKUs.
+    int? VariantGroupId = null, string? VariantGroupName = null);
 public record UpsertProductRequest(string Sku, string? Barcode, string NameEn, string? NameAr, int CategoryId, string? Brand, decimal CostPrice, decimal SellingPrice, decimal VatRate, string StockUom, string[] SellUoms, decimal Weight, bool Returnable, int ReorderLevel, int ReorderQty, string? ImageUrl, List<ProductUomConversionDto>? UomConversions = null, bool IsCutToSize = false,
     List<ProductAttributeDto>? Attributes = null, int? SupplierId = null, string? BinLocation = null, string CutToSizeUnit = "Area",
-    decimal? ContractorPrice = null, decimal? WholesalePrice = null, decimal? ProjectPrice = null, decimal? MinCutQty = null);
+    decimal? ContractorPrice = null, decimal? WholesalePrice = null, decimal? ProjectPrice = null, decimal? MinCutQty = null,
+    int? VariantGroupId = null);
+
+// Product Variants: a family of independent Product SKUs (own price/stock/barcode) that share a
+// display grouping in POS/catalog, e.g. "Steel Rebar" grouping the 12MM/16MM SKUs. VariantCount is
+// server-computed (count of Products with this VariantGroupId), not client-supplied.
+public record ProductVariantGroupDto(int Id, string Code, string NameEn, string? NameAr, int? CategoryId, string? CategoryName, string? ImageUrl, string Status, int VariantCount);
+public record UpsertProductVariantGroupRequest(string Code, string NameEn, string? NameAr, int? CategoryId, string? ImageUrl);
+
+// One-screen "Add Product with Variants" wizard: creates a brand-new ProductVariantGroup AND every
+// one of its variant SKUs in a single call, so a non-technical user never has to visit two screens,
+// type a Code, or type "Name=Value" attribute syntax. Value is the ONLY thing typed per row (e.g.
+// "12MM") — AttributeName (e.g. "Diameter") is picked once and reused for every generated SKU's
+// ProductAttribute row. SKU codes and the group Code are auto-generated server-side (see
+// ProductVariantGroupsController.Slugify) and never shown to the user.
+public record CreateProductFamilyLine(string Value, decimal CostPrice, decimal SellingPrice);
+public record CreateProductFamilyRequest(
+    string NameEn, string? NameAr, int CategoryId, string? Brand, string? ImageUrl,
+    string StockUom, decimal VatRate, string AttributeName, List<CreateProductFamilyLine> Variants);
+public record ProductFamilyDto(ProductVariantGroupDto Group, List<ProductDto> Products);
 
 public record SetStatusRequest(string Status);
 

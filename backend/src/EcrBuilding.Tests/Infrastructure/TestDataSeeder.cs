@@ -87,9 +87,9 @@ public static class TestDataSeeder
         return user;
     }
 
-    public static Category AddCategory(AppDbContext db, string code = "CEM", string nameEn = "Cement & Binders", string defaultUom = "Bag")
+    public static Category AddCategory(AppDbContext db, string code = "CEM", string nameEn = "Cement & Binders")
     {
-        var category = new Category { Code = code, NameEn = nameEn, DefaultUom = defaultUom, Status = EntityStatus.Active };
+        var category = new Category { Code = code, NameEn = nameEn, Status = EntityStatus.Active };
         db.Categories.Add(category);
         db.SaveChanges();
         return category;

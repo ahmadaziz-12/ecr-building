@@ -34,8 +34,7 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
         var category = new Category
         {
             Code = request.Code, NameEn = request.NameEn, NameAr = request.NameAr, ParentId = request.ParentId,
-            AttributesJson = JsonSerializer.Serialize(request.Attributes), ReturnRule = request.ReturnRule,
-            DefaultUom = request.DefaultUom, VatRate = request.VatRate, Returnable = request.Returnable,
+            Returnable = request.Returnable,
             LoyaltyAccrualMultiplier = request.LoyaltyAccrualMultiplier,
             SurplusRestockingFeePct = request.SurplusRestockingFeePct,
         };
@@ -54,9 +53,7 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
         if (category is null) return NotFound();
 
         category.Code = request.Code; category.NameEn = request.NameEn; category.NameAr = request.NameAr;
-        category.ParentId = request.ParentId; category.AttributesJson = JsonSerializer.Serialize(request.Attributes);
-        category.ReturnRule = request.ReturnRule; category.DefaultUom = request.DefaultUom;
-        category.VatRate = request.VatRate; category.Returnable = request.Returnable;
+        category.ParentId = request.ParentId; category.Returnable = request.Returnable;
         category.LoyaltyAccrualMultiplier = request.LoyaltyAccrualMultiplier;
         category.SurplusRestockingFeePct = request.SurplusRestockingFeePct;
         await db.SaveChangesAsync(ct);
@@ -80,8 +77,7 @@ public class CategoriesController(AppDbContext db, IAuditService audit) : Contro
     }
 
     private static CategoryDto Map(Category c) => new(
-        c.Id, c.Code, c.NameEn, c.NameAr, c.ParentId, c.Parent?.NameEn,
-        JsonSerializer.Deserialize<string[]>(c.AttributesJson) ?? [], c.ReturnRule, c.DefaultUom, c.VatRate, c.Returnable,
+        c.Id, c.Code, c.NameEn, c.NameAr, c.ParentId, c.Parent?.NameEn, c.Returnable,
         c.LoyaltyAccrualMultiplier, c.Status.ToString(), c.Products.Count, c.SurplusRestockingFeePct);
 }
 
@@ -96,6 +92,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     {
         var products = await db.Products.Include(p => p.Category).Include(p => p.StockLevels).ThenInclude(s => s.Warehouse)
             .Include(p => p.BranchStockLevels).Include(p => p.UomConversions).Include(p => p.Attributes).Include(p => p.Supplier)
+            .Include(p => p.VariantGroup)
             .OrderBy(p => p.Sku).ToListAsync(ct);
         return Ok(products.Select(p => Map(p, branchId)).ToList());
     }
@@ -105,7 +102,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     public async Task<ActionResult<ProductDto>> Lookup([FromQuery] string barcode, CancellationToken ct)
     {
         var product = await db.Products.Include(p => p.Category).Include(p => p.StockLevels).Include(p => p.UomConversions)
-            .Include(p => p.Attributes).Include(p => p.Supplier)
+            .Include(p => p.Attributes).Include(p => p.Supplier).Include(p => p.VariantGroup)
             .FirstOrDefaultAsync(p => p.Barcode == barcode || p.Sku == barcode, ct);
         return product is null ? NotFound() : Ok(Map(product));
     }
@@ -128,6 +125,10 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         {
             return StatusCode(403, new { error = "Setting a Contractor/Wholesale/Project price requires the Manage Price List & Users permission." });
         }
+        if (request.VariantGroupId is not null && !await db.ProductVariantGroups.AnyAsync(g => g.Id == request.VariantGroupId, ct))
+        {
+            return BadRequest(new { error = "The selected variant group does not exist." });
+        }
 
         var product = new Product
         {
@@ -139,7 +140,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             ImageUrl = request.ImageUrl, IsCutToSize = request.IsCutToSize, CutToSizeUnit = request.CutToSizeUnit,
             SupplierId = request.SupplierId, BinLocation = request.BinLocation,
             ContractorPrice = request.ContractorPrice, WholesalePrice = request.WholesalePrice, ProjectPrice = request.ProjectPrice,
-            MinCutQty = request.MinCutQty,
+            MinCutQty = request.MinCutQty, VariantGroupId = request.VariantGroupId,
         };
         product.UomConversions = BuildUomConversions(request.UomConversions, request.StockUom);
         product.Attributes = BuildAttributes(request.Attributes);
@@ -147,6 +148,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         await db.SaveChangesAsync(ct);
         await db.Entry(product).Reference(p => p.Category).LoadAsync(ct);
         if (product.SupplierId is not null) await db.Entry(product).Reference(p => p.Supplier).LoadAsync(ct);
+        if (product.VariantGroupId is not null) await db.Entry(product).Reference(p => p.VariantGroup).LoadAsync(ct);
         await audit.LogAsync("inventory", "PRODUCT_CREATED", product.Id.ToString(), newValue: request, cancellationToken: ct);
         return Ok(Map(product));
     }
@@ -162,6 +164,10 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         if (await db.Products.AnyAsync(p => p.Sku == request.Sku && p.Id != id, ct))
         {
             return Conflict(new { error = "A product with this SKU already exists." });
+        }
+        if (request.VariantGroupId is not null && !await db.ProductVariantGroups.AnyAsync(g => g.Id == request.VariantGroupId, ct))
+        {
+            return BadRequest(new { error = "The selected variant group does not exist." });
         }
         // Validate only when the barcode CHANGED — legacy rows may carry pre-validation values that
         // must stay editable without forcing a barcode fix first.
@@ -186,7 +192,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         product.ImageUrl = request.ImageUrl; product.IsCutToSize = request.IsCutToSize; product.CutToSizeUnit = request.CutToSizeUnit;
         product.SupplierId = request.SupplierId; product.BinLocation = request.BinLocation;
         product.ContractorPrice = request.ContractorPrice; product.WholesalePrice = request.WholesalePrice; product.ProjectPrice = request.ProjectPrice;
-        product.MinCutQty = request.MinCutQty;
+        product.MinCutQty = request.MinCutQty; product.VariantGroupId = request.VariantGroupId;
         // Replace-all, same pattern as RolePermissions in RolesController.Update — the request's list
         // is the complete intended state, not a delta.
         db.ProductUomConversions.RemoveRange(product.UomConversions);
@@ -196,6 +202,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         await db.SaveChangesAsync(ct);
         await db.Entry(product).Reference(p => p.Category).LoadAsync(ct);
         if (product.SupplierId is not null) await db.Entry(product).Reference(p => p.Supplier).LoadAsync(ct);
+        if (product.VariantGroupId is not null) await db.Entry(product).Reference(p => p.VariantGroup).LoadAsync(ct);
         await audit.LogAsync("inventory", "PRODUCT_UPDATED", product.Id.ToString(), newValue: request, cancellationToken: ct);
         return Ok(Map(product));
     }
@@ -212,6 +219,102 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         await db.SaveChangesAsync(ct);
         await audit.LogAsync("inventory", "PRODUCT_STATUS_CHANGED", product.Id.ToString(), newValue: request, cancellationToken: ct);
         return Ok(Map(product));
+    }
+
+    // One-screen "Add Product with Variants" wizard: creates a brand-new ProductVariantGroup AND
+    // every one of its variant SKUs atomically, so a non-technical admin only ever types a Value
+    // (e.g. "12MM") and its price per row — the group Code and every SKU code are generated here and
+    // never shown to the user. AttributeName (e.g. "Diameter") is picked once and reused as the
+    // ProductAttribute.Name on every generated row.
+    [HttpPost("family")]
+    [RequireModule("/stock/inventory", PermissionAction.Create)]
+    public async Task<ActionResult<ProductFamilyDto>> CreateFamily(CreateProductFamilyRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.NameEn)) return BadRequest(new { error = "Product name is required." });
+        if (string.IsNullOrWhiteSpace(request.AttributeName))
+        {
+            return BadRequest(new { error = "Pick what makes each version different (e.g. Size)." });
+        }
+        if (request.Variants.Count == 0) return BadRequest(new { error = "Add at least one size/option." });
+        var category = await db.Categories.FindAsync([request.CategoryId], ct);
+        if (category is null) return BadRequest(new { error = "Unknown category." });
+        foreach (var line in request.Variants)
+        {
+            if (string.IsNullOrWhiteSpace(line.Value)) return BadRequest(new { error = "Every row needs a value (e.g. 12MM)." });
+            if (line.SellingPrice <= 0) return BadRequest(new { error = $"\"{line.Value}\" needs a selling price greater than 0." });
+        }
+
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+        var group = new ProductVariantGroup
+        {
+            Code = await NextAvailableGroupCodeAsync(Slugify(request.NameEn), ct),
+            NameEn = request.NameEn, NameAr = request.NameAr,
+            CategoryId = request.CategoryId, Category = category, ImageUrl = request.ImageUrl,
+        };
+        db.ProductVariantGroups.Add(group);
+
+        var usedSkus = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var products = new List<Product>();
+        foreach (var line in request.Variants)
+        {
+            var sku = await NextAvailableSkuAsync($"{group.Code}-{Slugify(line.Value)}", usedSkus, ct);
+            usedSkus.Add(sku);
+            products.Add(new Product
+            {
+                Sku = sku,
+                NameEn = $"{request.NameEn} {line.Value}",
+                NameAr = request.NameAr is null ? null : $"{request.NameAr} {line.Value}",
+                CategoryId = request.CategoryId, Category = category, Brand = request.Brand,
+                CostPrice = line.CostPrice, SellingPrice = line.SellingPrice, VatRate = request.VatRate,
+                StockUom = request.StockUom, ImageUrl = request.ImageUrl, VariantGroup = group,
+                Attributes = [new ProductAttribute { Name = request.AttributeName.Trim(), Value = line.Value.Trim() }],
+            });
+        }
+        db.Products.AddRange(products);
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+
+        await audit.LogAsync("inventory", "PRODUCT_FAMILY_CREATED", group.Id.ToString(), newValue: request, cancellationToken: ct);
+
+        var groupDto = new ProductVariantGroupDto(
+            group.Id, group.Code, group.NameEn, group.NameAr, group.CategoryId, category.NameEn,
+            group.ImageUrl, group.Status.ToString(), products.Count);
+        return Ok(new ProductFamilyDto(groupDto, products.Select(p => Map(p)).ToList()));
+    }
+
+    private async Task<string> NextAvailableGroupCodeAsync(string baseCode, CancellationToken ct)
+    {
+        var code = baseCode;
+        var suffix = 1;
+        while (await db.ProductVariantGroups.AnyAsync(g => g.Code == code, ct))
+        {
+            suffix++;
+            code = $"{baseCode}-{suffix}";
+        }
+        return code;
+    }
+
+    private async Task<string> NextAvailableSkuAsync(string baseSku, HashSet<string> alreadyUsedThisBatch, CancellationToken ct)
+    {
+        var sku = baseSku;
+        var suffix = 1;
+        while (alreadyUsedThisBatch.Contains(sku) || await db.Products.AnyAsync(p => p.Sku == sku, ct))
+        {
+            suffix++;
+            sku = $"{baseSku}-{suffix}";
+        }
+        return sku;
+    }
+
+    // Turns a free-typed name/value ("Steel Rebar", "12MM") into an uppercase, hyphen-separated code
+    // ("STEEL-REBAR", "12MM") — never shown to the user, just used to build a readable, unique SKU.
+    private static string Slugify(string value)
+    {
+        var chars = value.Trim().ToUpperInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray();
+        var collapsed = new string(chars);
+        while (collapsed.Contains("--")) collapsed = collapsed.Replace("--", "-");
+        return collapsed.Trim('-');
     }
 
     // BRD §7 (CR-039): "restrict manual price changes based on user permissions" — reuses the
@@ -240,8 +343,9 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
     // branchId scopes On Hand/Available to that branch's OWN shop-floor stock (BranchStockLevel) —
     // what a cashier can actually sell right now — instead of the unscoped view, which reports
     // total bulk warehouse stock across the whole company (used by the general catalog page, not
-    // by checkout/quotation cart-building).
-    private static ProductDto Map(Product p, int? branchId = null)
+    // by checkout/quotation cart-building). Internal (not private) so ProductVariantGroupsController
+    // can map a group's variant SKUs identically to how the main product list would.
+    internal static ProductDto Map(Product p, int? branchId = null)
     {
         var conversions = p.UomConversions.Select(c => new ProductUomConversionDto(c.Uom, c.FactorToStock)).ToList();
         var attributes = p.Attributes.Select(a => new ProductAttributeDto(a.Name, a.Value)).ToList();
@@ -254,7 +358,8 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
                 p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
                 branchLevels.Sum(s => s.OnHand), branchLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
                 attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit,
-                p.ContractorPrice, p.WholesalePrice, p.ProjectPrice, p.MinCutQty);
+                p.ContractorPrice, p.WholesalePrice, p.ProjectPrice, p.MinCutQty,
+                p.VariantGroupId, p.VariantGroup?.NameEn);
         }
 
         return new(
@@ -263,8 +368,97 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             p.Returnable, p.ReorderLevel, p.ReorderQty, p.ImageUrl, p.Status.ToString(),
             p.StockLevels.Sum(s => s.OnHand), p.StockLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
             attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit,
-            p.ContractorPrice, p.WholesalePrice, p.ProjectPrice, p.MinCutQty);
+            p.ContractorPrice, p.WholesalePrice, p.ProjectPrice, p.MinCutQty,
+            p.VariantGroupId, p.VariantGroup?.NameEn);
     }
+}
+
+[ApiController]
+[Route("api/catalog/variant-groups")]
+[Authorize]
+[RequireModule("/stock/variant-groups", PermissionAction.View)]
+public class ProductVariantGroupsController(AppDbContext db, IAuditService audit) : ControllerBase
+{
+    [HttpGet]
+    public async Task<ActionResult<List<ProductVariantGroupDto>>> List(CancellationToken ct)
+    {
+        var groups = await db.ProductVariantGroups.Include(g => g.Category).Include(g => g.Variants)
+            .OrderBy(g => g.Code).ToListAsync(ct);
+        return Ok(groups.Select(Map).ToList());
+    }
+
+    // Powers the POS variant picker and the admin "view siblings" flow — every Product currently
+    // linked to this group, with the exact same branch-scoped stock aggregation ProductsController
+    // uses everywhere else, so a variant's price/stock here always matches its own catalog row.
+    [HttpGet("{id:int}/products")]
+    public async Task<ActionResult<List<ProductDto>>> Products(int id, [FromQuery] int? branchId, CancellationToken ct)
+    {
+        if (!await db.ProductVariantGroups.AnyAsync(g => g.Id == id, ct)) return NotFound();
+
+        var products = await db.Products.Where(p => p.VariantGroupId == id)
+            .Include(p => p.Category).Include(p => p.StockLevels).ThenInclude(s => s.Warehouse)
+            .Include(p => p.BranchStockLevels).Include(p => p.UomConversions).Include(p => p.Attributes)
+            .Include(p => p.Supplier).Include(p => p.VariantGroup)
+            .OrderBy(p => p.Sku).ToListAsync(ct);
+        return Ok(products.Select(p => ProductsController.Map(p, branchId)).ToList());
+    }
+
+    [HttpPost]
+    [RequireModule("/stock/variant-groups", PermissionAction.Create)]
+    public async Task<ActionResult<ProductVariantGroupDto>> Create(UpsertProductVariantGroupRequest request, CancellationToken ct)
+    {
+        if (await db.ProductVariantGroups.AnyAsync(g => g.Code == request.Code, ct))
+        {
+            return Conflict(new { error = "A variant group with this code already exists." });
+        }
+
+        var group = new ProductVariantGroup
+        {
+            Code = request.Code, NameEn = request.NameEn, NameAr = request.NameAr,
+            CategoryId = request.CategoryId, ImageUrl = request.ImageUrl,
+        };
+        db.ProductVariantGroups.Add(group);
+        await db.SaveChangesAsync(ct);
+        if (group.CategoryId is not null) await db.Entry(group).Reference(g => g.Category).LoadAsync(ct);
+        await audit.LogAsync("inventory", "VARIANT_GROUP_CREATED", group.Id.ToString(), newValue: request, cancellationToken: ct);
+        return Ok(Map(group));
+    }
+
+    [HttpPut("{id:int}")]
+    [RequireModule("/stock/variant-groups", PermissionAction.Edit)]
+    public async Task<ActionResult<ProductVariantGroupDto>> Update(int id, UpsertProductVariantGroupRequest request, CancellationToken ct)
+    {
+        var group = await db.ProductVariantGroups.Include(g => g.Category).Include(g => g.Variants).FirstOrDefaultAsync(g => g.Id == id, ct);
+        if (group is null) return NotFound();
+        if (await db.ProductVariantGroups.AnyAsync(g => g.Code == request.Code && g.Id != id, ct))
+        {
+            return Conflict(new { error = "A variant group with this code already exists." });
+        }
+
+        group.Code = request.Code; group.NameEn = request.NameEn; group.NameAr = request.NameAr;
+        group.CategoryId = request.CategoryId; group.ImageUrl = request.ImageUrl;
+        await db.SaveChangesAsync(ct);
+        group.Category = group.CategoryId is not null ? await db.Categories.FirstOrDefaultAsync(c => c.Id == group.CategoryId, ct) : null;
+        await audit.LogAsync("inventory", "VARIANT_GROUP_UPDATED", group.Id.ToString(), newValue: request, cancellationToken: ct);
+        return Ok(Map(group));
+    }
+
+    [HttpPut("{id:int}/status")]
+    [RequireModule("/stock/variant-groups", PermissionAction.Delete)]
+    public async Task<ActionResult<ProductVariantGroupDto>> SetStatus(int id, SetStatusRequest request, CancellationToken ct)
+    {
+        var group = await db.ProductVariantGroups.Include(g => g.Category).Include(g => g.Variants).FirstOrDefaultAsync(g => g.Id == id, ct);
+        if (group is null) return NotFound();
+        if (!Enum.TryParse<EntityStatus>(request.Status, out var status)) return BadRequest(new { error = $"Unknown status \"{request.Status}\"." });
+
+        group.Status = status;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "VARIANT_GROUP_STATUS_CHANGED", group.Id.ToString(), newValue: request, cancellationToken: ct);
+        return Ok(Map(group));
+    }
+
+    private static ProductVariantGroupDto Map(ProductVariantGroup g) => new(
+        g.Id, g.Code, g.NameEn, g.NameAr, g.CategoryId, g.Category?.NameEn, g.ImageUrl, g.Status.ToString(), g.Variants.Count);
 }
 
 [ApiController]
