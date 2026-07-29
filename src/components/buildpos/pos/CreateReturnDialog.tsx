@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCreateReturn, useReturnPreview, type ExchangeLineInput, type ReturnPreviewDto } from "@/lib/api/finance";
 import { useProducts } from "@/lib/api/catalog";
 import type { OrderDto } from "@/lib/api/pos";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 const RETURN_TYPES = ["Standard", "Surplus", "Damaged", "Exchange"];
 // BRD §3.2.2: the five mandatory damage reason codes.
@@ -180,7 +181,7 @@ export function CreateReturnDialog({ order, onClose }: { order: OrderDto | null;
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{l.productName}</p>
                 <p className="font-mono text-[10px] text-muted-foreground">
-                  {l.sku} · sold {l.originalQty} {l.uom} @ {money(l.unitPricePaid)}
+                  {l.sku} · sold {l.originalQty} {l.uom} @ <CurrencyText value={money(l.unitPricePaid)} />
                   {l.maxReturnableQty < l.originalQty && ` · ${l.maxReturnableQty} left returnable`}
                 </p>
                 {!l.returnable && <p className="text-[10px] font-semibold text-critical">Non-Returnable — {l.nonReturnableReason}</p>}
@@ -225,7 +226,7 @@ export function CreateReturnDialog({ order, onClose }: { order: OrderDto | null;
                       className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-brand/5"
                     >
                       <span className="truncate font-medium text-foreground">{p.sku} — {p.nameEn}</span>
-                      <span className="shrink-0 font-mono text-muted-foreground">{money(p.sellingPrice)}</span>
+                      <span className="shrink-0 font-mono text-muted-foreground"><CurrencyText value={money(p.sellingPrice)} /></span>
                     </button>
                   ))}
                 </div>
@@ -272,24 +273,24 @@ export function CreateReturnDialog({ order, onClose }: { order: OrderDto | null;
         {/* Return Value Calculation (BRD §3.2.3/§3.2.4) — reviewed before confirming */}
         {preview && selectedLines.length > 0 && (
           <div className="space-y-1 rounded-lg bg-canvas p-3 text-xs">
-            <div className="flex justify-between"><span className="text-muted-foreground">Refund (excl. VAT)</span><span className="font-mono">{money(preview.grossRefund)}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">VAT reversal</span><span className="font-mono">{money(preview.vatReversal)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Refund (excl. VAT)</span><span className="font-mono"><CurrencyText value={money(preview.grossRefund)} /></span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">VAT reversal</span><span className="font-mono"><CurrencyText value={money(preview.vatReversal)} /></span></div>
             {preview.restockingFeeAmount > 0 && (
               <div className="flex justify-between text-critical">
-                <span>Restocking fee ({preview.restockingFeePct}%)</span><span className="font-mono">−{money(preview.restockingFeeAmount)}</span>
+                <span>Restocking fee ({preview.restockingFeePct}%)</span><span className="font-mono">−<CurrencyText value={money(preview.restockingFeeAmount)} /></span>
               </div>
             )}
             <div className="flex justify-between border-t border-black/10 pt-1 text-sm font-semibold">
-              <span>{type === "Exchange" ? "Return credit" : "Net cashback"}</span><span className="font-mono">{money(preview.netCashback)}</span>
+              <span>{type === "Exchange" ? "Return credit" : "Net cashback"}</span><span className="font-mono"><CurrencyText value={money(preview.netCashback)} /></span>
             </div>
             {type === "Exchange" && exchangeItems.length > 0 && (
               <>
-                <div className="flex justify-between pt-1"><span className="text-muted-foreground">Replacement item(s) total</span><span className="font-mono">{money(preview.exchangeLinesTotal)}</span></div>
+                <div className="flex justify-between pt-1"><span className="text-muted-foreground">Replacement item(s) total</span><span className="font-mono"><CurrencyText value={money(preview.exchangeLinesTotal)} /></span></div>
                 <div className={`flex justify-between border-t border-black/10 pt-1 text-sm font-semibold ${
                   (preview.exchangeNetPayable ?? 0) > 0 ? "text-critical" : (preview.exchangeNetPayable ?? 0) < 0 ? "text-success" : ""
                 }`}>
                   <span>{(preview.exchangeNetPayable ?? 0) > 0 ? "Customer pays" : (preview.exchangeNetPayable ?? 0) < 0 ? "Customer is refunded" : "Even exchange"}</span>
-                  <span className="font-mono">{money(Math.abs(preview.exchangeNetPayable ?? 0))}</span>
+                  <span className="font-mono"><CurrencyText value={money(Math.abs(preview.exchangeNetPayable ?? 0))} /></span>
                 </div>
               </>
             )}

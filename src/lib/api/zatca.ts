@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPut } from "./client";
-import type { LiveTable } from "./admin";
+import { byStatus, type LiveTable } from "./admin";
 
 // Model B (per-branch CSID): every branch is its own EGS device with its own identity/CSID/chain.
 export type ZatcaIdentityDto = { branchId: number; branchName: string; egsSerial: string; environment: string; phase2Enabled: boolean; onboardingStatus: string; lastIcv: number; hasCsr: boolean; hasComplianceCsid: boolean; hasProductionCsid: boolean; csr: string | null };
@@ -114,7 +114,7 @@ export function mapZatcaConfiguration(identities: ZatcaIdentityDto[], settings: 
     statusCol: 5,
     kpis: [
       { label: "Branches Onboarded", value: String(identities.length), sub: "One CSID per branch", tone: "info" },
-      { label: "Production Ready", value: String(productionReady), sub: `${identities.length ? Math.round((productionReady / identities.length) * 100) : 0}%`, tone: productionReady === identities.length ? "success" : "warning" },
+      { label: "Production Ready", value: String(productionReady), sub: `${identities.length ? Math.round((productionReady / identities.length) * 100) : 0}%`, tone: productionReady === identities.length ? "success" : "warning", filter: byStatus(5, "Healthy") },
       { label: "Invoices Issued", value: identities.reduce((sum, i) => sum + i.lastIcv, 0).toLocaleString("en-US"), sub: "Total ICV count", tone: "info" },
     ],
     rows: identities.map((i) => [

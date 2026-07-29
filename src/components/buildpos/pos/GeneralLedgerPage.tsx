@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/table";
 import { exportToCsv } from "./shared";
 import { useAccounts, useJournal, type AccountDto, type JournalEntryDto } from "@/lib/api/finance";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 const TABS = ["Trial Balance", "Journal"] as const;
 type Tab = (typeof TABS)[number];
@@ -31,7 +32,7 @@ function AccountGroup({ title, accounts }: { title: string; accounts: AccountDto
     <div>
       <div className="flex items-center justify-between px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         <span>{title}</span>
-        <span>{fmtSar(total)}</span>
+        <span><CurrencyText value={fmtSar(total)} /></span>
       </div>
       {accounts.map((a) => (
         <div
@@ -43,7 +44,7 @@ function AccountGroup({ title, accounts }: { title: string; accounts: AccountDto
             <span>{a.name}</span>
           </div>
           <span className={`font-medium ${a.balance < 0 ? "text-critical" : ""}`}>
-            {fmtSar(a.balance)}
+            <CurrencyText value={fmtSar(a.balance)} />
           </span>
         </div>
       ))}
@@ -163,7 +164,7 @@ export function GeneralLedgerPage() {
         ))}
       </div>
 
-      <KpiGrid items={kpis} />
+      <KpiGrid items={kpis} scope="general-ledger" />
 
       {tab === "Trial Balance" && (
         <SectionCard
@@ -249,10 +250,10 @@ export function GeneralLedgerPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {l.debit > 0 ? fmtSar(l.debit) : "—"}
+                        <CurrencyText value={l.debit > 0 ? fmtSar(l.debit) : "—"} />
                       </TableCell>
                       <TableCell className="text-right">
-                        {l.credit > 0 ? fmtSar(l.credit) : "—"}
+                        <CurrencyText value={l.credit > 0 ? fmtSar(l.credit) : "—"} />
                       </TableCell>
                     </TableRow>
                   ));

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCreateApproval, type ApprovalRequestDto } from "@/lib/api/pos";
+import { SARIcon } from "@/lib/buildpos/currency";
 
 const TYPES = ["Discount", "PriceOverride", "Refund", "CreditOverride"];
 const TYPE_LABELS: Record<string, string> = {
@@ -74,7 +75,7 @@ export function RequestApprovalDialog({
           </Select>
         </div>
         <div>
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Amount (ر.س) <span className="text-critical">*</span></label>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Amount (<SARIcon />) <span className="text-critical">*</span></label>
           <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
         </div>
         <div>

@@ -43,7 +43,7 @@ export function DeliveryLogsPage() {
         { label: "Critical", value: kpi.critical, sub: "Failures, blocks", tone: "critical" },
         { label: "Warning", value: kpi.warning, sub: "Reschedules, returns", tone: "warning" },
         { label: "Info", value: kpi.info, sub: "Normal state changes", tone: "success" },
-      ]} />
+      ]} scope="delivery-logs" />
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 bg-white p-2">
         <input placeholder="Search event or record…" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 w-72 rounded-lg border border-black/10 bg-canvas px-3 text-sm" />
         <MultiSelectFilter label="Severity" allLabel="All Severity" options={SEVERITIES} labels={SEVERITY_LABELS} selected={severity} onChange={setSeverity} />

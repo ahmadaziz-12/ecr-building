@@ -13,9 +13,8 @@ import { CloseShiftDialog } from "./CloseShiftDialog";
 import { CashMovementDialog } from "./CashMovementDialog";
 import { CashMovementsDialog } from "./CashMovementsDialog";
 import { ShiftReportDialog } from "./ShiftReportDialog";
-import { useCashierShifts, type CashierShiftDto } from "@/lib/api/pos";
-import { useAuth } from "@/lib/api/auth";
-import { useBranches, useTerminals } from "@/lib/api/admin";
+import { useCashierShifts, useShiftTerminals, type CashierShiftDto } from "@/lib/api/pos";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 const SHIFT_STATUSES = ["Open", "NeedsReview", "Closed"];
 const STATUS_LABELS: Record<string, string> = { NeedsReview: "Needs Review" };
@@ -36,10 +35,10 @@ function inDateRange(iso: string, range: DateRangeValue | undefined): boolean {
 }
 
 export function CashierShiftPage() {
-  const { user } = useAuth();
-  const { data: branches } = useBranches(true);
-  const { data: terminals } = useTerminals(true);
-  const effectiveBranchId = user?.branchId ?? branches?.[0]?.id ?? null;
+  // Terminals come from the cashier-shift module's own endpoint, not Network → Terminals: a cashier
+  // whose role lacks the Network permission got a 403 there, which emptied both this page's Terminal
+  // filter and the Open Shift picker — the reported "my till isn't in the list".
+  const { data: terminals } = useShiftTerminals(true);
 
   const { data: shifts, refetch, isFetching } = useCashierShifts(true);
   const [opening, setOpening] = useState(false);
@@ -49,10 +48,17 @@ export function CashierShiftPage() {
   const [movementsShiftId, setMovementsShiftId] = useState<number | null>(null);
 
   const terminalBranch = useMemo(() => new Map((terminals ?? []).map((t) => [t.id, t.branchId])), [terminals]);
+  // Branch options are derived from the terminals themselves — same permission-free source, and the
+  // only branches a shift can belong to are the ones with a terminal on this list anyway.
+  const branches = useMemo(() => {
+    const byId = new Map<number, string>();
+    for (const t of terminals ?? []) byId.set(t.branchId, t.branchName);
+    return [...byId.entries()].map(([id, nameEn]) => ({ id, nameEn }));
+  }, [terminals]);
 
   const fields: FilterFieldDef[] = useMemo(() => [
     { kind: "daterange", key: "dateRange", placeholder: "Date Range" },
-    { kind: "select", key: "branchId", placeholder: "Branch", options: (branches ?? []).map((b) => String(b.id)), labels: Object.fromEntries((branches ?? []).map((b) => [String(b.id), b.nameEn])) },
+    { kind: "select", key: "branchId", placeholder: "Branch", options: branches.map((b) => String(b.id)), labels: Object.fromEntries(branches.map((b) => [String(b.id), b.nameEn])) },
     { kind: "select", key: "terminalId", placeholder: "Terminal", options: (terminals ?? []).map((t) => String(t.id)), labels: Object.fromEntries((terminals ?? []).map((t) => [String(t.id), t.name])) },
     { kind: "select", key: "cashier", placeholder: "Cashier", options: Array.from(new Set((shifts ?? []).map((s) => s.cashierName))) },
     { kind: "select", key: "status", placeholder: "Status", options: SHIFT_STATUSES, labels: STATUS_LABELS },
@@ -79,16 +85,26 @@ export function CashierShiftPage() {
 
   const pagination = usePagination(filtered, PAGE_SIZE, JSON.stringify(applied));
 
+  // The two count cards drive the Status filter they summarise; the two money cards are totals over
+  // every shift and have no single status to filter to, so they stay plain readouts.
+  const appliedStatus = (applied.status as string[]) ?? [];
+  const filterByStatus = (s: string) => () => {
+    const next = appliedStatus.length === 1 && appliedStatus[0] === s ? [] : [s];
+    setDraft((d) => ({ ...d, status: next }));
+    setApplied((a) => ({ ...a, status: next }));
+  };
   const kpis = useMemo(() => {
     const open = all.filter((s) => s.status === "Open");
     const needsReview = all.filter((s) => s.status === "NeedsReview");
+    const only = (s: string) => appliedStatus.length === 1 && appliedStatus[0] === s;
     return [
-      { label: "Open Shifts", value: open.length, sub: "Currently active", tone: "info" as const },
+      { label: "Open Shifts", value: open.length, sub: "Currently active", tone: "info" as const, onSelect: filterByStatus("Open"), active: only("Open") },
       { label: "Total Float", value: fmtSar(open.reduce((s, x) => s + x.openingFloat, 0)), sub: "All open terminals", tone: "info" as const },
       { label: "Cash Sales", value: fmtSar(all.reduce((s, x) => s + x.cashSales, 0)), sub: `${all.length} shifts`, tone: "success" as const },
-      { label: "Needs Review", value: needsReview.length, sub: "Variance over threshold", tone: needsReview.length > 0 ? ("critical" as const) : ("success" as const) },
+      { label: "Needs Review", value: needsReview.length, sub: "Variance over threshold", tone: needsReview.length > 0 ? ("critical" as const) : ("success" as const), onSelect: filterByStatus("NeedsReview"), active: only("NeedsReview") },
     ];
-  }, [all]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [all, appliedStatus.join("|")]);
 
   function handleExport() {
     exportToCsv("cashier-shifts.csv", ["Shift ID", "Cashier", "Terminal", "Opened", "Closed", "Opening Float", "Cash Sales", "Expected", "Counted", "Variance", "Status"],
@@ -117,7 +133,7 @@ export function CashierShiftPage() {
         resultLabel={`${filtered.length} of ${all.length}${isFetching ? " · refreshing…" : ""}`}
       />
 
-      <KpiGrid items={kpis} />
+      <KpiGrid items={kpis} scope="cashier-shifts" />
 
       <SectionCard title="Shift Ledger" desc={`${filtered.length} records`}>
         <div className="overflow-x-auto">
@@ -146,11 +162,11 @@ export function CashierShiftPage() {
                   <TableCell>{s.terminalName}</TableCell>
                   <TableCell className="text-muted-foreground">{fmtTime(s.openedAt)}</TableCell>
                   <TableCell className="text-muted-foreground">{fmtTime(s.closedAt)}</TableCell>
-                  <TableCell className="text-right">{fmtSar(s.openingFloat)}</TableCell>
-                  <TableCell className="text-right">{fmtSar(s.cashSales)}</TableCell>
-                  <TableCell className="text-right">{fmtSar(s.expectedCash)}</TableCell>
-                  <TableCell className="text-right">{s.countedCash === null ? "—" : fmtSar(s.countedCash)}</TableCell>
-                  <TableCell className="text-right">{s.variance === null ? "—" : fmtSar(s.variance)}</TableCell>
+                  <TableCell className="text-right"><CurrencyText value={fmtSar(s.openingFloat)} /></TableCell>
+                  <TableCell className="text-right"><CurrencyText value={fmtSar(s.cashSales)} /></TableCell>
+                  <TableCell className="text-right"><CurrencyText value={fmtSar(s.expectedCash)} /></TableCell>
+                  <TableCell className="text-right"><CurrencyText value={s.countedCash === null ? "—" : fmtSar(s.countedCash)} /></TableCell>
+                  <TableCell className="text-right"><CurrencyText value={s.variance === null ? "—" : fmtSar(s.variance)} /></TableCell>
                   <TableCell><Pill tone={statusTone(s.status)}>{s.status}</Pill></TableCell>
                   <TableCell>
                     <RowActionsMenu
@@ -178,7 +194,7 @@ export function CashierShiftPage() {
         )}
       </SectionCard>
 
-      <OpenShiftDialog open={opening} onOpenChange={setOpening} branchId={effectiveBranchId} />
+      <OpenShiftDialog open={opening} onOpenChange={setOpening} />
       <CloseShiftDialog shift={closingShift} onClose={() => setClosingShift(null)} />
       <CashMovementDialog shift={movementShift} onClose={() => setMovementShift(null)} />
       <CashMovementsDialog shiftId={movementsShiftId} onClose={() => setMovementsShiftId(null)} />

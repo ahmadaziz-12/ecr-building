@@ -5,6 +5,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Pill } from "@/components/buildpos/sections";
 import type { Severity } from "@/lib/buildpos/format";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 export type BulkActionRow = { id: number; primary: string; secondary?: string; status?: string; statusTone?: Severity };
 
@@ -105,8 +106,8 @@ export function BulkActionSheet({ config, onOpenChange }: { config: BulkActionCo
                   >
                     <Checkbox checked={selected.has(r.id)} onCheckedChange={() => toggle(r.id)} />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-foreground">{r.primary}</p>
-                      {r.secondary && <p className="truncate text-xs text-muted-foreground">{r.secondary}</p>}
+                      <p className="truncate text-sm font-medium text-foreground"><CurrencyText value={r.primary} /></p>
+                      {r.secondary && <p className="truncate text-xs text-muted-foreground"><CurrencyText value={r.secondary} /></p>}
                     </div>
                     {r.status && <Pill tone={r.statusTone ?? "muted"}>{r.status}</Pill>}
                   </label>

@@ -103,6 +103,7 @@ import {
 } from "@/lib/buildpos/offline-queue";
 import { useCreateQuotation } from "@/lib/api/pos";
 import { apiPost } from "@/lib/api/client";
+import { CurrencyText, SARIcon } from "@/lib/buildpos/currency";
 import { useTerminals, useBranches } from "@/lib/api/admin";
 import {
   useCustomers,
@@ -1873,12 +1874,15 @@ export function PosCheckout() {
                   {bundleSuggestion.missing.length > 0 &&
                     `Add ${bundleSuggestion.missing.map((l) => l.productName).join(", ")} to complete it — `}
                   Save{" "}
-                  {money(
-                    Math.max(
-                      0,
-                      bundleSuggestion.bundle.individualTotal - bundleSuggestion.bundle.bundlePrice,
-                    ),
-                  )}{" "}
+                  <CurrencyText
+                    value={money(
+                      Math.max(
+                        0,
+                        bundleSuggestion.bundle.individualTotal -
+                          bundleSuggestion.bundle.bundlePrice,
+                      ),
+                    )}
+                  />{" "}
                   vs individual prices.
                 </p>
               </div>
@@ -1979,7 +1983,7 @@ export function PosCheckout() {
                             {b.individualTotal.toFixed(2)}
                           </span>{" "}
                           <span className="font-mono font-semibold text-brand">
-                            {b.bundlePrice.toFixed(2)} ر.س
+                            {b.bundlePrice.toFixed(2)} <SARIcon />
                           </span>{" "}
                           <span className="rounded bg-success/10 px-1 py-0.5 text-[10px] font-semibold text-success">
                             Save {savingsPct}%
@@ -2237,7 +2241,7 @@ export function PosCheckout() {
                       <p className="mt-2 font-display text-lg font-bold text-foreground">
                         {p.price.toFixed(2)}{" "}
                         <span className="text-xs font-medium text-muted-foreground">
-                          ر.س / {p.uom}
+                          <SARIcon /> / {p.uom}
                         </span>
                       </p>
                     </button>
@@ -2274,7 +2278,7 @@ export function PosCheckout() {
                   </div>
                   <span className="flex flex-none items-center gap-2">
                     <span className="font-mono text-sm font-semibold text-foreground">
-                      {money(h.total)}
+                      <CurrencyText value={money(h.total)} />
                     </span>
                     <span className="flex items-center gap-1 rounded-md bg-brand/10 px-2 py-1 text-xs font-semibold text-brand">
                       <Play className="h-3 w-3" /> Resume
@@ -2369,8 +2373,9 @@ export function PosCheckout() {
               {(customer.type === "Contractor" || customer.type === "B2B") && (
                 <div className="flex items-center justify-between rounded-lg bg-canvas px-2.5 py-1 text-[11px] text-muted-foreground">
                   <span>
-                    Credit: {money(customer.creditLimit - customer.outstanding)} available of{" "}
-                    {money(customer.creditLimit)}
+                    Credit:{" "}
+                    <CurrencyText value={money(customer.creditLimit - customer.outstanding)} />{" "}
+                    available of <CurrencyText value={money(customer.creditLimit)} />
                   </span>
                   {creditNeedsApproval && (
                     <button
@@ -2393,9 +2398,11 @@ export function PosCheckout() {
                   </span>
                   {nextTierProgress(customer.loyaltyLifetimeSpend, tierConfig) && (
                     <span>
-                      {money(
-                        nextTierProgress(customer.loyaltyLifetimeSpend, tierConfig)!.remaining,
-                      )}{" "}
+                      <CurrencyText
+                        value={money(
+                          nextTierProgress(customer.loyaltyLifetimeSpend, tierConfig)!.remaining,
+                        )}
+                      />{" "}
                       to {nextTierProgress(customer.loyaltyLifetimeSpend, tierConfig)!.nextTier}
                     </span>
                   )}
@@ -2574,7 +2581,8 @@ export function PosCheckout() {
                     )}
                   </p>
                   <p className="font-mono text-[10px] text-muted-foreground">
-                    {b.code} · saves {money((b.individualTotal - b.bundlePrice) * b.qty)} vs
+                    {b.code} · saves{" "}
+                    <CurrencyText value={money((b.individualTotal - b.bundlePrice) * b.qty)} /> vs
                     individual
                   </p>
                 </div>
@@ -2604,7 +2612,7 @@ export function PosCheckout() {
                   </button>
                 </div>
                 <p className="font-mono text-sm font-semibold text-foreground">
-                  {money(b.bundlePrice * b.qty)}
+                  <CurrencyText value={money(b.bundlePrice * b.qty)} />
                 </p>
               </div>
             </div>
@@ -2838,24 +2846,24 @@ export function PosCheckout() {
                       {l.manualUnitPrice != null ? (
                         <div className="text-right">
                           <p className="font-mono text-[10px] text-muted-foreground line-through">
-                            {money(l.price * l.qty)}
+                            <CurrencyText value={money(l.price * l.qty)} />
                           </p>
                           <p className="font-mono text-sm font-semibold text-brand">
-                            {money(l.manualUnitPrice * l.qty)}
+                            <CurrencyText value={money(l.manualUnitPrice * l.qty)} />
                           </p>
                         </div>
                       ) : lineChargeTotal(l) !== l.price * l.qty ? (
                         <div className="text-right">
                           <p className="font-mono text-[10px] text-muted-foreground line-through">
-                            {money(l.price * l.qty)}
+                            <CurrencyText value={money(l.price * l.qty)} />
                           </p>
                           <p className="font-mono text-sm font-semibold text-foreground">
-                            {money(lineChargeTotal(l))}
+                            <CurrencyText value={money(lineChargeTotal(l))} />
                           </p>
                         </div>
                       ) : (
                         <p className="font-mono text-sm font-semibold text-foreground">
-                          {money(l.price * l.qty)}
+                          <CurrencyText value={money(l.price * l.qty)} />
                         </p>
                       )}
                     </div>
@@ -2976,24 +2984,26 @@ export function PosCheckout() {
                   {l.manualUnitPrice != null ? (
                     <div className="text-right">
                       <p className="font-mono text-[10px] text-muted-foreground line-through">
-                        {money(l.price * l.qty)}
+                        <CurrencyText value={money(l.price * l.qty)} />
                       </p>
                       <p className="font-mono text-sm font-semibold text-brand">
-                        {money(l.manualUnitPrice * l.qty)}
+                        <CurrencyText value={money(l.manualUnitPrice * l.qty)} />
                       </p>
                     </div>
                   ) : lineDiscountPct(l) > 0 ? (
                     <div className="text-right">
                       <p className="font-mono text-[10px] text-muted-foreground line-through">
-                        {money(l.price * l.qty)}
+                        <CurrencyText value={money(l.price * l.qty)} />
                       </p>
                       <p className="font-mono text-sm font-semibold text-foreground">
-                        {money(l.price * l.qty * (1 - lineDiscountPct(l) / 100))}
+                        <CurrencyText
+                          value={money(l.price * l.qty * (1 - lineDiscountPct(l) / 100))}
+                        />
                       </p>
                     </div>
                   ) : (
                     <p className="font-mono text-sm font-semibold text-foreground">
-                      {money(l.price * l.qty)}
+                      <CurrencyText value={money(l.price * l.qty)} />
                     </p>
                   )}
                 </div>
@@ -3135,7 +3145,7 @@ export function PosCheckout() {
                 <option value="">Delivery zone (fee)…</option>
                 {(deliveryZones ?? []).map((z) => (
                   <option key={z.id} value={z.id}>
-                    {z.name} — {z.fee.toFixed(0)} ر.س
+                    {z.name} — {z.fee.toFixed(0)} <SARIcon />
                   </option>
                 ))}
               </select>
@@ -3182,7 +3192,9 @@ export function PosCheckout() {
             {autoDeliveryFee && (
               <p className="text-muted-foreground">
                 Delivery fee (auto):{" "}
-                <span className="font-medium text-foreground">{money(autoDeliveryFee.amount)}</span>
+                <span className="font-medium text-foreground">
+                  <CurrencyText value={money(autoDeliveryFee.amount)} />
+                </span>
               </p>
             )}
             {!deliveryDetailsComplete && (
@@ -3198,7 +3210,8 @@ export function PosCheckout() {
           {appliedCoupon?.valid ? (
             <div className="flex items-center justify-between rounded-md bg-brand/10 px-2.5 py-1.5">
               <span className="flex items-center gap-1.5 font-medium text-brand">
-                <Tag className="h-3.5 w-3.5" /> {appliedCoupon.code} — saves {money(couponAmount)}
+                <Tag className="h-3.5 w-3.5" /> {appliedCoupon.code} — saves{" "}
+                <CurrencyText value={money(couponAmount)} />
               </span>
               <button
                 onClick={() => setAppliedCoupon(null)}
@@ -3315,7 +3328,7 @@ export function PosCheckout() {
             >
               <span className="text-foreground">{f.label}</span>
               <span className="flex items-center gap-1.5">
-                {money(f.amount)}
+                <CurrencyText value={money(f.amount)} />
                 <button
                   onClick={() => setCustomFees((fs) => fs.filter((_, idx) => idx !== i))}
                   className="text-muted-foreground hover:text-critical"
@@ -3330,7 +3343,9 @@ export function PosCheckout() {
         <div className="space-y-1.5 border-t border-black/5 bg-canvas px-4 py-3 text-sm">
           <div className="flex justify-between text-muted-foreground">
             <span>Subtotal ({cart.length} lines)</span>
-            <span>{money(subtotal)}</span>
+            <span>
+              <CurrencyText value={money(subtotal)} />
+            </span>
           </div>
           {totalCartWeight > 0 && (
             <div className="flex justify-between text-muted-foreground">
@@ -3346,7 +3361,9 @@ export function PosCheckout() {
                   ? `Contractor discount ${contractorDiscountPct}%`
                   : "Pricing rule discount"}
               </span>
-              <span>-{money(contractorDiscount)}</span>
+              <span>
+                -<CurrencyText value={money(contractorDiscount)} />
+              </span>
             </div>
           )}
           {tradeValueAmount > 0 && (
@@ -3354,29 +3371,37 @@ export function PosCheckout() {
               <span className="flex items-center gap-1">
                 <Percent className="h-3.5 w-3.5" /> Trade Value {tradeValuePct}%
               </span>
-              <span>-{money(tradeValueAmount)}</span>
+              <span>
+                -<CurrencyText value={money(tradeValueAmount)} />
+              </span>
             </div>
           )}
           {couponAmount + manualAmount > 0 && (
             <div className="flex justify-between text-muted-foreground">
               <span>Coupon / manual discount</span>
-              <span>-{money(couponAmount + manualAmount)}</span>
+              <span>
+                -<CurrencyText value={money(couponAmount + manualAmount)} />
+              </span>
             </div>
           )}
           {feesTotal > 0 && (
             <div className="flex justify-between text-muted-foreground">
               <span>Fees</span>
-              <span>{money(feesTotal)}</span>
+              <span>
+                <CurrencyText value={money(feesTotal)} />
+              </span>
             </div>
           )}
           <div className="flex justify-between text-muted-foreground">
             <span>VAT</span>
-            <span>{money(vat)}</span>
+            <span>
+              <CurrencyText value={money(vat)} />
+            </span>
           </div>
           <div className="mt-1 flex items-center justify-between border-t border-black/10 pt-2">
             <span className="font-display text-base font-semibold text-foreground">Total</span>
             <span key={total} className="pos-pop font-display text-2xl font-bold text-brand">
-              {money(Math.max(0, total))}
+              <CurrencyText value={money(Math.max(0, total))} />
             </span>
           </div>
         </div>
@@ -3397,7 +3422,8 @@ export function PosCheckout() {
             disabled={cartIsEmpty || !deliveryDetailsComplete}
             className="flex items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition hover:bg-brand/90 hover:shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-brand"
           >
-            <ReceiptText className="h-4 w-4" /> Charge {money(Math.max(0, total))}
+            <ReceiptText className="h-4 w-4" /> Charge{" "}
+            <CurrencyText value={money(Math.max(0, total))} />
           </button>
         </div>
       </aside>

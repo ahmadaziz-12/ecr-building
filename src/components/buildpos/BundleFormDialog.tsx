@@ -8,6 +8,8 @@ import { useProducts } from "@/lib/api/catalog";
 import { useBranches } from "@/lib/api/admin";
 import { useCreateBundle, useUpdateBundle, type BundleDto } from "@/lib/api/bundles";
 import { formatSAR } from "@/lib/buildpos/format";
+import { CurrencyText } from "@/lib/buildpos/currency";
+import { SARIcon } from "@/lib/buildpos/currency";
 
 // Mirrors backend CustomerType (Customer.cs) exactly — the eligibility check compares these literal
 // member names, not display labels.
@@ -281,7 +283,9 @@ export function BundleFormDialog({
                 />
               </div>
               <div>
-                <label className={labelClass}>Bundle price (ر.س)</label>
+                <label className={labelClass}>
+                  Bundle price (<SARIcon />)
+                </label>
                 <input
                   type="number"
                   min={0}
@@ -461,16 +465,24 @@ export function BundleFormDialog({
               <div className="flex items-start gap-2 rounded-xl border border-success/20 bg-success/5 p-3.5">
                 <Check className="mt-0.5 h-4 w-4 flex-none text-success" />
                 <p className="text-sm text-foreground/90">
-                  Individual total: <strong>{formatSAR(individualTotal)}</strong>
+                  Individual total:{" "}
+                  <strong>
+                    <CurrencyText value={formatSAR(individualTotal)} />
+                  </strong>
                   {price > 0 && (
                     <>
                       {" "}
-                      · Bundle price: <strong>{formatSAR(price)}</strong>
+                      · Bundle price:{" "}
+                      <strong>
+                        <CurrencyText value={formatSAR(price)} />
+                      </strong>
                       {savings > 0 ? (
                         <>
                           {" "}
                           · Customer saves{" "}
-                          <strong className="text-success">{formatSAR(savings)}</strong>
+                          <strong className="text-success">
+                            <CurrencyText value={formatSAR(savings)} />
+                          </strong>
                         </>
                       ) : savings < 0 ? (
                         <>

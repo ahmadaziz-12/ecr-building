@@ -28,6 +28,7 @@ import {
 } from "./ReportFilterBar";
 import { ReportTable } from "./ReportTable";
 import type { ReportColumn, ReportDetail } from "./report-columns";
+import { CurrencyText } from "@/lib/buildpos/currency";
 import {
   ExportMenu,
   KPI_PANEL_COLUMNS,
@@ -543,7 +544,7 @@ export function ReportsConsole() {
                 ],
               }}
             />
-            <KpiGrid items={salesKpis} />
+            <KpiGrid items={salesKpis} scope="report-sales" />
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <ReportTable
                 title="By Payment Method"
@@ -606,7 +607,7 @@ export function ReportsConsole() {
                 panels: [kpiPanel("Discount Utilization", discountKpis)],
               }}
             />
-            <KpiGrid items={discountKpis} />
+            <KpiGrid items={discountKpis} scope="report-discounts" />
             <SectionCard title="Reading This Report" desc="BRD §6.2 — discount authorization tiers">
               <p className="px-1 text-sm leading-relaxed text-muted-foreground">
                 A rising discount rate means margin is leaking through manual discounts. Ceilings
@@ -643,7 +644,7 @@ export function ReportsConsole() {
                 ],
               }}
             />
-            <KpiGrid items={vatKpis} />
+            <KpiGrid items={vatKpis} scope="report-vat" />
             <ReportTable
               title="Output VAT by Rate"
               desc="Zero-rated turnover is listed as its own rate — a VAT return declares it explicitly. Excludes voided orders; reversals come from approved returns."
@@ -671,7 +672,7 @@ export function ReportsConsole() {
         {table && def.columns && (
           <>
             {KPI_BUILDERS[active] && rows.length > 0 && (
-              <KpiGrid items={KPI_BUILDERS[active]!(rows)} />
+              <KpiGrid items={KPI_BUILDERS[active]!(rows)} scope={`report-${active}`} />
             )}
             <ReportTable
               title={def.tableTitle ?? def.label}
@@ -718,7 +719,7 @@ export function ReportsConsole() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        {money(r.outstanding)}
+                        <CurrencyText value={money(r.outstanding)} />
                       </TableCell>
                     </TableRow>
                   );

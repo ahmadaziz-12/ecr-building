@@ -5,6 +5,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useCloseShift, type CashierShiftDto } from "@/lib/api/pos";
+import { SARIcon } from "@/lib/buildpos/currency";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 function fmtSar(n: number): string {
   return `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} ر.س`;
@@ -40,17 +42,17 @@ export function CloseShiftDialog({ shift, onClose }: { shift: CashierShiftDto | 
       <DialogContent className="max-w-sm">
         <DialogHeader><DialogTitle>Close Shift — {shift?.terminalName}</DialogTitle></DialogHeader>
         <div className="rounded-lg border border-black/5 bg-canvas p-3 text-sm">
-          <div className="flex justify-between"><span className="text-muted-foreground">Opening Float</span><span>{shift && fmtSar(shift.openingFloat)}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Cash Sales</span><span>{shift && fmtSar(shift.cashSales)}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Cash In/Out</span><span>{shift && fmtSar(shift.cashIn - shift.cashOut)}</span></div>
-          <div className="mt-1 flex justify-between border-t border-black/10 pt-1 font-semibold"><span>Expected Cash</span><span>{shift && fmtSar(shift.expectedCash)}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Opening Float</span><span>{shift && <CurrencyText value={fmtSar(shift.openingFloat)} />}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Cash Sales</span><span>{shift && <CurrencyText value={fmtSar(shift.cashSales)} />}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Cash In/Out</span><span>{shift && <CurrencyText value={fmtSar(shift.cashIn - shift.cashOut)} />}</span></div>
+          <div className="mt-1 flex justify-between border-t border-black/10 pt-1 font-semibold"><span>Expected Cash</span><span>{shift && <CurrencyText value={fmtSar(shift.expectedCash)} />}</span></div>
         </div>
         <div>
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Counted Cash (ر.س) <span className="text-critical">*</span></label>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Counted Cash (<SARIcon />) <span className="text-critical">*</span></label>
           <Input type="number" value={counted} onChange={(e) => setCounted(e.target.value)} autoFocus />
           {variance !== null && (
             <p className={`mt-1 text-xs ${Math.abs(variance) > 20 ? "text-critical" : "text-muted-foreground"}`}>
-              Variance: {variance >= 0 ? "+" : ""}{variance.toFixed(2)} ر.س {Math.abs(variance) > 20 && "— will be flagged for review"}
+              Variance: {variance >= 0 ? "+" : ""}{variance.toFixed(2)} <SARIcon /> {Math.abs(variance) > 20 && "— will be flagged for review"}
             </p>
           )}
         </div>

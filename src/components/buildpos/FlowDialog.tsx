@@ -11,6 +11,7 @@ import { useStockLevels, useBranchStockLevels } from "@/lib/api/inventory";
 import { sellableUoms, unitPriceFor, factorToStock } from "@/lib/buildpos/uom";
 import { fileToCompressedDataUrl } from "@/lib/buildpos/image";
 import { SearchableSelect } from "@/components/buildpos/SearchableSelect";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 type LineItemRow = Record<string, string>;
 
@@ -166,7 +167,7 @@ function LineItemsField({
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {columns.map((c) => (
               <div key={c.key} className={c.type === "branch" ? "col-span-2 sm:col-span-3" : ""}>
-                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{c.label}</label>
+                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><CurrencyText value={c.label} /></label>
                 {c.type === "product" ? (
                   <>
                     <SearchableSelect
@@ -756,7 +757,7 @@ export function FlowDialog({
                           {s.label}
                         </dt>
                         <dd className="mt-0.5 truncate text-sm font-medium text-foreground">
-                          {s.val === "on" ? "Enabled" : s.val}
+                          {s.val === "on" ? "Enabled" : <CurrencyText value={s.val} />}
                         </dd>
                       </div>
                     ))}

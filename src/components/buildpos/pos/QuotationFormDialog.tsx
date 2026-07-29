@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { SARIcon } from "@/lib/buildpos/currency";
 import {
   Select,
   SelectContent,
@@ -336,8 +337,12 @@ export function QuotationFormDialog({
                 {[customer.address, customer.district, customer.city].filter(Boolean).join(", ") ||
                   "No address on file"}
               </span>
-              <span>Credit limit {customer.creditLimit.toFixed(2)} ر.س</span>
-              <span>Outstanding {customer.outstanding.toFixed(2)} ر.س</span>
+              <span>
+                Credit limit {customer.creditLimit.toFixed(2)} <SARIcon />
+              </span>
+              <span>
+                Outstanding {customer.outstanding.toFixed(2)} <SARIcon />
+              </span>
             </div>
           )}
         </div>
@@ -405,7 +410,9 @@ export function QuotationFormDialog({
                       )}
                     </span>
                     <span className="shrink-0 pl-2 text-right text-muted-foreground">
-                      <span className="block">{price.toFixed(2)} ر.س</span>
+                      <span className="block">
+                        {price.toFixed(2)} <SARIcon />
+                      </span>
                       <span
                         className={`block text-[10px] ${outOfStock ? "text-critical" : "text-muted-foreground/70"}`}
                       >

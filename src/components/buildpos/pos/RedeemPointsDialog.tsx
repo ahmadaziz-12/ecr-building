@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useCustomerLoyalty, useLoyaltyProgramConfig, useRedeemPoints } from "@/lib/api/loyalty";
 import type { CustomerDto } from "@/lib/api/pos";
+import { SARIcon } from "@/lib/buildpos/currency";
 
 export function RedeemPointsDialog({
   open,
@@ -134,10 +135,13 @@ export function RedeemPointsDialog({
             <p
               className={`mt-1 text-xs ${insufficientBalance ? "text-critical" : "text-muted-foreground"}`}
             >
-              {summary.points} points available (≈ {summary.pointsValue.toFixed(2)} ر.س)
-              {pointsNum > 0 &&
-                !insufficientBalance &&
-                ` · redeems for ${(pointsNum * sarPerPoint).toFixed(2)} ر.س`}
+              {summary.points} points available (≈ {summary.pointsValue.toFixed(2)} <SARIcon />)
+              {pointsNum > 0 && !insufficientBalance && (
+                <>
+                  {" · redeems for "}
+                  {(pointsNum * sarPerPoint).toFixed(2)} <SARIcon />
+                </>
+              )}
             </p>
           )}
         </div>

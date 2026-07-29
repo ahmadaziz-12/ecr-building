@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useReceivePurchaseOrder, type PurchaseOrderDto } from "@/lib/api/procurement";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 type DraftLine = { qty: string; batchNo: string; expiryDate: string };
 
@@ -152,7 +153,7 @@ export function ReceivePoDialog({ po, onClose }: { po: PurchaseOrderDto | null; 
             <div className="flex items-center justify-between border-t border-black/5 pt-3">
               <span className="text-sm text-muted-foreground">
                 Receiving <span className="font-semibold text-foreground">{toReceive.length}</span> line(s) ·{" "}
-                <span className="font-semibold text-foreground">{fmtSar(receiveValue)}</span>
+                <span className="font-semibold text-foreground"><CurrencyText value={fmtSar(receiveValue)} /></span>
               </span>
               <div className="flex gap-2">
                 <Button variant="ghost" size="sm" className="h-9" onClick={onClose} disabled={receivePo.isPending}>

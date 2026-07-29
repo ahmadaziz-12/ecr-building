@@ -38,7 +38,7 @@ export function HrActivityLogsPage() {
         { label: "Leave Approvals", value: kpi.leaves || 3, sub: "Requests", tone: "success" },
         { label: "Documents Uploaded", value: kpi.docs || 6, sub: "Verified queue", tone: "info" },
         { label: "Failed Access", value: kpi.failed, sub: "Security", tone: "critical" },
-      ]} />
+      ]} scope="hr-logs" />
       <div className="flex items-center gap-2 rounded-xl border border-black/5 bg-white p-2">
         <input placeholder="Search event or employee…" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 w-72 rounded-lg border border-black/10 bg-canvas px-3 text-sm" />
         <MultiSelectFilter label="Severity" allLabel="All Severity" options={SEVERITIES} labels={SEVERITY_LABELS} selected={sev} onChange={setSev} />

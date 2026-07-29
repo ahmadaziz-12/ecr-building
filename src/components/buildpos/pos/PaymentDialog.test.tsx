@@ -31,6 +31,43 @@ function b2bCustomer(overrides: Partial<CustomerDto> = {}): CustomerDto {
   };
 }
 
+describe("PaymentDialog — cash tender", () => {
+  it("starts with no amount entered and Confirm disabled", () => {
+    renderDialog(<PaymentDialog open total={43.7} onOpenChange={() => {}} onCharge={vi.fn()} />);
+
+    expect(screen.getByLabelText<HTMLInputElement>(/customer gives/i).value).toBe("");
+    expect(screen.getByRole("button", { name: /enter the cash received/i })).toBeDisabled();
+  });
+
+  it("enables Confirm once a covering amount is picked, and only highlights the picked button", async () => {
+    const user = userEvent.setup();
+    const onCharge = vi.fn().mockResolvedValue(undefined);
+    renderDialog(<PaymentDialog open total={43.7} onOpenChange={() => {}} onCharge={onCharge} />);
+
+    // "Exact" must not look chosen until it is chosen — picking 50 moves the selection to 50.
+    const exact = screen.getByRole("button", { name: "Exact" });
+    const fifty = screen.getByRole("button", { name: "50" });
+    expect(exact).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(fifty);
+    expect(fifty).toHaveAttribute("aria-pressed", "true");
+    expect(exact).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(screen.getByRole("button", { name: /confirm cash payment/i }));
+    expect(onCharge).toHaveBeenCalledWith([{ method: "Cash", amount: 43.7 }]);
+  });
+
+  it("keeps Confirm disabled while the tender is short of the total", async () => {
+    const user = userEvent.setup();
+    renderDialog(<PaymentDialog open total={143.7} onOpenChange={() => {}} onCharge={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "50" }));
+
+    expect(screen.getByText(/short by/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /confirm cash payment/i })).toBeDisabled();
+  });
+});
+
 describe("PaymentDialog — Account Credit (BRD §4.2)", () => {
   it("does not show an Account tab for a retail customer", () => {
     renderDialog(<PaymentDialog open total={100} onOpenChange={() => {}} onCharge={vi.fn()} customer={b2bCustomer({ type: "Retail" })} />);
@@ -44,9 +81,12 @@ describe("PaymentDialog — Account Credit (BRD §4.2)", () => {
 
     await user.click(screen.getByRole("tab", { name: /account/i }));
 
-    expect(screen.getByText("5,000.00 ر.س")).toBeInTheDocument(); // credit limit
-    expect(screen.getByText("3,000.00 ر.س")).toBeInTheDocument(); // outstanding
-    expect(screen.getByText("2,000.00 ر.س")).toBeInTheDocument(); // available credit
+    // Amounts render as "<number> <SARIcon/>", so the figure and the currency are separate nodes —
+    // assert on the enclosing element's text, which is what the cashier actually reads.
+    const amounts = screen.getAllByText(/[\d,]+\.\d\d/).map((el) => el.textContent?.trim());
+    expect(amounts).toContain("5,000.00"); // credit limit
+    expect(amounts).toContain("3,000.00"); // outstanding
+    expect(amounts).toContain("2,000.00"); // available credit
   });
 
   it("warns when the charge exceeds available credit", async () => {

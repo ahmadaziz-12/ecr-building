@@ -37,6 +37,7 @@ import {
   type DateRangeValue,
 } from "@/components/buildpos/FilterControls";
 import { getModule } from "@/lib/buildpos/modules";
+import { CurrencyText } from "@/lib/buildpos/currency";
 import type { Severity } from "@/lib/buildpos/format";
 import { getFlow, type Field, type Flow } from "@/lib/buildpos/flows";
 import { FlowDialog } from "@/components/buildpos/FlowDialog";
@@ -53,6 +54,7 @@ import {
 import { ApproveExchangeDialog } from "@/components/buildpos/pos/ApproveExchangeDialog";
 import { NoReceiptReturnDialog } from "@/components/buildpos/pos/NoReceiptReturnDialog";
 import { useModuleLiveData } from "@/lib/api/module-live-data";
+import type { LiveKpi } from "@/lib/api/admin";
 import { useFlowSubmitHandlers } from "@/lib/api/flow-submit-handlers";
 import { useRowActions, type RowAction } from "@/lib/api/row-actions";
 import {
@@ -63,6 +65,9 @@ import {
 } from "@/lib/api/row-details";
 import { useBulkActions } from "@/lib/api/bulk-actions";
 import { BulkActionSheet } from "@/components/buildpos/BulkActionSheet";
+import { NamePromptDialog } from "@/components/buildpos/NamePromptDialog";
+import { CardCustomizer } from "@/components/buildpos/CardCustomizer";
+import { applyCardPreference, useCardPreferences } from "@/lib/buildpos/card-preferences";
 
 function tone(status: string): Severity {
   const k = status.toLowerCase();
@@ -202,6 +207,9 @@ export function ModulePage({
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [dateRangeFilters, setDateRangeFilters] = useState<Record<string, DateRangeValue>>({});
   const [searchText, setSearchText] = useState("");
+  // Label of the summary card currently acting as a filter (see the KPI grid below) — null when the
+  // table is showing everything.
+  const [activeKpi, setActiveKpi] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [detailRow, setDetailRow] = useState<{
     id: number | undefined;
@@ -209,6 +217,7 @@ export function ModulePage({
   } | null>(null);
   const [activeBulkLabel, setActiveBulkLabel] = useState<string | null>(null);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
 
   const live = useModuleLiveData(pathname);
   const submitHandlers = useFlowSubmitHandlers();
@@ -256,6 +265,7 @@ export function ModulePage({
           : "",
     );
     setActiveTab(0);
+    setActiveKpi(null);
     setPage(1);
   }, [pathname, search.category, search.status, search.module, search.sku, search.code]);
 
@@ -268,9 +278,7 @@ export function ModulePage({
     }
   }, [pathname]);
 
-  function handleSaveView() {
-    const name = window.prompt("Name this view:");
-    if (!name) return;
+  function handleSaveView(name: string) {
     const next = [
       ...savedViews.filter((v) => v.name !== name),
       { name, columnFilters, dateRangeFilters, activeTab, searchText },
@@ -296,7 +304,17 @@ export function ModulePage({
   const statusCol = live?.statusCol ?? m?.statusCol;
   // A live page whose mapper supplies no kpis renders NO kpi grid — falling back to the static
   // catalog numbers would show fake figures next to real rows. Pure-demo pages keep theirs.
-  const kpis = live ? (live.kpis ?? []) : (m?.kpis ?? []);
+  // Static catalog KPIs share LiveKpi's shape minus the optional `filter` — only live mappers can
+  // supply a predicate, since a demo page's rows aren't the rows the number was counted from.
+  const kpis: LiveKpi[] = live ? (live.kpis ?? []) : (m?.kpis ?? []);
+  // Which summary cards this user wants on this page, and in what order — scoped per route so the
+  // arrangement on Product Catalog is independent of the one on Categories.
+  const kpiLabels = useMemo(() => kpis.map((k) => k.label), [kpis]);
+  const cardPrefs = useCardPreferences(`module.${pathname}`, kpiLabels);
+  const visibleKpis = useMemo(
+    () => applyCardPreference(kpis, (k) => k.label, cardPrefs.order, cardPrefs.hidden),
+    [kpis, cardPrefs.order, cardPrefs.hidden],
+  );
   const baseRows = live?.rows ?? m?.rows ?? [];
   const ids = live?.ids;
 
@@ -338,6 +356,11 @@ export function ModulePage({
         row.some((cell) => String(cell).toLowerCase().includes(needle)),
       );
     }
+    // A clicked summary card narrows to exactly the rows that card counted. Matched by label
+    // against the live KPI list so a stale selection (the mapper changed, the page changed) just
+    // stops applying instead of blanking the table.
+    const kpiFilter = activeKpi ? kpis.find((k) => k.label === activeKpi)?.filter : undefined;
+    if (kpiFilter) rows = rows.filter(({ row }) => kpiFilter(row));
     return rows;
   }, [
     indexed,
@@ -349,6 +372,8 @@ export function ModulePage({
     dateRangeFilters,
     searchText,
     columns,
+    activeKpi,
+    kpis,
   ]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -367,6 +392,7 @@ export function ModulePage({
     setDateRangeFilters({});
     setSearchText("");
     setActiveTab(0);
+    setActiveKpi(null);
     setPage(1);
   }
 
@@ -403,7 +429,7 @@ export function ModulePage({
       return;
     }
     if (label === "Save View") {
-      handleSaveView();
+      setSaveViewOpen(true);
       return;
     }
     // "Audit" always means the same thing everywhere it appears: jump to this record's real,
@@ -611,25 +637,71 @@ export function ModulePage({
         </Button>
       </div>
 
-      {/* KPI grid */}
+      {/* KPI grid. A KPI whose mapper supplied a `filter` predicate is a real control: clicking it
+          narrows the table below to exactly the rows it counted, and clicking it again clears.
+          KPIs with no predicate (totals like "Categories") stay plain, non-interactive readouts. */}
       {kpis.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {kpis.map((k) => (
-            <div
-              key={k.label}
-              className="rounded-2xl border border-black/5 bg-white p-3.5 shadow-[0_1px_2px_rgba(15,10,50,0.04)]"
-            >
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {k.label}
-              </p>
-              <p className="mt-1 font-display text-xl font-bold text-foreground">{k.value}</p>
-              <span
-                className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${toneKpi[k.tone]}`}
+        <div className="flex justify-end">
+          <CardCustomizer
+            labels={Object.fromEntries(kpis.map((k) => [k.label, k.label]))}
+            prefs={cardPrefs}
+          />
+        </div>
+      )}
+      {kpis.length > 0 && (
+        <div className="grid grid-cols-2 items-stretch gap-3 md:grid-cols-4">
+          {visibleKpis.map((k) => {
+            const interactive = typeof k.filter === "function";
+            const isActive = activeKpi === k.label;
+            const body = (
+              <>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {k.label}
+                </p>
+                <p className="mt-1 font-display text-xl font-bold text-foreground">
+                  <CurrencyText value={k.value} />
+                </p>
+                <span
+                  className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${toneKpi[k.tone]}`}
+                >
+                  <CurrencyText value={k.sub} />
+                </span>
+                {interactive && (
+                  <span className="mt-2 block text-[10px] font-medium text-brand">
+                    {isActive ? "Filtering · click to clear" : "Click to filter"}
+                  </span>
+                )}
+              </>
+            );
+            if (!interactive) {
+              return (
+                <div
+                  key={k.label}
+                  className="rounded-2xl border border-black/5 bg-white p-3.5 shadow-[0_1px_2px_rgba(15,10,50,0.04)]"
+                >
+                  {body}
+                </div>
+              );
+            }
+            return (
+              <button
+                key={k.label}
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => {
+                  setActiveKpi(isActive ? null : k.label);
+                  setPage(1);
+                }}
+                className={`rounded-2xl border p-3.5 text-left shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md ${
+                  isActive
+                    ? "border-brand bg-brand/5 ring-1 ring-brand/30"
+                    : "border-black/5 bg-white"
+                }`}
               >
-                {k.sub}
-              </span>
-            </div>
-          ))}
+                {body}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -710,7 +782,9 @@ export function ModulePage({
                           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                             {s.label}
                           </p>
-                          <p className="text-sm font-semibold text-foreground">{row[s.col]}</p>
+                          <p className="text-sm font-semibold text-foreground">
+                            <CurrencyText value={String(row[s.col] ?? "")} />
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -811,7 +885,7 @@ export function ModulePage({
                       key={c}
                       className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
                     >
-                      {c}
+                      <CurrencyText value={c} />
                     </TableHead>
                   ))}
                   {hasRowActions && <TableHead className="w-8" />}
@@ -840,7 +914,9 @@ export function ModulePage({
                             {isStatus ? (
                               <Pill tone={tone(String(cell))}>{String(cell)}</Pill>
                             ) : (
-                              <span className={isFirst ? "" : "text-foreground/85"}>{cell}</span>
+                              <span className={isFirst ? "" : "text-foreground/85"}>
+                                <CurrencyText value={String(cell)} />
+                              </span>
                             )}
                           </TableCell>
                         );
@@ -992,6 +1068,14 @@ export function ModulePage({
           setDetailRow(null);
         }}
       />
+      <NamePromptDialog
+        open={saveViewOpen}
+        onOpenChange={setSaveViewOpen}
+        title="Save this view"
+        label="View name"
+        placeholder="e.g. Low stock — Riyadh"
+        onConfirm={handleSaveView}
+      />
     </div>
   );
 }
@@ -1050,10 +1134,10 @@ function RowDetailSheet({
                   {columns.map((c, j) => (
                     <div key={c} className="rounded-lg bg-canvas px-3 py-2">
                       <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        {c}
+                        <CurrencyText value={c} />
                       </dt>
                       <dd className="mt-0.5 truncate text-sm font-medium text-foreground">
-                        {String(detailRow.row[j] ?? "—")}
+                        <CurrencyText value={String(detailRow.row[j] ?? "—")} />
                       </dd>
                     </div>
                   ))}
@@ -1101,7 +1185,9 @@ function DetailSections({
                 <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   {f.label}
                 </dt>
-                <dd className="mt-0.5 truncate text-sm font-medium text-foreground">{f.value}</dd>
+                <dd className="mt-0.5 truncate text-sm font-medium text-foreground">
+                  <CurrencyText value={f.value} />
+                </dd>
               </div>
             ))}
           </dl>
@@ -1121,7 +1207,7 @@ function DetailSections({
                       key={c}
                       className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
                     >
-                      {c}
+                      <CurrencyText value={c} />
                     </TableHead>
                   ))}
                 </TableRow>
@@ -1131,7 +1217,7 @@ function DetailSections({
                   <TableRow key={i} className="hover:bg-transparent">
                     {r.map((cell, j) => (
                       <TableCell key={j} className="whitespace-nowrap text-xs">
-                        {cell}
+                        <CurrencyText value={String(cell)} />
                       </TableCell>
                     ))}
                   </TableRow>

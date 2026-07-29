@@ -258,7 +258,7 @@ export function ExpiryPage() {
         resultLabel={`${filtered.length} of ${activeRows.length}${isFetchingActive ? " · refreshing…" : ""}`}
       />
 
-      <KpiGrid items={kpis} />
+      <KpiGrid items={kpis} scope="expiry" />
 
       <SectionCard title={`${tab} Batches`} desc={`${filtered.length} records`}>
         <div className="overflow-x-auto">

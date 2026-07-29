@@ -5,6 +5,7 @@ import { STAGE_TONE, STAGES, useDeliveryStore, type DeliveryOrder, type Stage } 
 import { StageActionDialog } from "./StageActionDialog";
 import { CreateDeliveryDialog } from "./CreateDeliveryDialog";
 import { ArrowRight, GripVertical } from "lucide-react";
+import { SARIcon } from "@/lib/buildpos/currency";
 
 export function DeliveryPipeline() {
   const orders = useDeliveryStore((s) => s.orders);
@@ -45,7 +46,7 @@ export function DeliveryPipeline() {
                   <Pill tone={STAGE_TONE[stage]}>{items.length}</Pill>
                 </div>
                 <div className="mt-1 grid grid-cols-3 gap-1 text-[10px] text-muted-foreground">
-                  <span>Value <br /><strong className="text-foreground">{Math.round(value)} ر.س</strong></span>
+                  <span>Value <br /><strong className="text-foreground">{Math.round(value)} <SARIcon /></strong></span>
                   <span>Weight <br /><strong className="text-foreground">{weight.toFixed(1)} t</strong></span>
                   <span>Overdue <br /><strong className={overdue ? "text-critical" : "text-foreground"}>{overdue}</strong></span>
                 </div>
@@ -76,7 +77,7 @@ export function DeliveryPipeline() {
                       <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
                         <span className="rounded bg-white px-1.5 py-0.5 text-foreground/80">{o.driverName ?? "Unassigned"}</span>
                         {o.vehicleId && <span className="rounded bg-white px-1.5 py-0.5 font-mono text-foreground/80">{o.vehicleId}</span>}
-                        <span className="ml-auto font-mono text-[11px] font-semibold text-foreground">{o.amount} ر.س</span>
+                        <span className="ml-auto font-mono text-[11px] font-semibold text-foreground">{o.amount} <SARIcon /></span>
                       </div>
                       <div className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-medium text-brand opacity-0 group-hover:opacity-100">
                         Move stage <ArrowRight className="h-3 w-3" />

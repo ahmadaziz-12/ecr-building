@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useProducts, type ProductDto } from "@/lib/api/catalog";
+import { SARIcon } from "@/lib/buildpos/currency";
 
 // BRD §7: which of Product's list prices to resolve — mirrors backend PriceListType (Customer.cs) /
 // OrdersController.Checkout's switch. "Retail" always resolves to sellingPrice; the other three fall
@@ -60,7 +61,7 @@ export function PriceCheckDialog({ open, onOpenChange }: { open: boolean; onOpen
                   <p className="font-mono text-xs text-muted-foreground">{p.sku}</p>
                 </div>
                 <div className="text-right">
-                  <p className="font-semibold text-foreground">{price.toFixed(2)} ر.س</p>
+                  <p className="font-semibold text-foreground">{price.toFixed(2)} <SARIcon /></p>
                   <p className="text-xs text-muted-foreground">
                     {priceList !== "Retail" && (isListPrice ? `${priceList} price` : "Retail — no list override")} · VAT {p.vatRate}% · {p.totalAvailable} available
                   </p>

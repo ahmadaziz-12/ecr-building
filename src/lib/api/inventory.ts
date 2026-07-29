@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPost, apiPut } from "./client";
-import type { LiveTable } from "./admin";
+import { byStatus, type LiveTable } from "./admin";
 
 export type StockLevelDto = {
   productId: number;
@@ -486,18 +486,21 @@ export function mapStockLevels(rows: StockLevelDto[]): LiveTable {
         value: String(rows.filter((s) => s.status === "Healthy").length),
         sub: `${rows.length} lines`,
         tone: "success",
+        filter: byStatus(9, "Healthy"),
       },
       {
         label: "Low Stock",
         value: String(rows.filter((s) => s.status === "Low").length),
         sub: "Approaching reorder",
         tone: "warning",
+        filter: byStatus(9, "Low"),
       },
       {
         label: "Critical / Out",
         value: String(rows.filter((s) => s.status === "Critical").length),
         sub: "Reorder now",
         tone: "critical",
+        filter: byStatus(9, "Critical"),
       },
       {
         label: "Stock Value",
@@ -542,18 +545,21 @@ export function mapBranchStockLevels(rows: BranchStockLevelDto[]): LiveTable {
         value: String(rows.filter((s) => s.status === "Healthy").length),
         sub: `${rows.length} lines`,
         tone: "success",
+        filter: byStatus(9, "Healthy"),
       },
       {
         label: "Low Stock",
         value: String(rows.filter((s) => s.status === "Low").length),
         sub: "Approaching reorder",
         tone: "warning",
+        filter: byStatus(9, "Low"),
       },
       {
         label: "Critical / Out",
         value: String(rows.filter((s) => s.status === "Critical").length),
         sub: "Can't be sold right now",
         tone: "critical",
+        filter: byStatus(9, "Critical"),
       },
       {
         label: "Stock Value",
@@ -622,12 +628,14 @@ export function mapStockBatches(
         ),
         sub: "Write-off pending",
         tone: "critical",
+        filter: byStatus(8, "Expired", "WrittenOff"),
       },
       {
         label: "Quarantine",
         value: String(rows.filter((b) => b.status === "Quarantine").length),
         sub: "QC review",
         tone: "warning",
+        filter: byStatus(8, "Quarantine"),
       },
     ],
   };
@@ -699,6 +707,7 @@ export function mapWarehouses(rows: WarehouseDto[]): LiveTable {
         value: String(rows.reduce((s, w) => s + w.openTransfersOut + w.openTransfersIn, 0)),
         sub: "In + out, not yet received",
         tone: "info",
+        filter: (row) => !["Received", "Cancelled"].includes(String(row[8])),
       },
     ],
   };
@@ -744,6 +753,7 @@ export function mapStockTransfers(rows: StockTransferDto[]): LiveTable {
         value: String(rows.filter((t) => t.status === "PendingApproval").length),
         sub: "Manager sign-off",
         tone: "warning",
+        filter: byStatus(8, "PendingApproval"),
       },
       {
         label: "Discrepancies",

@@ -62,7 +62,7 @@ export function LeavePage() {
           { label: "Conflicts", value: kpi.conflicts, sub: "Coverage risk", tone: "critical" },
           { label: "Leave Types", value: 5, sub: "Configured", tone: "info" },
           { label: "Team Calendar", value: "Live", sub: "Synced", tone: "success" },
-        ]} />
+        ]} scope="hr-leave" />
       )}
 
       {(tab === 0 || tab === 1 || tab === 5) && (

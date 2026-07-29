@@ -110,6 +110,12 @@ public record CreateOrderRequest(
     int? PriceOverrideApprovalRequestId = null);
 
 public record CashierShiftDto(int Id, int TerminalId, string TerminalName, string CashierName, DateTime OpenedAt, DateTime? ClosedAt, decimal OpeningFloat, decimal CashSales, decimal CashIn, decimal CashOut, decimal ExpectedCash, decimal? CountedCash, decimal? Variance, string Status);
+// The till picker for "Open Shift". Deliberately served by the cashier-shift module rather than
+// reusing /api/network/terminals: that endpoint needs Network→Terminals View, which a cashier's role
+// may not carry, and a 403 there emptied the dropdown — the terminal looked unregistered when it was
+// only unreadable. OpenShiftBlockedBy names the cashier already on the till so a busy one reads as
+// busy instead of silently missing.
+public record ShiftTerminalDto(int Id, string Code, string Name, int BranchId, string BranchName, string Status, string? OpenShiftBlockedBy);
 public record OpenShiftRequest(int TerminalId, decimal OpeningFloat);
 public record CloseShiftRequest(decimal CountedCash);
 public record CashMovementRequest(decimal Amount, string Reason);

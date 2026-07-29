@@ -32,6 +32,8 @@ import {
   SalesPerformance,
   BranchPerformance,
 } from "@/components/buildpos/sections";
+import { CardCustomizer } from "@/components/buildpos/CardCustomizer";
+import { applyCardPreference, useCardPreferences } from "@/lib/buildpos/card-preferences";
 import { useFilters } from "@/lib/buildpos/filter-context";
 import { resolveDateRangeBounds } from "@/components/buildpos/FilterControls";
 import { formatSAR, type Severity } from "@/lib/buildpos/format";
@@ -114,6 +116,53 @@ const PAYMENT_META: Record<string, { tone: Severity; icon: string }> = {
   Transfer: { tone: "warning", icon: "receipt" },
   AccountCredit: { tone: "warning", icon: "receipt" },
 };
+
+/**
+ * Wires one row of dashboard KPI cards to the shared card-customization preference: what to render,
+ * and the props the "Customise cards" control needs. Keyed by each card's stable `key`, labelled by
+ * its human title.
+ */
+function useKpiCards<T extends { key: string; title: string }>(scope: string, items: T[]) {
+  const signature = items.map((i) => `${i.key}:${i.title}`).join("|");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const keys = useMemo(() => items.map((i) => i.key), [signature]);
+  const labels = useMemo(
+    () => Object.fromEntries(items.map((i) => [i.key, i.title])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [signature],
+  );
+  const prefs = useCardPreferences(scope, keys);
+  const visible = useMemo(
+    () => applyCardPreference(items, (i) => i.key, prefs.order, prefs.hidden),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [signature, items, prefs.order, prefs.hidden],
+  );
+  return { labels, prefs, visible };
+}
+
+/** Header strip above a customizable card row. */
+function CardRowHeader({
+  title,
+  cards,
+}: {
+  title: string;
+  cards: { labels: Record<string, string>; prefs: ReturnType<typeof useCardPreferences> };
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {title}
+      </p>
+      <CardCustomizer labels={cards.labels} prefs={cards.prefs} />
+    </div>
+  );
+}
+
+const ALL_CARDS_HIDDEN = (
+  <p className="rounded-2xl border border-dashed border-black/10 bg-white py-8 text-center text-sm text-muted-foreground">
+    Every card is hidden. Use "Customise cards" to bring some back.
+  </p>
+);
 
 function OverviewPage() {
   const { activeTab, setActiveTab, values: filterValues, dateRange } = useFilters();
@@ -940,6 +989,158 @@ function OverviewPage() {
     { value: "compliance", label: "Compliance & Alerts", icon: Shield, requiresAnalytics: true },
   ];
   const visibleTabs = tabs.filter((t) => !t.requiresAnalytics || canViewAnalyticsTabs);
+
+  // Every KPI row on the dashboard is user-arrangeable: which cards appear, and in what order.
+  // Nobody watches all six equally — a yard supervisor cares about deliveries and stock, a branch
+  // manager about takings — and the choice is remembered per tab.
+  const overviewCards = useKpiCards("dashboard.overview", overviewKpisReal);
+  const salesCards = useKpiCards("dashboard.sales", salesPerfKpisReal);
+  const inventoryCards = useKpiCards("dashboard.inventory", inventoryKpisReal);
+  const cashierCards = useKpiCards("dashboard.cashier", cashierKpisReal);
+
+  // Export exports what you are looking at. FilterBar's Export button is generic — it needs the
+  // caller to hand it rows — and the dashboard never did, so it always reported "Nothing to
+  // export" no matter what was on screen. Each tab exports its own primary table, already narrowed
+  // by the filter bar above it.
+  const exportData = useMemo(() => {
+    switch (activeTab) {
+      case "overview":
+        return {
+          filename: "dashboard-overview.csv",
+          columns: ["KPI", "Value", "Detail"],
+          rows: overviewKpisReal.map((k) => [k.title, k.value, k.sub] as (string | number)[]),
+        };
+      case "sales":
+        return {
+          filename: "dashboard-sales.csv",
+          columns: ["Order", "Customer", "Type", "Value", "Status", "Payment", "Invoice"],
+          rows: recentOrdersReal.map(
+            (o) =>
+              [o.id, o.customer, o.type, o.value, o.status, o.payment, o.invoice] as (
+                string | number
+              )[],
+          ),
+        };
+      case "inventory":
+        return {
+          filename: "dashboard-inventory.csv",
+          columns: [
+            "SKU",
+            "Product",
+            "Category",
+            "Warehouse",
+            "Available",
+            "Reorder",
+            "Supplier",
+            "Status",
+          ],
+          rows: inventoryRowsReal.map(
+            (r) =>
+              [r.sku, r.name, r.cat, r.branch, r.qty, r.reorder, r.supplier, r.status] as (
+                string | number
+              )[],
+          ),
+        };
+      case "delivery":
+        return {
+          filename: "dashboard-delivery.csv",
+          columns: [
+            "Delivery",
+            "Order",
+            "Customer",
+            "Materials",
+            "Qty",
+            "Weight",
+            "Area",
+            "Promised",
+            "Driver",
+            "Vehicle",
+            "Status",
+            "Amount",
+            "Priority",
+          ],
+          rows: deliveryDetailReal.map(
+            (d) =>
+              [
+                d.no,
+                d.order,
+                d.customer,
+                d.materials,
+                d.qty,
+                d.weight,
+                d.area,
+                d.promised,
+                d.driver,
+                d.vehicle,
+                d.status,
+                d.amount,
+                d.priority,
+              ] as (string | number)[],
+          ),
+        };
+      case "cashier":
+        return {
+          filename: "dashboard-cashier.csv",
+          columns: [
+            "Terminal",
+            "Cashier",
+            "Shift",
+            "Started",
+            "Transactions",
+            "Cash Sales",
+            "Expected",
+            "Sync",
+            "Printer",
+            "Card Reader",
+            "Status",
+          ],
+          rows: terminalDetailReal.map(
+            (t) =>
+              [
+                t.term,
+                t.cashier,
+                t.shift,
+                t.started,
+                t.tx,
+                t.sales,
+                t.expected,
+                t.sync,
+                t.printer,
+                t.card,
+                t.status,
+              ] as (string | number)[],
+          ),
+        };
+      case "payments":
+        return {
+          filename: "dashboard-payments.csv",
+          columns: ["Method / Return type", "Amount", "Transactions"],
+          rows: [
+            ...paymentBreakdownReal.map((p) => [p.method, p.amount, p.tx] as (string | number)[]),
+            ...returnBreakdownReal.map((r) => [r.label, r.value, ""] as (string | number)[]),
+          ],
+        };
+      case "compliance":
+        return {
+          filename: "dashboard-alerts.csv",
+          columns: ["Severity", "Module", "Message", "Age"],
+          rows: alertsReal.map((a) => [a.severity, a.module, a.msg, a.age] as (string | number)[]),
+        };
+      default:
+        return null;
+    }
+  }, [
+    activeTab,
+    overviewKpisReal,
+    recentOrdersReal,
+    inventoryRowsReal,
+    deliveryDetailReal,
+    terminalDetailReal,
+    paymentBreakdownReal,
+    returnBreakdownReal,
+    alertsReal,
+  ]);
+
   useEffect(() => {
     if (!visibleTabs.some((t) => t.value === activeTab))
       setActiveTab(visibleTabs[0]?.value ?? "overview");
@@ -953,7 +1154,7 @@ function OverviewPage() {
       {/* Global filter bar — scrolls away with the page. Pinned under the header it held a large
           band of the viewport open on every tab, and it isn't something you adjust while reading rows. */}
       <div className="bp-fade">
-        <FilterBar />
+        <FilterBar exportData={exportData} />
       </div>
 
       {/* The tab strip stays pinned — it's navigation — and now sits directly under the app header
@@ -979,7 +1180,9 @@ function OverviewPage() {
 
         {/* 1. Overview */}
         <TabsContent value="overview" className="bp-fade space-y-4">
-          <OverviewKpis items={overviewKpisReal} />
+          <CardRowHeader title="Today at a glance" cards={overviewCards} />
+          <OverviewKpis items={overviewCards.visible} />
+          {overviewCards.visible.length === 0 && ALL_CARDS_HIDDEN}
           <HourlySummary data={hourlyReal} tx={txCount} />
           <TopCategoriesCompact
             categories={categoryAggReal}
@@ -996,7 +1199,9 @@ function OverviewPage() {
 
         {/* 2. Sales Performance */}
         <TabsContent value="sales" className="bp-fade space-y-4">
-          <SalesPerfKpis items={salesPerfKpisReal} />
+          <CardRowHeader title="Sales performance" cards={salesCards} />
+          <SalesPerfKpis items={salesCards.visible} />
+          {salesCards.visible.length === 0 && ALL_CARDS_HIDDEN}
           <SalesPerformance data={hourlyReal} />
           <TopCategoriesCompact
             categories={categoryAggReal}
@@ -1012,7 +1217,9 @@ function OverviewPage() {
 
         {/* 3. Inventory Health */}
         <TabsContent value="inventory" className="bp-fade space-y-4">
-          <InventoryKpiGrid items={inventoryKpisReal} />
+          <CardRowHeader title="Inventory health" cards={inventoryCards} />
+          <InventoryKpiGrid items={inventoryCards.visible} />
+          {inventoryCards.visible.length === 0 && ALL_CARDS_HIDDEN}
           <InventoryHealth rows={inventoryRowsReal} summary={inventorySummaryReal} />
         </TabsContent>
 
@@ -1023,7 +1230,9 @@ function OverviewPage() {
 
         {/* 5. Cashier & Terminal */}
         <TabsContent value="cashier" className="bp-fade space-y-4">
-          <CashierKpiGrid items={cashierKpisReal} />
+          <CardRowHeader title="Cashier &amp; terminal" cards={cashierCards} />
+          <CashierKpiGrid items={cashierCards.visible} />
+          {cashierCards.visible.length === 0 && ALL_CARDS_HIDDEN}
           <TerminalDetailTable rows={terminalDetailReal} />
         </TabsContent>
 

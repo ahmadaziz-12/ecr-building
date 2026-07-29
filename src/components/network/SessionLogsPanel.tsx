@@ -3,6 +3,7 @@ import { Pill, SectionCard } from "@/components/buildpos/sections";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtDate, useSessionLogs, useTerminals } from "@/lib/api/admin";
+import { SARIcon } from "@/lib/buildpos/currency";
 
 function statusTone(status: string): "critical" | "warning" | "success" | "info" | "muted" {
   if (status === "Open") return "info";
@@ -80,7 +81,7 @@ export function SessionLogsPanel() {
                 <TableCell><Pill tone={statusTone(s.status)}>{s.status}</Pill></TableCell>
                 <TableCell className="text-sm text-foreground/85">{fmtDate(s.openedAt)}</TableCell>
                 <TableCell className="text-sm text-foreground/85">{s.closedAt ? fmtDate(s.closedAt) : "—"}</TableCell>
-                <TableCell className="text-sm text-foreground/85">{s.variance !== null ? `${s.variance.toFixed(2)} ر.س` : "—"}</TableCell>
+                <TableCell className="text-sm text-foreground/85">{s.variance !== null ? <><span>{s.variance.toFixed(2)}</span> <SARIcon /></> : "—"}</TableCell>
               </TableRow>
             ))}
             {!isLoading && (sessions?.length ?? 0) === 0 && (

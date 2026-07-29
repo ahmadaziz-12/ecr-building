@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useBranches } from "@/lib/api/admin";
 import { useApproveReturn, type ReturnDto } from "@/lib/api/finance";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ر.س";
 const PAYMENT_METHODS = ["Cash", "Mada", "ApplePay", "StcPay", "Transfer"];
@@ -67,19 +68,19 @@ export function ApproveExchangeDialog({ returnRecord, onClose }: { returnRecord:
         <div className="space-y-1 rounded-lg bg-canvas p-3 text-xs">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Returned item(s)</p>
           {returnRecord.lines.map((l) => (
-            <div key={l.productId} className="flex justify-between"><span>{l.productName} × {l.qty}</span><span className="font-mono">{money(l.amount)}</span></div>
+            <div key={l.productId} className="flex justify-between"><span>{l.productName} × {l.qty}</span><span className="font-mono"><CurrencyText value={money(l.amount)} /></span></div>
           ))}
-          <div className="flex justify-between border-t border-black/10 pt-1 font-semibold"><span>Return credit</span><span className="font-mono">{money(returnRecord.totalAmount)}</span></div>
+          <div className="flex justify-between border-t border-black/10 pt-1 font-semibold"><span>Return credit</span><span className="font-mono"><CurrencyText value={money(returnRecord.totalAmount)} /></span></div>
 
           <p className="pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Replacement item(s)</p>
           {returnRecord.exchangeLines.map((l) => (
-            <div key={l.productId} className="flex justify-between"><span>{l.productName} × {l.qty}</span><span className="font-mono">{money(l.lineTotal)}</span></div>
+            <div key={l.productId} className="flex justify-between"><span>{l.productName} × {l.qty}</span><span className="font-mono"><CurrencyText value={money(l.lineTotal)} /></span></div>
           ))}
-          <div className="flex justify-between border-t border-black/10 pt-1 font-semibold"><span>Replacement total</span><span className="font-mono">{money(exchangeTotal)}</span></div>
+          <div className="flex justify-between border-t border-black/10 pt-1 font-semibold"><span>Replacement total</span><span className="font-mono"><CurrencyText value={money(exchangeTotal)} /></span></div>
 
           <div className={`flex justify-between border-t border-black/10 pt-1.5 text-sm font-bold ${customerOwes ? "text-critical" : customerRefunded ? "text-success" : ""}`}>
             <span>{customerOwes ? "Customer pays" : customerRefunded ? "Customer is refunded" : "Even exchange"}</span>
-            <span className="font-mono">{money(Math.abs(netPayable))}</span>
+            <span className="font-mono"><CurrencyText value={money(Math.abs(netPayable))} /></span>
           </div>
         </div>
 

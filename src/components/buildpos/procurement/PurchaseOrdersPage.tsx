@@ -18,6 +18,7 @@ import {
 } from "@/lib/api/procurement";
 import { PurchaseOrderDetailDialog } from "./PurchaseOrderDetailDialog";
 import { ReceivePoDialog } from "./ReceivePoDialog";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 // Tabs mirror the backend PurchaseOrderStatus enum (backend/src/EcrBuilding.Domain/Entities/
 // Procurement.cs). "Delayed" is a computed display status the API substitutes for an overdue
@@ -139,6 +140,15 @@ export function PurchaseOrdersPage() {
 
   const pagination = usePagination(filtered, PAGE_SIZE, JSON.stringify(applied) + tab);
 
+  // Count cards drive the Status filter they summarise; the two value cards are money totals with
+  // no single status behind them, so they stay plain readouts rather than dead controls.
+  const appliedStatus = (applied.status as string[]) ?? [];
+  const filterByStatus = (...s: string[]) => () => {
+    const same = appliedStatus.length === s.length && s.every((x) => appliedStatus.includes(x));
+    const next = same ? [] : s;
+    setDraft((d) => ({ ...d, status: next }));
+    setApplied((a) => ({ ...a, status: next }));
+  };
   const kpis = useMemo(() => {
     const open = allPos.filter((p) => OPEN_STATUSES.has(p.status));
     const pending = allPos.filter((p) => p.status === "PendingApproval").length;
@@ -154,14 +164,17 @@ export function PurchaseOrdersPage() {
       })
       .reduce((s, p) => s + receivedValue(p), 0);
     const outstanding = open.reduce((s, p) => s + outstandingValue(p), 0);
+    const only = (...s: string[]) =>
+      appliedStatus.length === s.length && s.every((x) => appliedStatus.includes(x));
     return [
-      { label: "Open POs", value: open.length, sub: `${allPos.length} total`, tone: "info" as const },
-      { label: "Awaiting Approval", value: pending, sub: "Pending review", tone: "warning" as const },
-      { label: "In Transit", value: inTransit, sub: delayed > 0 ? `${delayed} delayed` : "On schedule", tone: (delayed > 0 ? "critical" : "info") as "critical" | "info" },
+      { label: "Open POs", value: open.length, sub: `${allPos.length} total`, tone: "info" as const, onSelect: filterByStatus(...OPEN_STATUSES), active: only(...OPEN_STATUSES) },
+      { label: "Awaiting Approval", value: pending, sub: "Pending review", tone: "warning" as const, onSelect: filterByStatus("PendingApproval"), active: only("PendingApproval") },
+      { label: "In Transit", value: inTransit, sub: delayed > 0 ? `${delayed} delayed` : "On schedule", tone: (delayed > 0 ? "critical" : "info") as "critical" | "info", onSelect: filterByStatus("InTransit"), active: only("InTransit") },
       { label: "Received This Month", value: fmtSar(receivedThisMonth), sub: "By expected date", tone: "success" as const },
       { label: "Outstanding Value", value: fmtSar(outstanding), sub: "Not yet received", tone: "warning" as const },
     ];
-  }, [allPos]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allPos, appliedStatus.join("|")]);
 
   async function runAction(po: PurchaseOrderDto, action: "submit" | "approve" | "dispatch" | "cancel") {
     try {
@@ -252,7 +265,7 @@ export function PurchaseOrdersPage() {
         resultLabel={`${filtered.length} record(s)${isFetching ? " · refreshing…" : ""}`}
       />
 
-      <KpiGrid items={kpis} />
+      <KpiGrid items={kpis} scope="purchase-orders" />
 
       <SectionCard title="Purchase Order Ledger" desc={`${filtered.length} records`}>
         <div className="overflow-x-auto">
@@ -288,7 +301,7 @@ export function PurchaseOrdersPage() {
                         <TableCell className="text-muted-foreground">{po.branches.join(", ") || "—"}</TableCell>
                         <TableCell className="text-muted-foreground">{fmtDate(po.expectedDate)}</TableCell>
                         <TableCell className="text-right">{po.lines.length}</TableCell>
-                        <TableCell className="text-right font-medium">{fmtSar(po.totalValue)}</TableCell>
+                        <TableCell className="text-right font-medium"><CurrencyText value={fmtSar(po.totalValue)} /></TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <div className="h-1.5 w-16 flex-none overflow-hidden rounded-full bg-black/5">

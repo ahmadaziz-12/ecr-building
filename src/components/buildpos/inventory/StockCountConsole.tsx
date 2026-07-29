@@ -16,6 +16,7 @@ import { exportToCsv } from "@/components/buildpos/pos/shared";
 import type { Severity } from "@/lib/buildpos/format";
 import { useWarehouses } from "@/lib/api/inventory";
 import { useCategories } from "@/lib/api/catalog";
+import { CurrencyText } from "@/lib/buildpos/currency";
 import {
   useAutoFillStockCount, useCancelStockCount, useGenerateStockCount, usePostStockCount,
   useSaveStockCountLines, useScanStockCount, useStockCount, useStockCounts, useSubmitStockCount,
@@ -119,6 +120,7 @@ function StockCountList({ onOpen }: { onOpen: (id: number) => void }) {
             tone: "critical",
           },
         ]}
+        scope="stock-counts"
       />
 
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 bg-white p-2.5 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
@@ -216,7 +218,7 @@ function StockCountList({ onOpen }: { onOpen: (id: number) => void }) {
                   </TableCell>
                   <TableCell className="text-sm">{int(c.varianceLines)}</TableCell>
                   <TableCell className="text-sm">{c.accuracyPct.toFixed(1)}%</TableCell>
-                  <TableCell className={`text-sm ${c.netVarianceValue < 0 ? "text-critical" : ""}`}>{money(c.netVarianceValue)}</TableCell>
+                  <TableCell className={`text-sm ${c.netVarianceValue < 0 ? "text-critical" : ""}`}><CurrencyText value={money(c.netVarianceValue)} /></TableCell>
                   <TableCell className="text-sm text-muted-foreground">{c.countedByName ?? "—"}</TableCell>
                   <TableCell><Pill tone={statusTone(c.status)}>{c.status}</Pill></TableCell>
                 </TableRow>
@@ -566,6 +568,7 @@ function StockCountSheet({ id, onBack }: { id: number; onBack: () => void }) {
           { label: "Accuracy", value: `${count.accuracyPct.toFixed(1)}%`, sub: "Counted lines matching", tone: count.accuracyPct >= 98 ? "success" : count.accuracyPct >= 90 ? "warning" : "critical" },
           { label: "Net Variance", value: money(count.netVarianceValue), sub: `Absolute ${money(count.absVarianceValue)}`, tone: count.netVarianceValue < 0 ? "critical" : "info" },
         ]}
+        scope="stock-count-detail"
       />
 
       {editable && (
@@ -686,7 +689,7 @@ function StockCountSheet({ id, onBack }: { id: number; onBack: () => void }) {
                       {l.variance === null ? "—" : `${l.variance > 0 ? "+" : ""}${qty(l.variance)}`}
                     </TableCell>
                     <TableCell className={`text-right text-sm ${(l.varianceValue ?? 0) < 0 ? "text-critical" : "text-muted-foreground"}`}>
-                      {l.varianceValue === null ? "—" : money(l.varianceValue)}
+                      <CurrencyText value={l.varianceValue === null ? "—" : money(l.varianceValue)} />
                     </TableCell>
                     <TableCell><Pill tone={lineTone(l.status)}>{l.status}</Pill></TableCell>
                   </TableRow>
