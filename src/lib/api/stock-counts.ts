@@ -3,8 +3,11 @@ import { apiGet, apiPost, apiPut } from "./client";
 
 // Automatic Stock Count — typed client for backend StockCountsController
 // (api/inventory/stock-counts/*). A session is generated from live stock, counted by keyboard or
-// barcode, submitted for review, then posted; posting writes one StockAdjustment and the matching
-// StockMovements, so a stocktake reconciles through the same ledger as any other correction.
+// barcode, then goes through a two-stage maker-checker: Submit hands it to a reviewer
+// (PendingReview), Review is the first sign-off (PendingApproval) or a reject, and Approve is the
+// only step that ever writes stock — it posts one StockAdjustment and the matching StockMovements,
+// so a stocktake reconciles through the same ledger as any other correction. Either stage can
+// reject instead (a reason is required), which ends the session without ever touching stock.
 
 export type StockCountLineDto = {
   id: number;
@@ -36,12 +39,18 @@ export type StockCountDto = {
   scope: string;
   categoryId: number | null;
   categoryName: string | null;
-  status: "Draft" | "InProgress" | "PendingApproval" | "Completed" | "Cancelled";
+  status: "Draft" | "InProgress" | "PendingReview" | "PendingApproval" | "Completed" | "Cancelled" | "Rejected";
   scheduledFor: string;
   startedAt: string | null;
   completedAt: string | null;
   countedByName: string | null;
+  reviewedAt: string | null;
+  reviewedByName: string | null;
+  approvedAt: string | null;
   approvedByName: string | null;
+  rejectedAt: string | null;
+  rejectedByName: string | null;
+  rejectionReason: string | null;
   notes: string | null;
   autoFillUncounted: boolean;
   blindCount: boolean;
@@ -138,16 +147,32 @@ export const useAutoFillStockCount = () =>
 export const useSubmitStockCount = () =>
   useStockCountMutation(({ id }: { id: number }) => apiPost<StockCountDto>(`${base}/${id}/submit`));
 
-export function usePostStockCount() {
+// First-stage sign-off: approved moves PendingReview -> PendingApproval; rejecting (reason
+// required) moves straight to Rejected. Neither outcome touches stock.
+export const useReviewStockCount = () =>
+  useStockCountMutation(({ id, approved, reason }: { id: number; approved: boolean; reason?: string | null }) =>
+    apiPut<StockCountDto>(`${base}/${id}/review`, { approved, reason: reason ?? null }),
+  );
+
+// Final sign-off. Approved is the only path in the whole workflow that writes stock — it posts one
+// StockAdjustment and the matching StockMovements. Rejecting (reason required) leaves stock alone.
+export function useApproveStockCount() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, approverUserId, notes }: { id: number; approverUserId?: number | null; notes?: string | null }) =>
-      apiPost<StockCountDto>(`${base}/${id}/post`, { approverUserId: approverUserId ?? null, notes: notes ?? null }),
+    mutationFn: ({
+      id, approved, reason, approverUserId, notes,
+    }: {
+      id: number; approved: boolean; reason?: string | null; approverUserId?: number | null; notes?: string | null;
+    }) =>
+      apiPost<StockCountDto>(`${base}/${id}/approve`, {
+        approved, reason: reason ?? null, approverUserId: approverUserId ?? null, notes: notes ?? null,
+      }),
     onSuccess: (data) => {
       queryClient.setQueryData(["inventory", "stock-count", data.id], data);
       queryClient.invalidateQueries({ queryKey: ["inventory", "stock-counts"] });
-      // Posting rewrites both stock pools and appends to the movement ledger — every view of stock
-      // is now stale, not just the count itself.
+      // Approving rewrites both stock pools and appends to the movement ledger — every view of
+      // stock is now stale, not just the count itself. Rejecting touches none of this, but
+      // invalidating unconditionally is harmless and keeps this one code path for both outcomes.
       queryClient.invalidateQueries({ queryKey: ["inventory", "stock-levels"] });
       queryClient.invalidateQueries({ queryKey: ["inventory", "branch-stock-levels"] });
       queryClient.invalidateQueries({ queryKey: ["inventory", "stock-movements"] });

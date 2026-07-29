@@ -406,6 +406,49 @@ export const REPORTS: ReportDef[] = [
     emptyLabel: "No sales in the selected period for these filters.",
   },
   {
+    key: "slow-moving",
+    label: "Slow-Moving Stock",
+    desc: "On-hand items with no sales in the chosen window, and the capital tied up in them.",
+    group: "Sales",
+    icon: Clock,
+    dated: false,
+    filters: [F.branch, F.category, F.item, F.supplier, F.brand],
+    knobs: [
+      {
+        key: "days",
+        label: "No sales in",
+        kind: "choice",
+        choices: [
+          { value: "30", label: "30 days" },
+          { value: "60", label: "60 days" },
+          { value: "90", label: "90 days" },
+          { value: "180", label: "180 days" },
+        ],
+      },
+    ],
+    defaultKnobs: { days: "30" },
+    tableTitle: "Slow-Moving SKUs",
+    columns: [
+      c("sku", "SKU", "mono"),
+      c("name", "Product"),
+      c("category", "Category"),
+      c("brand", "Brand"),
+      c("supplier", "Supplier"),
+      c("uom", "UOM"),
+      c("onHand", "On Hand", "qty"),
+      c("costPrice", "Cost", "money"),
+      c("stockValue", "Stock Value", "money"),
+      c("sellingPrice", "Price", "money"),
+      c("retailValue", "Retail Value", "money"),
+      c("reorderLevel", "Reorder", "int"),
+      c("unitsSoldInWindow", "Sold In Window", "qty"),
+      c("lastSoldAt", "Last Sold", "date"),
+      c("daysSinceLastSale", "Days Idle", "int"),
+      c("status", "Status", "status"),
+    ],
+    emptyLabel: "Nothing slow-moving — every stocked SKU sold recently.",
+  },
+  {
     key: "profit-margin",
     label: "Profit & Margin",
     desc: "Revenue against cost of goods, by product, category or branch.",
@@ -624,7 +667,7 @@ export const REPORTS: ReportDef[] = [
   },
   {
     key: "stock-count-variance",
-    label: "Stock Count Report",
+    label: "Stock Taking Report",
     desc: "Stocktake sessions, their accuracy, and the variance each one posted.",
     group: "Inventory",
     icon: ClipboardCheck,
@@ -647,8 +690,11 @@ export const REPORTS: ReportDef[] = [
       c("netVarianceValue", "Net Variance Value", "money"),
       c("absVarianceValue", "Absolute Variance", "money"),
       c("countedBy", "Counted By"),
+      c("reviewedBy", "Reviewed By"),
       c("approvedBy", "Approved By"),
       c("status", "Status", "status"),
+      { key: "rejectedBy", label: "Rejected By", exportOnly: true },
+      { key: "rejectionReason", label: "Rejection Reason", exportOnly: true },
     ],
     detail: {
       title: (r: never) => `Count ${(r as { countNo: string }).countNo}`,
@@ -660,19 +706,30 @@ export const REPORTS: ReportDef[] = [
         const row = r as {
           status: string;
           countedBy: string | null;
+          reviewedBy: string | null;
           approvedBy: string | null;
+          rejectedBy: string | null;
+          rejectionReason: string | null;
           accuracyPct: number;
           netVarianceValue: number;
           absVarianceValue: number;
         };
-        return [
+        const fields = [
           { label: "Status", value: row.status },
           { label: "Accuracy", value: `${row.accuracyPct.toFixed(1)}%` },
           { label: "Counted By", value: row.countedBy ?? "—" },
+          { label: "Reviewed By", value: row.reviewedBy ?? "—" },
           { label: "Approved By", value: row.approvedBy ?? "—" },
           { label: "Net Variance", value: `${row.netVarianceValue.toFixed(2)} ر.س` },
           { label: "Absolute Variance", value: `${row.absVarianceValue.toFixed(2)} ر.س` },
         ];
+        if (row.status === "Rejected") {
+          fields.push(
+            { label: "Rejected By", value: row.rejectedBy ?? "—" },
+            { label: "Rejection Reason", value: row.rejectionReason ?? "—" },
+          );
+        }
+        return fields;
       },
       itemsLabel: "Counted items",
       items: (r: never) => (r as { items: unknown[] }).items,
@@ -688,49 +745,6 @@ export const REPORTS: ReportDef[] = [
         c("note", "Note"),
       ],
     },
-  },
-  {
-    key: "slow-moving",
-    label: "Slow-Moving Stock",
-    desc: "On-hand items with no sales in the chosen window, and the capital tied up in them.",
-    group: "Inventory",
-    icon: Clock,
-    dated: false,
-    filters: [F.branch, F.category, F.item, F.supplier, F.brand],
-    knobs: [
-      {
-        key: "days",
-        label: "No sales in",
-        kind: "choice",
-        choices: [
-          { value: "30", label: "30 days" },
-          { value: "60", label: "60 days" },
-          { value: "90", label: "90 days" },
-          { value: "180", label: "180 days" },
-        ],
-      },
-    ],
-    defaultKnobs: { days: "30" },
-    tableTitle: "Slow-Moving SKUs",
-    columns: [
-      c("sku", "SKU", "mono"),
-      c("name", "Product"),
-      c("category", "Category"),
-      c("brand", "Brand"),
-      c("supplier", "Supplier"),
-      c("uom", "UOM"),
-      c("onHand", "On Hand", "qty"),
-      c("costPrice", "Cost", "money"),
-      c("stockValue", "Stock Value", "money"),
-      c("sellingPrice", "Price", "money"),
-      c("retailValue", "Retail Value", "money"),
-      c("reorderLevel", "Reorder", "int"),
-      c("unitsSoldInWindow", "Sold In Window", "qty"),
-      c("lastSoldAt", "Last Sold", "date"),
-      c("daysSinceLastSale", "Days Idle", "int"),
-      c("status", "Status", "status"),
-    ],
-    emptyLabel: "Nothing slow-moving — every stocked SKU sold recently.",
   },
   {
     key: "expiry-report",

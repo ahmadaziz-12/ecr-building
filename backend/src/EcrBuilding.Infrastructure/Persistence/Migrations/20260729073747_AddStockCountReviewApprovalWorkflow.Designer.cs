@@ -4,6 +4,7 @@ using EcrBuilding.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EcrBuilding.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260729073747_AddStockCountReviewApprovalWorkflow")]
+    partial class AddStockCountReviewApprovalWorkflow
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -624,12 +627,20 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AttributesJson")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasColumnType("varchar(255)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
+
+                    b.Property<string>("DefaultUom")
+                        .IsRequired()
+                        .HasColumnType("longtext");
 
                     b.Property<decimal>("LoyaltyAccrualMultiplier")
                         .HasPrecision(18, 4)
@@ -645,6 +656,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<int?>("ParentId")
                         .HasColumnType("int");
 
+                    b.Property<string>("ReturnRule")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
                     b.Property<bool>("Returnable")
                         .HasColumnType("tinyint(1)");
 
@@ -659,6 +674,10 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
+
+                    b.Property<decimal>("VatRate")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.HasKey("Id");
 
@@ -2653,9 +2672,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<int?>("VariantGroupId")
-                        .HasColumnType("int");
-
                     b.Property<decimal>("VatRate")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
@@ -2676,8 +2692,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("SupplierId");
-
-                    b.HasIndex("VariantGroupId");
 
                     b.ToTable("Products");
                 });
@@ -2801,52 +2815,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("ProductUomConversions");
-                });
-
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductVariantGroup", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int?>("CategoryId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasColumnType("varchar(255)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("ImageUrl")
-                        .HasColumnType("longtext");
-
-                    b.Property<string>("NameAr")
-                        .HasColumnType("longtext");
-
-                    b.Property<string>("NameEn")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CategoryId");
-
-                    b.HasIndex("Code")
-                        .IsUnique();
-
-                    b.ToTable("ProductVariantGroups");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.PurchaseOrder", b =>
@@ -5706,16 +5674,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("SupplierId");
 
-                    b.HasOne("EcrBuilding.Domain.Entities.ProductVariantGroup", "VariantGroup")
-                        .WithMany("Variants")
-                        .HasForeignKey("VariantGroupId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.Navigation("Category");
 
                     b.Navigation("Supplier");
-
-                    b.Navigation("VariantGroup");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductAttribute", b =>
@@ -5738,16 +5699,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Product");
-                });
-
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductVariantGroup", b =>
-                {
-                    b.HasOne("EcrBuilding.Domain.Entities.Category", "Category")
-                        .WithMany()
-                        .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("Category");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.PurchaseOrder", b =>
@@ -6406,11 +6357,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductBundle", b =>
                 {
                     b.Navigation("Lines");
-                });
-
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductVariantGroup", b =>
-                {
-                    b.Navigation("Variants");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.PurchaseOrder", b =>

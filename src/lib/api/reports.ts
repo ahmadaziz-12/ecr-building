@@ -257,7 +257,10 @@ export type StockCountVarianceRow = {
   category: string | null;
   status: string;
   countedBy: string | null;
+  reviewedBy: string | null;
   approvedBy: string | null;
+  rejectedBy: string | null;
+  rejectionReason: string | null;
   lines: number;
   counted: number;
   varianceLines: number;

@@ -278,6 +278,12 @@ export function useDeletePricingRule() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["finance", "pricing-rules"] }),
   });
 }
+export type PricingRuleTestResult = { passed: boolean; messages: string[] };
+export function useTestPricingRule() {
+  return useMutation({
+    mutationFn: (id: number) => apiPost<PricingRuleTestResult>(`/api/finance/pricing-rules/${id}/test`),
+  });
+}
 
 // uom: selling UOM (omitted = stock UOM). lengthM/widthM/heightM: cut-to-size dimensions — when
 // lengthM is set on an IsCutToSize product the server computes qty (length/area/volume, per the

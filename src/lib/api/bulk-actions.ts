@@ -18,7 +18,7 @@ import {
 } from "./procurement";
 import { useWarehouses, useCreateStockTransfer, useCreateStockAdjustment } from "./inventory";
 import { useProducts } from "./catalog";
-import { usePricingRules, useUpdatePricingRuleStatus } from "./pos";
+import { usePricingRules, useUpdatePricingRuleStatus, useTestPricingRule } from "./pos";
 import { useTestPrint } from "./print";
 import { useZatcaInvoices, useSubmitZatcaInvoice } from "./zatca";
 import {
@@ -67,6 +67,7 @@ export function useBulkActions(
 
   const { data: pricingRules } = usePricingRules(pathname === "/finance/pricing");
   const updatePricingRuleStatus = useUpdatePricingRuleStatus();
+  const testPricingRule = useTestPricingRule();
 
   const { data: customerReturns } = useReturns(pathname === "/finance/returns");
   const approveReturn = useApproveReturn();
@@ -621,6 +622,20 @@ export function useBulkActions(
           rows: rules.filter((r) => r.status === "Active").map(rowFor),
           emptyMessage: "No active pricing rules.",
           run: (id) => updatePricingRuleStatus.mutateAsync({ id, status: "Expired" }),
+        },
+        // Checks the rule's own approval/date/field state and reports, in plain language, whether
+        // and how it will fire at checkout — same checks PricingRulesController.Test runs server-side,
+        // so this can't drift from what checkout actually does.
+        Test: {
+          title: "Test Pricing Rule", mode: "single", confirmLabel: "Run Test",
+          rows: rules.map(rowFor), emptyMessage: "No pricing rules to test.",
+          run: async (id) => {
+            const result = await testPricingRule.mutateAsync(id);
+            const rule = rules.find((r) => r.id === id);
+            const detail = result.messages.join(" ");
+            if (result.passed) toast.success(`"${rule?.name}" would apply`, { description: detail });
+            else toast.warning(`"${rule?.name}" won't apply yet`, { description: detail });
+          },
         },
       };
     }

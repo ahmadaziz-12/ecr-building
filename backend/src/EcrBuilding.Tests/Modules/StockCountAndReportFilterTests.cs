@@ -95,8 +95,18 @@ public class StockCountAndReportFilterTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode);
     }
 
+    // Carries a generated count through Submit -> Review(approve) -> the doorstep of final Approve,
+    // so tests only need to add their own assertions around the Approve call itself.
+    private static async Task<StockCountDto> SubmitAndReview(HttpClient client, int id)
+    {
+        await client.PostAsJsonAsync($"/api/inventory/stock-counts/{id}/submit", new { });
+        var reviewed = await client.PutAsJsonAsync($"/api/inventory/stock-counts/{id}/review",
+            new ReviewStockCountRequest(true, null));
+        return (await reviewed.Content.ReadFromJsonAsync<StockCountDto>())!;
+    }
+
     [Fact]
-    public async Task Posting_a_count_applies_the_variance_to_both_stock_pools_and_records_the_movement()
+    public async Task Approving_a_count_applies_the_variance_to_both_stock_pools_and_records_the_movement()
     {
         using var db = _factory.CreateDbContext();
         var branch = TestDataSeeder.AddBranch(db);
@@ -123,10 +133,15 @@ public class StockCountAndReportFilterTests : IAsyncLifetime
         Assert.Equal(-77.5m, counted.Lines.Single().VarianceValue);
         Assert.Equal("Shortage", counted.Lines.Single().Status);
 
-        var posted = await (await client.PostAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/post",
-            new PostStockCountRequest(null, null))).Content.ReadFromJsonAsync<StockCountDto>();
+        var reviewed = await SubmitAndReview(client, generated.Id);
+        Assert.Equal("PendingApproval", reviewed.Status);
+        Assert.NotNull(reviewed.ReviewedByName);
+
+        var posted = await (await client.PostAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/approve",
+            new ApproveStockCountRequest(true, null, null, null))).Content.ReadFromJsonAsync<StockCountDto>();
         Assert.Equal("Completed", posted!.Status);
         Assert.NotNull(posted.StockAdjustmentId);
+        Assert.NotNull(posted.ApprovedByName);
 
         using var verify = _factory.CreateDbContext();
         // Both pools land on the counted absolute quantity — same invariant StockAdjustments holds.
@@ -159,8 +174,9 @@ public class StockCountAndReportFilterTests : IAsyncLifetime
         await client.PutAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/lines",
             new SaveStockCountLinesRequest([new StockCountLineInput(countedLineId, 10m, null)]));
 
-        var posted = await (await client.PostAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/post",
-            new PostStockCountRequest(null, null))).Content.ReadFromJsonAsync<StockCountDto>();
+        await SubmitAndReview(client, generated.Id);
+        var posted = await (await client.PostAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/approve",
+            new ApproveStockCountRequest(true, null, null, null))).Content.ReadFromJsonAsync<StockCountDto>();
 
         Assert.Equal("Completed", posted!.Status);
         Assert.Equal(0, posted.VarianceLines);
@@ -170,7 +186,7 @@ public class StockCountAndReportFilterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_blind_count_withholds_the_system_quantity_until_it_is_posted()
+    public async Task A_blind_count_withholds_the_system_quantity_until_it_is_approved()
     {
         using var db = _factory.CreateDbContext();
         var branch = TestDataSeeder.AddBranch(db);
@@ -188,9 +204,56 @@ public class StockCountAndReportFilterTests : IAsyncLifetime
         Assert.True(generated!.BlindCount);
         Assert.Null(generated.Lines.Single().SystemQty);
 
-        var posted = await (await client.PostAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/post",
-            new PostStockCountRequest(null, null))).Content.ReadFromJsonAsync<StockCountDto>();
+        await client.PutAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/lines",
+            new SaveStockCountLinesRequest([new StockCountLineInput(generated.Lines.Single().Id, 140m, null)]));
+
+        var reviewed = await SubmitAndReview(client, generated.Id);
+        // Still withheld through the first sign-off — only Completed/Cancelled/Rejected reveal it.
+        Assert.Null(reviewed.Lines.Single().SystemQty);
+
+        var posted = await (await client.PostAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/approve",
+            new ApproveStockCountRequest(true, null, null, null))).Content.ReadFromJsonAsync<StockCountDto>();
         Assert.Equal(153m, posted!.Lines.Single().SystemQty);
+    }
+
+    [Fact]
+    public async Task Rejecting_a_count_at_either_stage_never_touches_stock()
+    {
+        using var db = _factory.CreateDbContext();
+        var branch = TestDataSeeder.AddBranch(db);
+        var warehouse = TestDataSeeder.AddWarehouse(db, branch);
+        var category = TestDataSeeder.AddCategory(db);
+        var product = TestDataSeeder.AddProduct(db, category);
+        AddWarehouseStock(db, product, warehouse, 100m);
+        var client = InventoryClient(db, branch);
+
+        var generated = await (await client.PostAsJsonAsync("/api/inventory/stock-counts/generate",
+            new GenerateStockCountRequest(warehouse.Id, "FullWarehouse", null, null, null)))
+            .Content.ReadFromJsonAsync<StockCountDto>();
+        var lineId = generated!.Lines.Single().Id;
+        await client.PutAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/lines",
+            new SaveStockCountLinesRequest([new StockCountLineInput(lineId, 40m, null)]));
+
+        // A reject with no reason is refused at either stage.
+        await client.PostAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/submit", new { });
+        var bareReject = await client.PutAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/review",
+            new ReviewStockCountRequest(false, null));
+        Assert.Equal(HttpStatusCode.BadRequest, bareReject.StatusCode);
+
+        var rejected = await (await client.PutAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/review",
+            new ReviewStockCountRequest(false, "Sheet looks wrong, recount it"))).Content.ReadFromJsonAsync<StockCountDto>();
+        Assert.Equal("Rejected", rejected!.Status);
+        Assert.Equal("Sheet looks wrong, recount it", rejected.RejectionReason);
+        Assert.NotNull(rejected.RejectedByName);
+
+        // A rejected count is a dead end — Approve refuses it outright.
+        var approveAfterReject = await client.PostAsJsonAsync($"/api/inventory/stock-counts/{generated.Id}/approve",
+            new ApproveStockCountRequest(true, null, null, null));
+        Assert.Equal(HttpStatusCode.BadRequest, approveAfterReject.StatusCode);
+
+        using var verify = _factory.CreateDbContext();
+        Assert.Equal(100m, verify.StockLevels.Single(s => s.ProductId == product.Id).OnHand);
+        Assert.Empty(verify.StockAdjustments);
     }
 
     [Fact]

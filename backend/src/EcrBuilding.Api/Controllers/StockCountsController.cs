@@ -16,10 +16,15 @@ namespace EcrBuilding.Api.Controllers;
 // Generate materialises the sheet from live stock for a chosen scope (whole warehouse, one
 // category, only what's already low, the highest-value or fastest-moving lines) and snapshots
 // SystemQty + UnitCost per line, so a sale landing mid-count can't move the baseline the variance
-// is measured against. Counters then key or scan quantities; Post applies every variance in one
-// transaction by writing exactly one StockAdjustment — the same record an ad-hoc correction
-// produces — so stocktakes and manual corrections share one ledger, one audit trail and one
-// StockMovement stream.
+// is measured against. Counters then key or scan quantities and Submit for review.
+//
+// From there it's a two-stage maker-checker: Review (PendingReview -> PendingApproval, gated on
+// Edit) is the first sign-off and never touches stock; Approve (PendingApproval -> Completed,
+// gated on the stricter Approve permission) is the only step that writes stock, applying every
+// variance in one transaction as exactly one StockAdjustment — the same record an ad-hoc
+// correction produces — so stocktakes and manual corrections share one ledger, one audit trail
+// and one StockMovement stream. Either stage can Reject instead (a reason is required), which
+// ends the session without ever touching stock.
 [ApiController]
 [Route("api/inventory/stock-counts")]
 [Authorize]
@@ -79,9 +84,10 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
         // quantities for the same product — the second post would silently overwrite the first.
         var openCount = await db.StockCounts.FirstOrDefaultAsync(
             c => c.WarehouseId == request.WarehouseId
-                && (c.Status == StockCountStatus.Draft || c.Status == StockCountStatus.InProgress || c.Status == StockCountStatus.PendingApproval), ct);
+                && (c.Status == StockCountStatus.Draft || c.Status == StockCountStatus.InProgress
+                    || c.Status == StockCountStatus.PendingReview || c.Status == StockCountStatus.PendingApproval), ct);
         if (openCount is not null)
-            return BadRequest(new { error = $"{openCount.CountNo} is still open on this warehouse. Post or cancel it first." });
+            return BadRequest(new { error = $"{openCount.CountNo} is still open on this warehouse. Approve, reject or cancel it first." });
 
         var levels = await db.StockLevels.Include(s => s.Product).ThenInclude(p => p!.Category)
             .Where(s => s.WarehouseId == request.WarehouseId)
@@ -242,8 +248,8 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
     }
 
     // Close counting and hand the sheet to a reviewer. Separating "I've finished counting" from "I
-    // approve moving the stock" is what makes the variance auditable — the counter and the approver
-    // are different people, and nothing touches stock until Post.
+    // approve moving the stock" is what makes the variance auditable — the counter, the reviewer and
+    // the final approver can all be different people, and nothing touches stock until Approve.
     [HttpPost("{id:int}/submit")]
     [RequireModule("/stock/stock-count", PermissionAction.Edit)]
     public async Task<ActionResult<StockCountDto>> Submit(int id, CancellationToken ct)
@@ -259,7 +265,7 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
         if (uncounted > 0 && !count.AutoFillUncounted)
             return BadRequest(new { error = $"{uncounted} line(s) are still uncounted, and this count doesn't auto-fill." });
 
-        count.Status = StockCountStatus.PendingApproval;
+        count.Status = StockCountStatus.PendingReview;
         count.CompletedAt = DateTime.UtcNow;
         count.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -268,17 +274,71 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
         return Ok(Map(count, includeLines: true));
     }
 
-    // Post the variance. Sets both stock pools to the counted absolute quantity (same
-    // single-warehouse-per-branch invariant StockAdjustmentsController establishes) and records one
-    // StockAdjustment plus one StockMovement per non-zero variance.
-    [HttpPost("{id:int}/post")]
+    // First-stage sign-off: does the sheet look right? Doesn't touch stock either way — approving
+    // only hands the sheet to whoever holds final Approve, and rejecting stops it cold.
+    [HttpPut("{id:int}/review")]
     [RequireModule("/stock/stock-count", PermissionAction.Edit)]
-    public async Task<ActionResult<StockCountDto>> Post(int id, PostStockCountRequest request, CancellationToken ct)
+    public async Task<ActionResult<StockCountDto>> Review(int id, ReviewStockCountRequest request, CancellationToken ct)
     {
         var count = await BaseQuery().FirstOrDefaultAsync(c => c.Id == id, ct);
         if (count is null) return NotFound();
-        if (count.Status == StockCountStatus.Completed) return BadRequest(new { error = $"{count.CountNo} has already been posted." });
-        if (count.Status == StockCountStatus.Cancelled) return BadRequest(new { error = $"{count.CountNo} was cancelled." });
+        if (count.Status != StockCountStatus.PendingReview)
+            return BadRequest(new { error = $"{count.CountNo} is {count.Status} — it isn't awaiting review." });
+        if (!request.Approved && string.IsNullOrWhiteSpace(request.Reason))
+            return BadRequest(new { error = "A reason is required to reject a count." });
+
+        var userId = CurrentUserId();
+        count.ReviewedByUserId = userId;
+        count.ReviewedAt = DateTime.UtcNow;
+        count.UpdatedAt = DateTime.UtcNow;
+
+        if (request.Approved)
+        {
+            count.Status = StockCountStatus.PendingApproval;
+        }
+        else
+        {
+            count.Status = StockCountStatus.Rejected;
+            count.RejectedByUserId = userId;
+            count.RejectedAt = DateTime.UtcNow;
+            count.RejectionReason = request.Reason;
+        }
+
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", request.Approved ? "STOCK_COUNT_REVIEWED" : "STOCK_COUNT_REJECTED", id.ToString(),
+            newValue: new { count.CountNo, Stage = "Review", request.Reason }, cancellationToken: ct);
+        return Ok(Map(count, includeLines: true));
+    }
+
+    // Final sign-off. Approving is the only path in this whole controller that writes stock: it sets
+    // both pools to the counted absolute quantity (same single-warehouse-per-branch invariant
+    // StockAdjustmentsController establishes) and records one StockAdjustment plus one StockMovement
+    // per non-zero variance. Rejecting leaves stock untouched — there's nothing to reverse.
+    [HttpPost("{id:int}/approve")]
+    [RequireModule("/stock/stock-count", PermissionAction.Approve)]
+    public async Task<ActionResult<StockCountDto>> Approve(int id, ApproveStockCountRequest request, CancellationToken ct)
+    {
+        var count = await BaseQuery().FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (count is null) return NotFound();
+        if (count.Status != StockCountStatus.PendingApproval)
+            return BadRequest(new { error = $"{count.CountNo} is {count.Status} — it isn't awaiting final approval." });
+        if (!request.Approved && string.IsNullOrWhiteSpace(request.Reason))
+            return BadRequest(new { error = "A reason is required to reject a count." });
+
+        var userId = CurrentUserId();
+
+        if (!request.Approved)
+        {
+            count.Status = StockCountStatus.Rejected;
+            count.RejectedByUserId = userId;
+            count.RejectedAt = DateTime.UtcNow;
+            count.RejectionReason = request.Reason;
+            count.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            await audit.LogAsync("inventory", "STOCK_COUNT_REJECTED", id.ToString(),
+                newValue: new { count.CountNo, Stage = "Approval", request.Reason }, cancellationToken: ct);
+            return Ok(Map(count, includeLines: true));
+        }
 
         var warehouse = await db.Warehouses.FirstOrDefaultAsync(w => w.Id == count.WarehouseId, ct);
         if (warehouse is null) return BadRequest(new { error = "Unknown warehouse." });
@@ -287,13 +347,12 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
         if (uncounted.Count > 0 && !count.AutoFillUncounted)
             return BadRequest(new { error = $"{uncounted.Count} line(s) are still uncounted, and this count doesn't auto-fill." });
 
-        var userId = CurrentUserId();
         foreach (var line in uncounted)
         {
             line.CountedQty = line.SystemQty;
             line.CountedAt = DateTime.UtcNow;
             line.CountedByUserId = userId;
-            line.Note ??= "Auto-filled at posting";
+            line.Note ??= "Auto-filled at approval";
         }
 
         // Every line goes onto the adjustment, not just the variances — the adjustment is the
@@ -303,7 +362,7 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
             Reason = $"Stock Count {count.CountNo}",
             WarehouseId = count.WarehouseId,
             Date = DateTime.UtcNow,
-            ApproverUserId = request.ApproverUserId,
+            ApproverUserId = request.ApproverUserId ?? userId,
             EvidenceAttached = false,
             Lines = count.Lines.Select(l => new StockAdjustmentLine
             {
@@ -337,8 +396,9 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
         }
 
         count.Status = StockCountStatus.Completed;
-        count.CompletedAt = DateTime.UtcNow;
         count.ApprovedByUserId = request.ApproverUserId ?? userId;
+        count.ApprovedAt = DateTime.UtcNow;
+        count.UpdatedAt = DateTime.UtcNow;
         if (!string.IsNullOrWhiteSpace(request.Notes)) count.Notes = request.Notes;
         await db.SaveChangesAsync(ct);
 
@@ -372,8 +432,8 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
     {
         var count = await BaseQuery().FirstOrDefaultAsync(c => c.Id == id, ct);
         if (count is null) return NotFound();
-        if (count.Status == StockCountStatus.Completed)
-            return BadRequest(new { error = $"{count.CountNo} has already been posted and can't be cancelled." });
+        if (count.Status is StockCountStatus.Completed or StockCountStatus.Rejected)
+            return BadRequest(new { error = $"{count.CountNo} is already {count.Status} and can't be cancelled." });
 
         count.Status = StockCountStatus.Cancelled;
         count.UpdatedAt = DateTime.UtcNow;
@@ -386,7 +446,9 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
         .Include(c => c.Warehouse).ThenInclude(w => w!.Branch)
         .Include(c => c.Category)
         .Include(c => c.CountedBy)
+        .Include(c => c.ReviewedBy)
         .Include(c => c.ApprovedBy)
+        .Include(c => c.RejectedBy)
         .Include(c => c.Lines).ThenInclude(l => l.Product).ThenInclude(p => p!.Category);
 
     private static StockCountDto Map(StockCount c, bool includeLines)
@@ -396,14 +458,18 @@ public class StockCountsController(AppDbContext db, IAuditService audit, IStockM
         var varianceLines = counted.Count(l => l.Variance != 0);
         // Blind counts hide SystemQty (and everything derived from it) until the sheet is posted —
         // otherwise the "blind" is only a UI convention any API client could see straight past.
-        var reveal = !c.BlindCount || c.Status is StockCountStatus.Completed or StockCountStatus.Cancelled;
+        var reveal = !c.BlindCount || c.Status is StockCountStatus.Completed or StockCountStatus.Cancelled or StockCountStatus.Rejected;
 
         return new StockCountDto(
             c.Id, c.CountNo, c.WarehouseId, c.Warehouse?.Name ?? "",
             c.Warehouse?.BranchId ?? 0, c.Warehouse?.Branch?.NameEn ?? "",
             c.Scope.ToString(), c.CategoryId, c.Category?.NameEn, c.Status.ToString(),
             c.ScheduledFor, c.StartedAt, c.CompletedAt,
-            c.CountedBy?.Name, c.ApprovedBy?.Name, c.Notes,
+            c.CountedBy?.Name,
+            c.ReviewedAt, c.ReviewedBy?.Name,
+            c.ApprovedAt, c.ApprovedBy?.Name,
+            c.RejectedAt, c.RejectedBy?.Name, c.RejectionReason,
+            c.Notes,
             c.AutoFillUncounted, c.BlindCount, c.StockAdjustmentId,
             lines.Count, counted.Count, varianceLines,
             Math.Round(counted.Sum(l => l.Variance), 2),
