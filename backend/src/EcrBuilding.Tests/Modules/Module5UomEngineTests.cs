@@ -175,7 +175,7 @@ public class Module5UomEngineTests : IAsyncLifetime
         using var db = _factory.CreateDbContext();
         // Glass at 180 SAR/m², stocked in m².
         var branch = TestDataSeeder.AddBranch(db);
-        var category = TestDataSeeder.AddCategory(db, code: "GLS", nameEn: "Glass", defaultUom: "m²");
+        var category = TestDataSeeder.AddCategory(db, code: "GLS", nameEn: "Glass");
         var product = TestDataSeeder.AddProduct(db, category, sku: "GLASS-6MM", nameEn: "Clear Glass 6mm",
             sellingPrice: 180m, vatRate: 0m, stockUom: "m²", isCutToSize: true);
         TestDataSeeder.AddBranchStock(db, product, branch, 100m);
@@ -208,7 +208,7 @@ public class Module5UomEngineTests : IAsyncLifetime
         using var db = _factory.CreateDbContext();
         // Cable at 4 SAR/m, stocked in m (linear length only — no width, unlike glass's area mode).
         var branch = TestDataSeeder.AddBranch(db);
-        var category = TestDataSeeder.AddCategory(db, code: "ELC", nameEn: "Electrical", defaultUom: "m");
+        var category = TestDataSeeder.AddCategory(db, code: "ELC", nameEn: "Electrical");
         var product = TestDataSeeder.AddProduct(db, category, sku: "CABLE-CUT", nameEn: "Cut Cable",
             sellingPrice: 4m, vatRate: 0m, stockUom: "m", isCutToSize: true, cutToSizeUnit: "Length");
         TestDataSeeder.AddBranchStock(db, product, branch, 200m);
@@ -239,7 +239,7 @@ public class Module5UomEngineTests : IAsyncLifetime
         using var db = _factory.CreateDbContext();
         // Sand at 50 SAR/m³, stocked in m³.
         var branch = TestDataSeeder.AddBranch(db);
-        var category = TestDataSeeder.AddCategory(db, code: "SND", nameEn: "Aggregates", defaultUom: "m³");
+        var category = TestDataSeeder.AddCategory(db, code: "SND", nameEn: "Aggregates");
         var product = TestDataSeeder.AddProduct(db, category, sku: "SAND-CUT", nameEn: "Bulk Sand",
             sellingPrice: 50m, vatRate: 0m, stockUom: "m³", isCutToSize: true, cutToSizeUnit: "Volume");
         TestDataSeeder.AddBranchStock(db, product, branch, 100m);
@@ -268,7 +268,7 @@ public class Module5UomEngineTests : IAsyncLifetime
     {
         using var db = _factory.CreateDbContext();
         var branch = TestDataSeeder.AddBranch(db);
-        var category = TestDataSeeder.AddCategory(db, code: "SND2", nameEn: "Aggregates 2", defaultUom: "m³");
+        var category = TestDataSeeder.AddCategory(db, code: "SND2", nameEn: "Aggregates 2");
         var product = TestDataSeeder.AddProduct(db, category, sku: "SAND-CUT-2", nameEn: "Bulk Sand 2",
             sellingPrice: 50m, vatRate: 0m, stockUom: "m³", isCutToSize: true, cutToSizeUnit: "Volume");
         TestDataSeeder.AddBranchStock(db, product, branch, 100m);

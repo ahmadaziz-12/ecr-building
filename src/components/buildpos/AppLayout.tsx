@@ -54,6 +54,7 @@ import {
   History,
   BookOpen,
   ClipboardCheck,
+  Copy,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import logoAsset from "@/assets/mimony-logo.png.asset.json";
@@ -110,6 +111,7 @@ const nav: Group[] = [
     name: "Products & Stock",
     items: [
       { to: "/stock/inventory", label: "Product Catalog", icon: Package },
+      { to: "/stock/variant-groups", label: "Variant Groups", icon: Copy },
       { to: "/admin/categories", label: "Categories & Attributes", icon: Layers },
       { to: "/stock/bundles", label: "Bundles & Systems", icon: Blocks },
     ],

@@ -77,6 +77,7 @@ import {
   toStockQty,
   unitPriceFor,
 } from "@/lib/buildpos/uom";
+import { groupProductTiles } from "@/lib/buildpos/variant-tiles";
 import {
   nextTierProgress,
   qualifiesForFreeDelivery,
@@ -252,6 +253,9 @@ export function PosCheckout() {
   // parent category (e.g. "Electric") also matches every one of its subcategories' products.
   const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  // Product Variants: which grouped tile's variant picker (if any) is currently open — only one at
+  // a time, same convention as categoryPickerOpen.
+  const [openVariantGroupId, setOpenVariantGroupId] = useState<number | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   // sku of the cart line whose note input is currently expanded — null collapses all of them.
   const [notesEditingSku, setNotesEditingSku] = useState<string | null>(null);
@@ -516,6 +520,11 @@ export function PosCheckout() {
         // Carried through so lineDiscountPct can tell whether THIS line actually got a distinct list
         // price (and should suppress the legacy contractor trade % — see contractorDiscountPct below).
         hasDistinctListPrice: listPriceFor(p) !== p.sellingPrice,
+        // Product Variants: siblings sharing this id collapse into one browsable tile (see
+        // `tiles` below) instead of each showing as its own separate card.
+        variantGroupId: p.variantGroupId ?? null,
+        variantGroupName: p.variantGroupName ?? null,
+        attributes: p.attributes ?? [],
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [liveProducts, customer?.priceListType],
@@ -550,6 +559,12 @@ export function PosCheckout() {
           (p.barcode?.toLowerCase().includes(q) ?? false)),
     );
   }, [query, products, categoryFilterIds]);
+
+  // Product Variants: collapse every SKU that shares a VariantGroupId into one browsable tile —
+  // a search/category match on ANY sibling surfaces the whole family (via the full `products` list,
+  // not just `shown`), so switching which variant matched never hides the others from the picker.
+  // Standalone products (no group) pass through untouched, in their original relative order.
+  const tiles = useMemo(() => groupProductTiles(shown, products), [shown, products]);
 
   // Barcode scanners act as keyboards: they type the code then send Enter. A real POS should add
   // the item straight to the cart on that Enter, no manual click — this is what makes it "scan".
@@ -2074,8 +2089,8 @@ export function PosCheckout() {
             <div className="mb-2 flex items-center justify-between px-1">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 {query !== ""
-                  ? `${shown.length} match${shown.length === 1 ? "" : "es"} for "${query}"`
-                  : `${shown.length} product${shown.length === 1 ? "" : "s"} in ${activeCategoryName}`}
+                  ? `${tiles.length} match${tiles.length === 1 ? "" : "es"} for "${query}"`
+                  : `${tiles.length} product${tiles.length === 1 ? "" : "s"} in ${activeCategoryName}`}
               </p>
               <button
                 onClick={() => {
@@ -2087,13 +2102,98 @@ export function PosCheckout() {
                 Clear
               </button>
             </div>
-            {shown.length === 0 ? (
+            {tiles.length === 0 ? (
               <div className="p-6 text-center text-sm text-muted-foreground">
                 No product found. Try SKU, name or barcode.
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
-                {shown.map((p, i) => {
+                {tiles.map((t, i) => {
+                  if (t.isGroup) {
+                    const Icon = productIcon[t.variants[0]?.sku ?? ""] ?? Package;
+                    return (
+                      <Popover
+                        key={`group-${t.variantGroupId}`}
+                        open={openVariantGroupId === t.variantGroupId}
+                        onOpenChange={(o) => setOpenVariantGroupId(o ? t.variantGroupId : null)}
+                      >
+                        <PopoverTrigger asChild>
+                          <button
+                            style={{ animationDelay: `${i * 40}ms` }}
+                            className="pos-slide-up group relative flex flex-col items-start overflow-hidden rounded-xl border border-black/5 bg-white p-3 text-left shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md"
+                          >
+                            <span className="absolute right-2 top-2 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-semibold text-brand">
+                              {t.variants.length} sizes
+                            </span>
+                            <div className="relative mb-2 grid aspect-square w-full place-items-center overflow-hidden rounded-lg bg-gradient-to-br from-canvas to-concrete">
+                              {t.imageUrl ? (
+                                <img
+                                  src={t.imageUrl}
+                                  alt={t.name}
+                                  loading="lazy"
+                                  width={200}
+                                  height={200}
+                                  className="h-full w-full object-contain p-2 transition duration-300 group-hover:scale-110"
+                                />
+                              ) : (
+                                <Icon className="h-8 w-8 text-brand" />
+                              )}
+                              <span className="pointer-events-none absolute inset-0 blueprint-grid opacity-30" />
+                            </div>
+                            <p className="mt-2 text-sm font-medium text-foreground line-clamp-2">
+                              {t.name}
+                            </p>
+                            {categoryLabelFor(t.categoryId) && (
+                              <p className="mt-0.5 truncate text-[10px] text-brand">
+                                {categoryLabelFor(t.categoryId)}
+                              </p>
+                            )}
+                            <p className="mt-2 font-display text-lg font-bold text-foreground">
+                              from {t.minPrice.toFixed(2)}{" "}
+                              <span className="text-xs font-medium text-muted-foreground">
+                                ر.س / {t.uom}
+                              </span>
+                            </p>
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent align="start" className="w-[280px] p-2">
+                          <p className="mb-1.5 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                            {t.name} — pick a size
+                          </p>
+                          <div className="space-y-1">
+                            {t.variants.map((v) => (
+                              <button
+                                key={v.sku}
+                                onClick={() => {
+                                  addToCart(v);
+                                  setOpenVariantGroupId(null);
+                                }}
+                                className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-brand/5"
+                              >
+                                <span className="min-w-0">
+                                  <span className="block truncate text-sm font-medium text-foreground">
+                                    {v.attributes.length
+                                      ? v.attributes.map((a) => a.value).join(" · ")
+                                      : v.name}
+                                  </span>
+                                  <span
+                                    className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${toneClass[v.tone]}`}
+                                  >
+                                    {v.stock} {v.uom}
+                                  </span>
+                                </span>
+                                <span className="flex-none font-display text-sm font-bold text-foreground">
+                                  {v.price.toFixed(2)}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    );
+                  }
+
+                  const p = t;
                   const Icon = productIcon[p.sku] ?? Package;
                   // A real uploaded photo (Product.ImageUrl) always wins; the static demo map is
                   // only a fallback for the seeded sample catalog, then a generic category icon.

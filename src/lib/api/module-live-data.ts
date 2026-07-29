@@ -22,7 +22,14 @@ import {
   mapAuditLogs,
   type LiveTable,
 } from "./admin";
-import { useCategories, useProducts, mapCategories, mapProducts } from "./catalog";
+import {
+  useCategories,
+  useProducts,
+  useVariantGroups,
+  mapCategories,
+  mapProducts,
+  mapVariantGroups,
+} from "./catalog";
 import { useBundles, mapBundles } from "./bundles";
 import {
   useWarehouses,
@@ -93,6 +100,7 @@ export function useModuleLiveData(pathname: string): LiveTable | undefined {
 
   const categories = useCategories(pathname === "/admin/categories");
   const products = useProducts(pathname === "/stock/inventory");
+  const variantGroups = useVariantGroups(pathname === "/stock/variant-groups");
   const warehouses = useWarehouses(pathname === "/stock/warehouses");
   const stockLevels = useStockLevels(pathname === "/stock/stocks");
   const branchStockLevels = useBranchStockLevels(pathname === "/stock/branch-stock");
@@ -145,6 +153,8 @@ export function useModuleLiveData(pathname: string): LiveTable | undefined {
       return categories.data ? mapCategories(categories.data) : undefined;
     case "/stock/inventory":
       return products.data ? mapProducts(products.data) : undefined;
+    case "/stock/variant-groups":
+      return variantGroups.data ? mapVariantGroups(variantGroups.data) : undefined;
     case "/stock/warehouses":
       return warehouses.data ? mapWarehouses(warehouses.data) : undefined;
     case "/stock/stocks":

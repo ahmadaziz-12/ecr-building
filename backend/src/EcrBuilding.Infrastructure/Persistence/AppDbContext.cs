@@ -34,6 +34,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Product> Products => Set<Product>();
+    public DbSet<ProductVariantGroup> ProductVariantGroups => Set<ProductVariantGroup>();
     public DbSet<ProductUomConversion> ProductUomConversions => Set<ProductUomConversion>();
     public DbSet<ProductAttribute> ProductAttributes => Set<ProductAttribute>();
     public DbSet<ProductBundle> ProductBundles => Set<ProductBundle>();
@@ -218,6 +219,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             b.HasIndex(x => x.Sku).IsUnique();
             b.HasOne(x => x.Category).WithMany(x => x.Products).HasForeignKey(x => x.CategoryId);
+            // SetNull: deleting/archiving a variant group must never touch its variant SKUs.
+            b.HasOne(x => x.VariantGroup).WithMany(x => x.Variants).HasForeignKey(x => x.VariantGroupId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProductVariantGroup>(b =>
+        {
+            b.HasIndex(x => x.Code).IsUnique();
+            b.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<ProductUomConversion>(b =>

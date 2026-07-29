@@ -4,10 +4,12 @@ import {
   useCategories,
   useCreateCategory,
   useCreateProduct,
+  useCreateProductFamily,
+  useCreateVariantGroup,
   useProducts,
+  useVariantGroups,
 } from "./catalog";
 import { parseUomConversions, parseCutToSizeMode } from "@/lib/buildpos/uom";
-import { parseAttributes } from "@/lib/buildpos/attributes";
 import {
   useCreateBranchStockBatch,
   useCreateStockAdjustment,
@@ -70,6 +72,14 @@ function parseLineItemRows(raw: string | undefined): Record<string, string>[] {
   }
 }
 
+// The Add/Edit SKU "Attributes" field is a lineItems table (Attribute + Value per row) instead of
+// typed "Name=Value" syntax — drops any row missing either half rather than failing the whole save.
+function parseAttributeRows(raw: string | undefined): { name: string; value: string }[] {
+  return parseLineItemRows(raw)
+    .filter((r) => r.name && r.value)
+    .map((r) => ({ name: r.name, value: r.value }));
+}
+
 // Real backend submit handlers for FlowDialog, keyed by Flow.key (src/lib/buildpos/flows.ts).
 // A flow with no entry here just keeps the old "toast only, not persisted" mock behavior —
 // see AGENTS/README for which flows are wired vs. still mock.
@@ -81,6 +91,9 @@ export function useFlowSubmitHandlers(): Record<
   const createCategory = useCreateCategory();
   const createProduct = useCreateProduct();
   const { data: products } = useProducts();
+  const { data: variantGroups } = useVariantGroups();
+  const createVariantGroup = useCreateVariantGroup();
+  const createProductFamily = useCreateProductFamily();
   const { data: warehouses } = useWarehouses();
   const { data: users } = useUsers();
   const createStockAdjustment = useCreateStockAdjustment();
@@ -130,6 +143,15 @@ export function useFlowSubmitHandlers(): Record<
       return { warehouseId: null, branchId: branch.id };
     }
     throw new Error(`"${value}" must be prefixed "Warehouse:" or "Branch:".`);
+  }
+
+  // "— Standalone SKU —" (the default) or blank means no group; anything else must match an
+  // existing group's name — created from the Variant Groups module, not typed freely here.
+  function resolveVariantGroupId(label: string | undefined): number | null {
+    if (!label || label === "— Standalone SKU —") return null;
+    const group = variantGroups?.find((g) => g.nameEn.toLowerCase() === label.toLowerCase());
+    if (!group) throw new Error(`Unknown variant group "${label}" — create it first in Variant Groups.`);
+    return group.id;
   }
 
   function findWarehouseForBranch(branchName: string) {
@@ -192,7 +214,52 @@ export function useFlowSubmitHandlers(): Record<
         isCutToSize,
         cutToSizeUnit,
         minCutQty: values.minCutQty ? Number(values.minCutQty) : null,
-        attributes: parseAttributes(values.attributes),
+        attributes: parseAttributeRows(values.attributes),
+        variantGroupId: resolveVariantGroupId(values.variantGroup),
+      });
+    },
+
+    "add-product-family": async (values) => {
+      if (!values.nameEn) throw new Error("Product Name is required.");
+      const categoryId = resolveProductCategoryId(categories, values.category ?? "", values.subcategory);
+      if (categoryId == null) {
+        throw new Error(
+          `Unknown category "${values.category}" — pick one that exists in Categories & Attributes.`,
+        );
+      }
+      if (!values.attributeName) throw new Error("Pick what makes each version different (e.g. Size).");
+      const rows = parseLineItemRows(values.variants);
+      if (rows.length === 0) throw new Error("Add at least one version with a price.");
+      const variants = rows.map((r) => {
+        if (!r.value) throw new Error("Every row needs a value (e.g. 12MM).");
+        if (!(Number(r.price) > 0)) throw new Error(`"${r.value}" needs a selling price greater than 0.`);
+        return { value: r.value, costPrice: Number(r.cost || 0), sellingPrice: Number(r.price) };
+      });
+      const vatRate = values.vat === "Exempt" ? 0 : values.vat?.startsWith("0%") ? 0 : 15;
+      await createProductFamily.mutateAsync({
+        nameEn: values.nameEn,
+        nameAr: values.nameAr || null,
+        categoryId,
+        brand: values.brand || null,
+        imageUrl: values.imageUrl || null,
+        stockUom: values.stockUom || "Piece",
+        vatRate,
+        attributeName: values.attributeName,
+        variants,
+      });
+    },
+
+    "add-variant-group": async (values) => {
+      if (!values.code || !values.nameEn) throw new Error("Code and Name (English) are required.");
+      const categoryId = values.category
+        ? resolveProductCategoryId(categories, values.category)
+        : null;
+      await createVariantGroup.mutateAsync({
+        code: values.code,
+        nameEn: values.nameEn,
+        nameAr: values.nameAr || null,
+        categoryId,
+        imageUrl: values.imageUrl || null,
       });
     },
 
@@ -203,22 +270,12 @@ export function useFlowSubmitHandlers(): Record<
       const parentName =
         values.parent && values.parent !== "— This is a Main Category —" ? values.parent : null;
       const parent = parentName ? resolveParentCategory(categories, parentName) : undefined;
-      const vatRate = values.vat === "Exempt" ? 0 : values.vat?.startsWith("0%") ? 0 : 15;
 
       await createCategory.mutateAsync({
         code: values.code,
         nameEn: values.nameEn,
         nameAr: values.nameAr || null,
         parentId: parent?.id ?? null,
-        attributes: values.attributes
-          ? values.attributes
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : [],
-        returnRule: values.returnRule || "Standard 15 days",
-        defaultUom: values.defaultUom || "Piece",
-        vatRate,
         returnable: values.returnable === "on",
       });
     },

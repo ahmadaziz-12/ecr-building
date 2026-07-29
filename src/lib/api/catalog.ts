@@ -9,10 +9,6 @@ export type CategoryDto = {
   nameAr: string | null;
   parentId: number | null;
   parentName: string | null;
-  attributes: string[];
-  returnRule: string;
-  defaultUom: string;
-  vatRate: number;
   returnable: boolean;
   status: string;
   skuCount: number;
@@ -20,8 +16,7 @@ export type CategoryDto = {
 // BRD §2.3: "1 {uom} = {factorToStock} {stockUom}" — drives the POS cart's UOM dropdown; the backend
 // refuses to sell in any UOM without a row here, so the dropdown only ever offers configured units.
 export type ProductUomConversionDto = { uom: string; factorToStock: number };
-// BRD §2.2: a structured custom attribute (Grade, Size, Colour, Diameter…) — the category's
-// Attribute Template suggests names, this is the actual value on one product.
+// BRD §2.2: a structured custom attribute (Grade, Size, Colour, Diameter…) on one product.
 export type ProductAttributeDto = { name: string; value: string };
 // BRD §2.3 items 5-6: which dimensions the POS asks for on a cut-to-size line.
 export type CutToSizeUnit = "Length" | "Area" | "Volume";
@@ -62,6 +57,24 @@ export type ProductDto = {
   projectPrice?: number | null;
   // BRD §2.3 enhancement: minimum billable qty (stock UOM) for a cut-to-size line — null = no minimum.
   minCutQty?: number | null;
+  // Product Variants: optional family link (e.g. Steel Rebar groups the 12MM/16MM SKUs) — null for
+  // standalone SKUs. Every variant still keeps its own price/stock/barcode/attributes.
+  variantGroupId?: number | null;
+  variantGroupName?: string | null;
+};
+
+// A family of independent Product SKUs (own price/stock/barcode) sharing a display grouping in
+// POS/catalog — e.g. "Steel Rebar" grouping the 12MM/16MM SKUs.
+export type ProductVariantGroupDto = {
+  id: number;
+  code: string;
+  nameEn: string;
+  nameAr: string | null;
+  categoryId: number | null;
+  categoryName: string | null;
+  imageUrl: string | null;
+  status: string;
+  variantCount: number;
 };
 
 export const useCategories = (enabled = true) =>
@@ -162,6 +175,7 @@ export type CreateProductRequest = {
   wholesalePrice?: number | null;
   projectPrice?: number | null;
   minCutQty?: number | null;
+  variantGroupId?: number | null;
 };
 
 export function useCreateProduct() {
@@ -170,6 +184,36 @@ export function useCreateProduct() {
     mutationFn: (request: CreateProductRequest) =>
       apiPost<ProductDto>("/api/catalog/products", request),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["catalog", "products"] }),
+  });
+}
+
+// One-screen "Add Product with Variants" wizard: creates a brand-new ProductVariantGroup AND every
+// one of its variant SKUs in a single call. Value is the only thing typed per row (e.g. "12MM") —
+// attributeName (e.g. "Diameter") is picked once and reused for every generated SKU's attribute.
+// SKU codes and the group Code are generated server-side, never typed by the user.
+export type CreateProductFamilyLine = { value: string; costPrice: number; sellingPrice: number };
+export type CreateProductFamilyRequest = {
+  nameEn: string;
+  nameAr: string | null;
+  categoryId: number;
+  brand: string | null;
+  imageUrl: string | null;
+  stockUom: string;
+  vatRate: number;
+  attributeName: string;
+  variants: CreateProductFamilyLine[];
+};
+export type ProductFamilyDto = { group: ProductVariantGroupDto; products: ProductDto[] };
+
+export function useCreateProductFamily() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: CreateProductFamilyRequest) =>
+      apiPost<ProductFamilyDto>("/api/catalog/products/family", request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["catalog", "products"] });
+      queryClient.invalidateQueries({ queryKey: ["catalog", "variant-groups"] });
+    },
   });
 }
 
@@ -191,15 +235,94 @@ export function useSetProductStatus() {
   });
 }
 
+export const useVariantGroups = (enabled = true) =>
+  useQuery({
+    queryKey: ["catalog", "variant-groups"],
+    queryFn: () => apiGet<ProductVariantGroupDto[]>("/api/catalog/variant-groups"),
+    enabled,
+  });
+
+// Powers the POS variant picker: every SKU currently linked to this group, with the same
+// branch-scoped stock a plain product tile shows.
+export const useVariantGroupProducts = (groupId: number | null, branchId?: number, enabled = true) =>
+  useQuery({
+    queryKey: ["catalog", "variant-groups", groupId, "products", branchId ?? "global"],
+    queryFn: () =>
+      apiGet<ProductDto[]>(
+        `/api/catalog/variant-groups/${groupId}/products${branchId ? `?branchId=${branchId}` : ""}`,
+      ),
+    enabled: enabled && groupId != null,
+  });
+
+export type UpsertProductVariantGroupRequest = {
+  code: string;
+  nameEn: string;
+  nameAr: string | null;
+  categoryId: number | null;
+  imageUrl: string | null;
+};
+
+export function useCreateVariantGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: UpsertProductVariantGroupRequest) =>
+      apiPost<ProductVariantGroupDto>("/api/catalog/variant-groups", request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["catalog", "variant-groups"] }),
+  });
+}
+
+export function useUpdateVariantGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, request }: { id: number; request: UpsertProductVariantGroupRequest }) =>
+      apiPut<ProductVariantGroupDto>(`/api/catalog/variant-groups/${id}`, request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["catalog", "variant-groups"] }),
+  });
+}
+
+export function useSetVariantGroupStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: number; status: "Active" | "Inactive" }) =>
+      apiPut<ProductVariantGroupDto>(`/api/catalog/variant-groups/${id}/status`, { status }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["catalog", "variant-groups"] }),
+  });
+}
+
+export function mapVariantGroups(rows: ProductVariantGroupDto[]): LiveTable {
+  return {
+    columns: ["Code", "Name EN/AR", "Category", "Variants", "Status"],
+    statusCol: 4,
+    ids: rows.map((g) => g.id),
+    rows: rows.map((g) => [
+      g.code,
+      `${g.nameEn}${g.nameAr ? ` / ${g.nameAr}` : ""}`,
+      g.categoryName ?? "—",
+      g.variantCount,
+      g.status,
+    ]),
+    kpis: [
+      {
+        label: "Variant Groups",
+        value: String(rows.length),
+        sub: `${rows.reduce((s, g) => s + g.variantCount, 0)} SKUs grouped`,
+        tone: "info",
+      },
+      {
+        label: "Empty Groups",
+        value: String(rows.filter((g) => g.variantCount === 0).length),
+        sub: "No SKUs linked yet",
+        tone: rows.some((g) => g.variantCount === 0) ? "warning" : "success",
+      },
+    ],
+  };
+}
+
 export type UpsertCategoryRequest = {
   code: string;
   nameEn: string;
   nameAr: string | null;
   parentId: number | null;
-  attributes: string[];
-  returnRule: string;
-  defaultUom: string;
-  vatRate: number;
   returnable: boolean;
 };
 
@@ -249,16 +372,13 @@ export function mapCategories(rows: CategoryDto[]): LiveTable {
   const ordered = [...topLevel.flatMap((c) => [c, ...(childrenOf.get(c.id) ?? [])]), ...orphans];
 
   return {
-    columns: ["Code", "Category", "SKUs", "Attributes", "Return Rule", "Default UOM", "Status"],
-    statusCol: 6,
+    columns: ["Code", "Category", "SKUs", "Status"],
+    statusCol: 3,
     ids: ordered.map((c) => c.id),
     rows: ordered.map((c) => [
       c.code,
       c.parentId == null ? c.nameEn : `↳ ${c.nameEn}`,
       c.skuCount,
-      c.attributes.length,
-      c.returnRule,
-      c.defaultUom,
       c.status,
     ]),
     kpis: [
@@ -277,7 +397,7 @@ export function mapCategories(rows: CategoryDto[]): LiveTable {
       {
         label: "Non-Returnable",
         value: String(rows.filter((c) => !c.returnable).length),
-        sub: "Return rule blocked",
+        sub: "Whole category blocked",
         tone: "warning",
       },
       {
@@ -303,10 +423,11 @@ export function mapProducts(rows: ProductDto[]): LiveTable {
       "Stock UOM",
       "Selling UOMs",
       "Attributes",
+      "Variant Group",
       "Stock",
       "Status",
     ],
-    statusCol: 11,
+    statusCol: 12,
     ids: rows.map((p) => p.id),
     rows: rows.map((p) => [
       p.sku,
@@ -319,6 +440,7 @@ export function mapProducts(rows: ProductDto[]): LiveTable {
       p.stockUom,
       p.sellUoms.length ? p.sellUoms.join(", ") : p.stockUom,
       p.attributes.length ? p.attributes.map((a) => `${a.name}: ${a.value}`).join(", ") : "—",
+      p.variantGroupName ?? "—",
       p.totalOnHand,
       p.returnable ? p.status : "Non-Returnable",
     ]),

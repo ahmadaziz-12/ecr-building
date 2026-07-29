@@ -184,14 +184,7 @@ export function useRowDetails(
               heading: "Overview",
               fields: [
                 { label: "Parent", value: category.parentName ?? "— Top level —" },
-                { label: "Default UOM", value: category.defaultUom },
-                { label: "Return Rule", value: category.returnRule },
-                { label: "VAT Rate", value: `${category.vatRate}%` },
                 { label: "Returnable", value: category.returnable ? "Yes" : "No" },
-                {
-                  label: "Attributes",
-                  value: category.attributes.length ? category.attributes.join(", ") : "—",
-                },
               ],
             },
           ],

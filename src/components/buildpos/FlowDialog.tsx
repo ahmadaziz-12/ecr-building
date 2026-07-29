@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { Field, Flow, LineItemColumn } from "@/lib/buildpos/flows";
-import { useCategories, useProducts } from "@/lib/api/catalog";
+import { useCategories, useProducts, useVariantGroups } from "@/lib/api/catalog";
 import { useBranches, useTerminals, useUsers, useRoles } from "@/lib/api/admin";
 import { useAuth } from "@/lib/api/auth";
 import { useStockLevels, useBranchStockLevels } from "@/lib/api/inventory";
@@ -461,12 +461,14 @@ export function FlowDialog({
   );
   const { data: liveUsers } = useUsers(open && optionsSources.has("users"));
   const { data: liveRoles } = useRoles(open && optionsSources.has("roles"));
+  const { data: liveVariantGroups } = useVariantGroups(open && optionsSources.has("variantGroups"));
   const liveOptions: Record<Exclude<NonNullable<Field["optionsSource"]>, "subcategories">, string[] | undefined> = {
     branches: liveBranches?.map((b) => b.nameEn),
     terminals: liveTerminals?.map((t) => t.code),
     topCategories: liveCategories?.filter((c) => c.parentId == null).map((c) => c.nameEn),
     users: liveUsers?.map((u) => u.name),
     roles: liveRoles?.map((r) => r.name),
+    variantGroups: liveVariantGroups?.map((g) => g.nameEn),
   };
 
   function resolveField(f: Field): Field {
