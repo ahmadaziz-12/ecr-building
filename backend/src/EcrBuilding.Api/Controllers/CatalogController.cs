@@ -140,7 +140,8 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             ImageUrl = request.ImageUrl, IsCutToSize = request.IsCutToSize, CutToSizeUnit = request.CutToSizeUnit,
             SupplierId = request.SupplierId, BinLocation = request.BinLocation,
             ContractorPrice = request.ContractorPrice, WholesalePrice = request.WholesalePrice, ProjectPrice = request.ProjectPrice,
-            MinCutQty = request.MinCutQty, VariantGroupId = request.VariantGroupId,
+            MinCutQty = request.MinCutQty, VariantGroupId = request.VariantGroupId, IsSoldByWeight = request.IsSoldByWeight,
+            RequiresSerialTracking = request.RequiresSerialTracking,
         };
         product.UomConversions = BuildUomConversions(request.UomConversions, request.StockUom);
         product.Attributes = BuildAttributes(request.Attributes);
@@ -192,7 +193,8 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
         product.ImageUrl = request.ImageUrl; product.IsCutToSize = request.IsCutToSize; product.CutToSizeUnit = request.CutToSizeUnit;
         product.SupplierId = request.SupplierId; product.BinLocation = request.BinLocation;
         product.ContractorPrice = request.ContractorPrice; product.WholesalePrice = request.WholesalePrice; product.ProjectPrice = request.ProjectPrice;
-        product.MinCutQty = request.MinCutQty; product.VariantGroupId = request.VariantGroupId;
+        product.MinCutQty = request.MinCutQty; product.VariantGroupId = request.VariantGroupId; product.IsSoldByWeight = request.IsSoldByWeight;
+        product.RequiresSerialTracking = request.RequiresSerialTracking;
         // Replace-all, same pattern as RolePermissions in RolesController.Update — the request's list
         // is the complete intended state, not a delta.
         db.ProductUomConversions.RemoveRange(product.UomConversions);
@@ -359,7 +361,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
                 branchLevels.Sum(s => s.OnHand), branchLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
                 attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit,
                 p.ContractorPrice, p.WholesalePrice, p.ProjectPrice, p.MinCutQty,
-                p.VariantGroupId, p.VariantGroup?.NameEn);
+                p.VariantGroupId, p.VariantGroup?.NameEn, p.IsSoldByWeight, p.RequiresSerialTracking);
         }
 
         return new(
@@ -369,7 +371,7 @@ public class ProductsController(AppDbContext db, IAuditService audit) : Controll
             p.StockLevels.Sum(s => s.OnHand), p.StockLevels.Sum(s => s.Available), conversions, p.IsCutToSize,
             attributes, p.SupplierId, p.Supplier?.NameEn, p.BinLocation, p.CutToSizeUnit,
             p.ContractorPrice, p.WholesalePrice, p.ProjectPrice, p.MinCutQty,
-            p.VariantGroupId, p.VariantGroup?.NameEn);
+            p.VariantGroupId, p.VariantGroup?.NameEn, p.IsSoldByWeight, p.RequiresSerialTracking);
     }
 }
 

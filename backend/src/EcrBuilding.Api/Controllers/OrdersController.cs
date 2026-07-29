@@ -312,6 +312,15 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             }
         }
 
+        // Serial Number Tracking: free up any serialized units this order sold, back to InStock.
+        var voidedSerials = await db.SerializedUnits.Where(s => s.SoldOrderId == id).ToListAsync(ct);
+        foreach (var serial in voidedSerials)
+        {
+            serial.Status = SerialUnitStatus.InStock;
+            serial.SoldOrderId = null;
+            serial.SoldOrderLineId = null;
+        }
+
         order.Status = OrderStatus.Voided;
         order.PaymentStatus = PaymentStatus.Cancelled;
         await db.SaveChangesAsync(ct);
@@ -379,6 +388,15 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
                 $"UPDATE BranchStockLevels SET OnHand = OnHand + {restoreQty} WHERE ProductId = {line.ProductId} AND BranchId = {order.BranchId}", ct);
         }
 
+        // Serial Number Tracking: free up any serialized units sold on THIS line, back to InStock.
+        var voidedLineSerials = await db.SerializedUnits.Where(s => s.SoldOrderLineId == line.Id).ToListAsync(ct);
+        foreach (var serial in voidedLineSerials)
+        {
+            serial.Status = SerialUnitStatus.InStock;
+            serial.SoldOrderId = null;
+            serial.SoldOrderLineId = null;
+        }
+
         order.SubTotal = Math.Round(order.SubTotal - line.Qty * line.UnitPrice, 2);
         order.DiscountTotal = Math.Round(order.DiscountTotal - (line.Qty * line.UnitPrice - line.LineTotal) - line.LineTotal * discountRatio, 2);
         order.VatTotal = Math.Round(order.VatTotal - lineVat, 2);
@@ -397,6 +415,170 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             await stockMovements.RecordAsync(line.ProductId, order.BranchId, StockMovementType.Void, restoreQty,
                 refTable: "Order", refId: id.ToString(), userId: cashierId, cancellationToken: ct);
         }
+
+        var updated = await Query().FirstAsync(o => o.Id == id, ct);
+        return Ok(MapOrder(updated));
+    }
+
+    // Approval Center (BRD Business Controls): a stronger, async-approval-gated alternative to Void
+    // for a cashier who lacks void authorization and can't get a supervisor's PIN in person — they
+    // request an InvoiceDeletion approval instead (see ApprovalsController), and once a different,
+    // higher-tier user approves it, this endpoint restores stock exactly like Void but leaves the
+    // order in a distinct Deleted status so the audit trail (and any BI/reports keying off Voided)
+    // can tell the two apart.
+    [HttpDelete("{id:int}")]
+    [RequireModule("/operate/orders", PermissionAction.Delete)]
+    public async Task<ActionResult<OrderDto>> Delete(int id, [FromBody] DeleteOrderRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason)) return BadRequest(new { error = "A reason is required to delete an invoice." });
+
+        var order = await Query().FirstOrDefaultAsync(o => o.Id == id, ct);
+        if (order is null) return NotFound();
+        if (order.Status is OrderStatus.Voided or OrderStatus.Deleted) return BadRequest(new { error = "Order is already voided or deleted." });
+
+        var approved = await db.ApprovalRequests.AnyAsync(a =>
+            a.Id == request.ApprovalRequestId && a.Type == ApprovalType.InvoiceDeletion && a.Status == ApprovalStatus.Approved
+            && a.RelatedOrderId == id && a.BranchId == order.BranchId, ct);
+        if (!approved) return BadRequest(new { error = "Deleting this invoice requires an approved deletion request for this order." });
+
+        var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        foreach (var line in order.Lines)
+        {
+            var restoreQty = line.StockQty > 0 ? line.StockQty : line.Qty;
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE BranchStockLevels SET OnHand = OnHand + {restoreQty} WHERE ProductId = {line.ProductId} AND BranchId = {order.BranchId}", ct);
+        }
+
+        var deletedSerials = await db.SerializedUnits.Where(s => s.SoldOrderId == id).ToListAsync(ct);
+        foreach (var serial in deletedSerials)
+        {
+            serial.Status = SerialUnitStatus.InStock;
+            serial.SoldOrderId = null;
+            serial.SoldOrderLineId = null;
+        }
+
+        order.Status = OrderStatus.Deleted;
+        order.PaymentStatus = PaymentStatus.Cancelled;
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+
+        await audit.LogAsync("pos", "ORDER_DELETED", id.ToString(), userId: cashierId, branchId: order.BranchId,
+            reason: request.Reason, newValue: new { ApprovalRequestId = request.ApprovalRequestId }, cancellationToken: ct);
+        foreach (var line in order.Lines)
+        {
+            var restoreQty = line.StockQty > 0 ? line.StockQty : line.Qty;
+            await stockMovements.RecordAsync(line.ProductId, order.BranchId, StockMovementType.Void, restoreQty,
+                refTable: "Order", refId: id.ToString(), userId: cashierId, cancellationToken: ct);
+        }
+
+        var updated = await Query().FirstAsync(o => o.Id == id, ct);
+        return Ok(MapOrder(updated));
+    }
+
+    // Approval Center: the async-approval-gated counterpart to VoidLine above, for a cashier who
+    // lacks void authorization — removes one line, restores its stock and re-derives totals exactly
+    // like VoidLine, but only once a PaymentMethodChange... no, an ItemDeletion approval covering
+    // this specific order+line has been granted.
+    [HttpDelete("{id:int}/lines/{lineId:int}")]
+    [RequireModule("/operate/orders", PermissionAction.Delete)]
+    public async Task<ActionResult<OrderDto>> DeleteLine(int id, int lineId, [FromBody] DeleteOrderLineRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason)) return BadRequest(new { error = "A reason is required to delete this item." });
+        if (request.OrderLineId != lineId) return BadRequest(new { error = "Line id mismatch." });
+
+        var order = await Query().FirstOrDefaultAsync(o => o.Id == id, ct);
+        if (order is null) return NotFound();
+        if (order.Status is OrderStatus.Voided or OrderStatus.Deleted) return BadRequest(new { error = "Order is already voided or deleted." });
+
+        var line = order.Lines.FirstOrDefault(l => l.Id == lineId);
+        if (line is null) return BadRequest(new { error = "That line does not belong to this order." });
+        if (line.BundleId is not null) return BadRequest(new { error = "Bundle items can't be deleted individually — void the whole order or process a return." });
+        if (order.Lines.Count == 1) return BadRequest(new { error = "This is the order's only line — delete the whole invoice instead." });
+
+        var approved = await db.ApprovalRequests.AnyAsync(a =>
+            a.Id == request.ApprovalRequestId && a.Type == ApprovalType.ItemDeletion && a.Status == ApprovalStatus.Approved
+            && a.RelatedOrderId == id && a.RelatedOrderLineId == lineId && a.BranchId == order.BranchId, ct);
+        if (!approved) return BadRequest(new { error = "Deleting this item requires an approved deletion request for this line." });
+
+        var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+        var lineTotalsSum = order.Lines.Sum(l => l.LineTotal);
+        var perLineDiscounts = order.SubTotal - lineTotalsSum;
+        var orderDiscount = Math.Max(0, order.DiscountTotal - perLineDiscounts);
+        var discountRatio = lineTotalsSum == 0 ? 0 : orderDiscount / lineTotalsSum;
+
+        var lineNet = line.LineTotal * (1 - discountRatio);
+        var lineVat = lineNet * line.VatRate / 100;
+
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var restoreQty = line.StockQty > 0 ? line.StockQty : line.Qty;
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE BranchStockLevels SET OnHand = OnHand + {restoreQty} WHERE ProductId = {line.ProductId} AND BranchId = {order.BranchId}", ct);
+
+        var deletedLineSerials = await db.SerializedUnits.Where(s => s.SoldOrderLineId == line.Id).ToListAsync(ct);
+        foreach (var serial in deletedLineSerials)
+        {
+            serial.Status = SerialUnitStatus.InStock;
+            serial.SoldOrderId = null;
+            serial.SoldOrderLineId = null;
+        }
+
+        order.SubTotal = Math.Round(order.SubTotal - line.Qty * line.UnitPrice, 2);
+        order.DiscountTotal = Math.Round(order.DiscountTotal - (line.Qty * line.UnitPrice - line.LineTotal) - line.LineTotal * discountRatio, 2);
+        order.VatTotal = Math.Round(order.VatTotal - lineVat, 2);
+        order.GrandTotal = Math.Round(order.GrandTotal - lineNet - lineVat, 2);
+        order.Lines.Remove(line);
+        db.OrderLines.Remove(line);
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+
+        await audit.LogAsync("pos", "ORDER_ITEM_DELETED", id.ToString(), userId: cashierId, branchId: order.BranchId,
+            reason: request.Reason,
+            newValue: new { LineId = lineId, line.ProductId, line.Qty, RefundDue = Math.Round(lineNet + lineVat, 2), ApprovalRequestId = request.ApprovalRequestId },
+            cancellationToken: ct);
+        await stockMovements.RecordAsync(line.ProductId, order.BranchId, StockMovementType.Void, restoreQty,
+            refTable: "Order", refId: id.ToString(), userId: cashierId, cancellationToken: ct);
+
+        var updated = await Query().FirstAsync(o => o.Id == id, ct);
+        return Ok(MapOrder(updated));
+    }
+
+    // Approval Center: changing how an already-completed order was paid (e.g. cashier keyed "Cash"
+    // but the customer actually tapped a card) — gated behind an approved PaymentMethodChange
+    // request so it can't be used to quietly launder a sale's payment trail. Reassigns the payment
+    // record's method only; the settled Amount doesn't change.
+    [HttpPut("{id:int}/payment-method")]
+    [RequireModule("/operate/orders", PermissionAction.Edit)]
+    public async Task<ActionResult<OrderDto>> ChangePaymentMethod(int id, ChangePaymentMethodRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason)) return BadRequest(new { error = "A reason is required to change the payment method." });
+        if (!Enum.TryParse<PaymentMethod>(request.NewMethod, ignoreCase: true, out var newMethod))
+        {
+            return BadRequest(new { error = "Unknown payment method." });
+        }
+
+        var order = await Query().FirstOrDefaultAsync(o => o.Id == id, ct);
+        if (order is null) return NotFound();
+
+        var payment = order.Payments.FirstOrDefault(p => p.Id == request.OrderPaymentId);
+        if (payment is null) return BadRequest(new { error = "That payment does not belong to this order." });
+
+        var approved = await db.ApprovalRequests.AnyAsync(a =>
+            a.Id == request.ApprovalRequestId && a.Type == ApprovalType.PaymentMethodChange && a.Status == ApprovalStatus.Approved
+            && a.RelatedOrderId == id && a.BranchId == order.BranchId, ct);
+        if (!approved) return BadRequest(new { error = "Changing the payment method requires an approved request for this order." });
+
+        var cashierId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var oldMethod = payment.Method;
+        payment.Method = newMethod;
+        await db.SaveChangesAsync(ct);
+
+        await audit.LogAsync("pos", "ORDER_PAYMENT_METHOD_CHANGED", id.ToString(), userId: cashierId, branchId: order.BranchId,
+            reason: request.Reason,
+            oldValue: new { Method = oldMethod.ToString() }, newValue: new { Method = newMethod.ToString(), ApprovalRequestId = request.ApprovalRequestId },
+            cancellationToken: ct);
 
         var updated = await Query().FirstAsync(o => o.Id == id, ct);
         return Ok(MapOrder(updated));
@@ -624,6 +806,11 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         var productsById = await db.Products.Include(p => p.UomConversions)
             .Where(p => productIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, ct);
 
+        // Serial Number Tracking: which SerializedUnit rows to mark Sold once order.Lines get their
+        // real Ids (right after the first SaveChangesAsync below) — captured per-line since a cart
+        // can carry more than one serial-tracked product.
+        var pendingSerialAssignments = new List<(OrderLine Line, List<SerializedUnit> Serials)>();
+
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         foreach (var priced in pricedLines)
         {
@@ -766,6 +953,28 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             }
 
             if (enteredQty <= 0) return BadRequest(new { error = $"Quantity for {product.Sku} must be positive." });
+
+            // Serial Number Tracking: exactly one serial per unit sold — validated up front (before
+            // stock is touched) like every other "can this checkout even proceed" gate above. Never
+            // eligible for the pallet/Buy-X-Get-Y split paths below (serialized tools/equipment aren't
+            // bulk-priced), so it's resolved here rather than after those checks.
+            List<SerializedUnit>? matchedSerials = null;
+            if (product.RequiresSerialTracking)
+            {
+                var providedSerials = (line.SerialNumbers ?? []).Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+                var neededCount = (int)Math.Round(enteredQty, MidpointRounding.AwayFromZero);
+                if (providedSerials.Count != neededCount)
+                {
+                    return BadRequest(new { error = $"{product.Sku} is serial-tracked — provide exactly {neededCount} serial number(s) (got {providedSerials.Count})." });
+                }
+                matchedSerials = await db.SerializedUnits.Where(s => s.ProductId == product.Id && s.BranchId == request.BranchId
+                    && s.Status == SerialUnitStatus.InStock && providedSerials.Contains(s.SerialNo)).ToListAsync(ct);
+                if (matchedSerials.Count != providedSerials.Count)
+                {
+                    var missing = providedSerials.Except(matchedSerials.Select(s => s.SerialNo));
+                    return BadRequest(new { error = $"Not available in stock for {product.Sku} at this branch: {string.Join(", ", missing)}." });
+                }
+            }
             // The customer's own actual physical demand, in stock UOM — the measured cut (or minimum
             // charge floor) for a cut-to-size line, the selling-UOM×factor conversion otherwise.
             // Unaffected by remnant scrapping: that's material that never reaches the customer.
@@ -878,7 +1087,7 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             // represented, not inventory. Scoped to plain stock-UOM, non-cut-to-size lines (every
             // example in the spec is whole units of the product's own stock UOM — a cut-to-size
             // glass panel or an alternate-UOM pallet line never has a sensible "N free units").
-            var eligibleForSplit = priced.BundleId is null && !manualPriceOverride && lengthM is null && sellUom == product.StockUom;
+            var eligibleForSplit = priced.BundleId is null && !manualPriceOverride && lengthM is null && sellUom == product.StockUom && !product.RequiresSerialTracking;
             var buyXGetYRule = eligibleForSplit
                 ? buyXGetYRules.Where(r => r.Sku == null || string.Equals(r.Sku, product.Sku, StringComparison.OrdinalIgnoreCase))
                     .OrderByDescending(r => r.BranchId != null).ThenByDescending(r => r.Priority).FirstOrDefault()
@@ -937,7 +1146,7 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             }
 
             var lineTotal = Math.Round(enteredQty * unitPrice * (1 - lineDiscountPct / 100), 2);
-            order.Lines.Add(new OrderLine
+            var newOrderLine = new OrderLine
             {
                 // StockQty is deductQty (not stockQty) — the true net amount removed from
                 // BranchStockLevel, including any permanently-scrapped remnant, so Void/VoidLine
@@ -948,7 +1157,9 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
                 DiscountPct = lineDiscountPct, VatRate = product.VatRate, LineTotal = lineTotal, Notes = line.Notes,
                 MeasuredQty = measuredQty, SourceQty = sourceQty, RemnantQty = remnantQty, RemnantAction = remnantAction,
                 ConsumedRemnantId = consumedRemnant?.Id,
-            });
+            };
+            order.Lines.Add(newOrderLine);
+            if (matchedSerials is not null) pendingSerialAssignments.Add((newOrderLine, matchedSerials));
             lineCategoryTotals.Add((product.CategoryId, lineTotal));
             if (line.RequiresDelivery)
             {
@@ -1126,6 +1337,22 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
             });
         }
         await db.SaveChangesAsync(ct);
+
+        // Serial Number Tracking: order.Lines now have real Ids — link each captured serial to the
+        // exact line that sold it and mark it Sold.
+        if (pendingSerialAssignments.Count > 0)
+        {
+            foreach (var (soldLine, serials) in pendingSerialAssignments)
+            {
+                foreach (var serial in serials)
+                {
+                    serial.Status = SerialUnitStatus.Sold;
+                    serial.SoldOrderId = order.Id;
+                    serial.SoldOrderLineId = soldLine.Id;
+                }
+            }
+            await db.SaveChangesAsync(ct);
+        }
 
         int? loyaltyPointsEarnedForReceipt = null;
         int? loyaltyPointsBalanceForReceipt = null;
@@ -1340,7 +1567,7 @@ public class OrdersController(AppDbContext db, IAuditService audit, IStockMoveme
         o.Lines.Select(l => new OrderLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.UnitPrice, l.DiscountPct, l.VatRate, l.LineTotal, l.Uom, l.StockQty, l.LengthM, l.WidthM, l.Id, l.BundleId, l.Bundle?.NameEn,
             (l.Product?.Weight ?? 0) * (l.StockQty > 0 ? l.StockQty : l.Qty), l.HeightM, l.Notes,
             l.MeasuredQty, l.SourceQty, l.RemnantQty, l.RemnantAction, l.ConsumedRemnantId)).ToList(),
-        o.Payments.Select(p => new OrderPaymentDto(p.Method.ToString(), p.Amount, p.ReferenceNumber, p.Status.ToString(), p.CreatedAt)).ToList(),
+        o.Payments.Select(p => new OrderPaymentDto(p.Id, p.Method.ToString(), p.Amount, p.ReferenceNumber, p.Status.ToString(), p.CreatedAt)).ToList(),
         o.Fees.Select(f => new OrderFeeDto(f.Label, f.Amount)).ToList(),
         loyaltyPointsEarned, loyaltyPointsBalance, loyaltyNextTierThreshold, loyaltyPointsRedeemed,
         deliveryOrderId, deliveryOrderNo, deliveryStage, o.PoReference, o.ProjectCode);

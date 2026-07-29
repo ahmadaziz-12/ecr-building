@@ -88,3 +88,11 @@ public record RemnantDto(
     string Status, decimal DiscountPct, string? Notes, DateTime CreatedAt,
     int? SourceOrderLineId, string? SourceOrderNo);
 public record UpdateRemnantRequest(decimal DiscountPct, string? Notes);
+
+// Serial Number Tracking (electrical tools, equipment, warranty items): one row per physical unit.
+public record SerializedUnitDto(
+    int Id, int ProductId, string Sku, string ProductName, string SerialNo, string Status,
+    int BranchId, string BranchName, DateTime ReceivedDate, int? SoldOrderId, string? SoldOrderNo,
+    DateTime? WarrantyExpiresAt, string? Notes, DateTime CreatedAt);
+public record RegisterSerializedUnitsRequest(int ProductId, int BranchId, List<string> SerialNumbers, DateTime? WarrantyExpiresAt = null, string? Notes = null);
+public record UpdateSerialStatusRequest(string Status, string? Notes = null);

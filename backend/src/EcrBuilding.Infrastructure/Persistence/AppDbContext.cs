@@ -46,6 +46,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<BranchStockLevel> BranchStockLevels => Set<BranchStockLevel>();
     public DbSet<StockBatch> StockBatches => Set<StockBatch>();
     public DbSet<BranchStockBatch> BranchStockBatches => Set<BranchStockBatch>();
+    public DbSet<SerializedUnit> SerializedUnits => Set<SerializedUnit>();
     public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
     public DbSet<StockTransferLine> StockTransferLines => Set<StockTransferLine>();
     public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
@@ -453,6 +454,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasOne(x => x.Approver).WithMany().HasForeignKey(x => x.ApproverUserId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.RelatedOrder).WithMany().HasForeignKey(x => x.RelatedOrderId);
             b.HasOne(x => x.RelatedDeliveryOrder).WithMany().HasForeignKey(x => x.RelatedDeliveryOrderId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.RelatedOrderLine).WithMany().HasForeignKey(x => x.RelatedOrderLineId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SerializedUnit>(b =>
+        {
+            b.HasIndex(x => new { x.ProductId, x.SerialNo }).IsUnique();
+            b.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.Branch).WithMany().HasForeignKey(x => x.BranchId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.SoldOrder).WithMany().HasForeignKey(x => x.SoldOrderId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.SoldOrderLine).WithMany().HasForeignKey(x => x.SoldOrderLineId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<CashierShift>(b =>

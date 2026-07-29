@@ -3,29 +3,24 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Download } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader, KpiGrid } from "@/components/buildpos/PageHeader";
-import { Pill, SectionCard } from "@/components/buildpos/sections";
+import { SectionCard } from "@/components/buildpos/sections";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  RowActionsMenu, statusTone, FilterBar, emptyFilterDraft, exportToCsv, type FilterFieldDef, type FilterDraftValue,
+  RowActionsMenu, FilterBar, emptyFilterDraft, exportToCsv, type FilterFieldDef, type FilterDraftValue,
 } from "./shared";
 import { resolveDateRangeBounds, type DateRangeValue } from "@/components/buildpos/FilterControls";
 import { RequestApprovalDialog } from "./RequestApprovalDialog";
 import { PriceCheckDialog } from "./PriceCheckDialog";
 import { StockEnquiryDialog } from "./StockEnquiryDialog";
-import {
-  useApprovalRequests, useApproveApproval, useCashierShifts, useParkedSales, useRejectApproval,
-} from "@/lib/api/pos";
+import { useApprovalRequests, useCashierShifts, useParkedSales } from "@/lib/api/pos";
 import { RESUME_HOLD_KEY } from "@/components/buildpos/PosCheckout";
 import { useAuth } from "@/lib/api/auth";
 import { useBranches } from "@/lib/api/admin";
 import { CurrencyText } from "@/lib/buildpos/currency";
 
-const APPROVAL_TYPES = ["Discount", "PriceOverride", "Refund"];
-const APPROVAL_TYPE_LABELS: Record<string, string> = { Discount: "Discount", PriceOverride: "Price Override", Refund: "Refund" };
 const FIELDS: FilterFieldDef[] = [
   { kind: "daterange", key: "dateRange", placeholder: "Date Range" },
-  { kind: "select", key: "approvalType", placeholder: "Approval Type", options: APPROVAL_TYPES, labels: APPROVAL_TYPE_LABELS },
   { kind: "search", key: "search", placeholder: "Search ticket, customer, reason…" },
 ];
 
@@ -57,8 +52,6 @@ export function CashierWorkspacePage() {
   const { data: parkedSales, refetch: refetchParked } = useParkedSales(effectiveBranchId ?? undefined);
   const { data: approvals, refetch: refetchApprovals } = useApprovalRequests(true);
   const navigate = useNavigate();
-  const approveApproval = useApproveApproval();
-  const rejectApproval = useRejectApproval();
 
   const [draft, setDraft] = useState<Record<string, FilterDraftValue>>(() => emptyFilterDraft(FIELDS));
   const [applied, setApplied] = useState<Record<string, FilterDraftValue>>(draft);
@@ -80,20 +73,6 @@ export function CashierWorkspacePage() {
     });
   }, [parkedSales, applied]);
 
-  const filteredApprovals = useMemo(() => {
-    const approvalType = (applied.approvalType as string[]) ?? [];
-    const search = (applied.search as string) ?? "";
-    return (approvals ?? []).filter((a) => {
-      if (approvalType.length && !approvalType.includes(a.type)) return false;
-      if (!inDateRange(a.createdAt, applied.dateRange as DateRangeValue)) return false;
-      if (search) {
-        const t = search.trim().toLowerCase();
-        if (t && !a.requestedByName.toLowerCase().includes(t) && !a.reason.toLowerCase().includes(t)) return false;
-      }
-      return true;
-    });
-  }, [approvals, applied]);
-
   const pendingApprovals = useMemo(() => (approvals ?? []).filter((a) => a.status === "Pending"), [approvals]);
 
   const kpis = [
@@ -113,16 +92,6 @@ export function CashierWorkspacePage() {
     void navigate({ to: "/operate/pos-checkout" });
   }
 
-  async function resolveApproval(id: number, approve: boolean) {
-    try {
-      if (approve) await approveApproval.mutateAsync(id);
-      else await rejectApproval.mutateAsync(id);
-      toast.success(approve ? "Approval granted" : "Approval rejected");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not resolve this request.");
-    }
-  }
-
   return (
     <div className="space-y-4">
       <PageHeader
@@ -135,6 +104,9 @@ export function CashierWorkspacePage() {
             <Button variant="ghost" size="sm" className="h-9 gap-1.5" onClick={() => setPriceCheckOpen(true)}>Price Check</Button>
             <Button variant="ghost" size="sm" className="h-9 gap-1.5" onClick={() => setStockEnquiryOpen(true)}>Stock Enquiry</Button>
             <Button variant="ghost" size="sm" className="h-9 gap-1.5" onClick={() => setRequestingApproval(true)}>Request Approval</Button>
+            <Button asChild variant="ghost" size="sm" className="h-9 gap-1.5">
+              <Link to="/operate/approval-center">Approval Center</Link>
+            </Button>
             <Button asChild size="sm" className="h-9 gap-1.5 bg-brand text-brand-foreground hover:bg-brand/90">
               <Link to="/operate/pos-checkout">New Sale</Link>
             </Button>
@@ -148,7 +120,7 @@ export function CashierWorkspacePage() {
         onDraftChange={(key, value) => setDraft((d) => ({ ...d, [key]: value }))}
         onApply={() => setApplied(draft)}
         onReset={() => { const empty = emptyFilterDraft(FIELDS); setDraft(empty); setApplied(empty); }}
-        resultLabel={`${filteredParked.length} parked · ${filteredApprovals.length} approvals`}
+        resultLabel={`${filteredParked.length} parked`}
       />
 
       <KpiGrid items={kpis} scope="cashier-workspace" />
@@ -192,54 +164,6 @@ export function CashierWorkspacePage() {
               ))}
               {filteredParked.length === 0 && (
                 <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">No parked sales match those filters.</TableCell></TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </SectionCard>
-
-      <SectionCard
-        title="Approval Requests"
-        desc={`${filteredApprovals.length} records`}
-        action={
-          <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => { exportToCsv("approval-requests.csv", ["Type", "Requested By", "Amount", "Reason", "Status"], filteredApprovals.map((a) => [a.type, a.requestedByName, a.amount, a.reason, a.status])); toast.success("Exported CSV"); }}
-          >
-            <Download className="h-3.5 w-3.5" /> Export
-          </Button>
-        }
-      >
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Type</TableHead>
-                <TableHead>Requested By</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Reason</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-8" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredApprovals.map((a) => (
-                <TableRow key={a.id}>
-                  <TableCell>{APPROVAL_TYPE_LABELS[a.type] ?? a.type}</TableCell>
-                  <TableCell>{a.requestedByName}</TableCell>
-                  <TableCell className="text-right"><CurrencyText value={fmtSar(a.amount)} /></TableCell>
-                  <TableCell className="max-w-xs truncate text-muted-foreground">{a.reason}</TableCell>
-                  <TableCell><Pill tone={statusTone(a.status)}>{a.status}</Pill></TableCell>
-                  <TableCell>
-                    <RowActionsMenu
-                      actions={[
-                        { label: "Approve", onClick: () => resolveApproval(a.id, true), disabled: a.status !== "Pending" },
-                        { label: "Reject", onClick: () => resolveApproval(a.id, false), destructive: true, disabled: a.status !== "Pending" },
-                      ]}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-              {filteredApprovals.length === 0 && (
-                <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">No approval requests match those filters.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>

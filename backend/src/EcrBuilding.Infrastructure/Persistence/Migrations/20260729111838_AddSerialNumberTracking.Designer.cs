@@ -4,6 +4,7 @@ using EcrBuilding.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EcrBuilding.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260729111838_AddSerialNumberTracking")]
+    partial class AddSerialNumberTracking
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -64,7 +67,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ParentId");
 
-                    b.ToTable("Accounts", (string)null);
+                    b.ToTable("Accounts");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ApprovalRequest", b =>
@@ -101,6 +104,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<int?>("RelatedOrderId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("RelatedOrderLineId")
+                        .HasColumnType("int");
+
                     b.Property<int>("RequestedByUserId")
                         .HasColumnType("int");
 
@@ -130,9 +136,11 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("RelatedOrderId");
 
+                    b.HasIndex("RelatedOrderLineId");
+
                     b.HasIndex("RequestedByUserId");
 
-                    b.ToTable("ApprovalRequests", (string)null);
+                    b.ToTable("ApprovalRequests");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Attendance", b =>
@@ -199,7 +207,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ShiftId");
 
-                    b.ToTable("Attendances", (string)null);
+                    b.ToTable("Attendances");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.AuditLog", b =>
@@ -255,7 +263,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("AuditLogs", (string)null);
+                    b.ToTable("AuditLogs");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.BiFeed", b =>
@@ -307,7 +315,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("BiFeeds", (string)null);
+                    b.ToTable("BiFeeds");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Branch", b =>
@@ -364,7 +372,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("Branches", (string)null);
+                    b.ToTable("Branches");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.BranchStockBatch", b =>
@@ -414,7 +422,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("BranchStockBatches", (string)null);
+                    b.ToTable("BranchStockBatches");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.BranchStockLevel", b =>
@@ -452,7 +460,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProductId", "BranchId")
                         .IsUnique();
 
-                    b.ToTable("BranchStockLevels", (string)null);
+                    b.ToTable("BranchStockLevels");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.BundleLine", b =>
@@ -479,7 +487,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("BundleLines", (string)null);
+                    b.ToTable("BundleLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.BundleSuggestionEvent", b =>
@@ -511,7 +519,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("BundleId", "EventType", "CreatedAt");
 
-                    b.ToTable("BundleSuggestionEvents", (string)null);
+                    b.ToTable("BundleSuggestionEvents");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.CashMovement", b =>
@@ -553,7 +561,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CreatedByUserId");
 
-                    b.ToTable("CashMovements", (string)null);
+                    b.ToTable("CashMovements");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.CashierShift", b =>
@@ -613,7 +621,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TerminalId");
 
-                    b.ToTable("CashierShifts", (string)null);
+                    b.ToTable("CashierShifts");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Category", b =>
@@ -667,7 +675,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ParentId");
 
-                    b.ToTable("Categories", (string)null);
+                    b.ToTable("Categories");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.CompanySubscription", b =>
@@ -707,7 +715,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("PlanId");
 
-                    b.ToTable("CompanySubscriptions", (string)null);
+                    b.ToTable("CompanySubscriptions");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ComplianceControl", b =>
@@ -755,7 +763,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ComplianceControls", (string)null);
+                    b.ToTable("ComplianceControls");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Contract", b =>
@@ -832,7 +840,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("SupersededByContractId");
 
-                    b.ToTable("Contracts", (string)null);
+                    b.ToTable("Contracts");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Customer", b =>
@@ -937,7 +945,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("AccountManagerUserId");
 
-                    b.ToTable("Customers", (string)null);
+                    b.ToTable("Customers");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.CustomerPayment", b =>
@@ -987,7 +995,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CustomerId");
 
-                    b.ToTable("CustomerPayments", (string)null);
+                    b.ToTable("CustomerPayments");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.DeliveryHistory", b =>
@@ -1026,7 +1034,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("DeliveryOrderId");
 
-                    b.ToTable("DeliveryHistories", (string)null);
+                    b.ToTable("DeliveryHistories");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.DeliveryOrder", b =>
@@ -1197,7 +1205,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("VehicleId");
 
-                    b.ToTable("DeliveryOrders", (string)null);
+                    b.ToTable("DeliveryOrders");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.DeliveryOrderLine", b =>
@@ -1252,7 +1260,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("DeliveryOrderLines", (string)null);
+                    b.ToTable("DeliveryOrderLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.DeliveryZone", b =>
@@ -1287,7 +1295,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DeliveryZones", (string)null);
+                    b.ToTable("DeliveryZones");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Department", b =>
@@ -1340,7 +1348,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ParentId");
 
-                    b.ToTable("Departments", (string)null);
+                    b.ToTable("Departments");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Device", b =>
@@ -1418,7 +1426,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TerminalId");
 
-                    b.ToTable("Devices", (string)null);
+                    b.ToTable("Devices");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Driver", b =>
@@ -1473,7 +1481,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("VehicleId");
 
-                    b.ToTable("Drivers", (string)null);
+                    b.ToTable("Drivers");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Employee", b =>
@@ -1586,7 +1594,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("Employees", (string)null);
+                    b.ToTable("Employees");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.EmployeeDoc", b =>
@@ -1643,7 +1651,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("VerifiedByEmployeeId");
 
-                    b.ToTable("EmployeeDocs", (string)null);
+                    b.ToTable("EmployeeDocs");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Expense", b =>
@@ -1714,7 +1722,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("ExpenseNo")
                         .IsUnique();
 
-                    b.ToTable("Expenses", (string)null);
+                    b.ToTable("Expenses");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.JournalEntry", b =>
@@ -1741,7 +1749,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("JournalEntries", (string)null);
+                    b.ToTable("JournalEntries");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.JournalLine", b =>
@@ -1775,7 +1783,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("JournalEntryId");
 
-                    b.ToTable("JournalLines", (string)null);
+                    b.ToTable("JournalLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Kpi", b =>
@@ -1818,7 +1826,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Kpis", (string)null);
+                    b.ToTable("Kpis");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Leave", b =>
@@ -1880,7 +1888,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("HandoverToEmployeeId");
 
-                    b.ToTable("Leaves", (string)null);
+                    b.ToTable("Leaves");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.LoyaltyTransaction", b =>
@@ -1931,7 +1939,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OrderId");
 
-                    b.ToTable("LoyaltyTransactions", (string)null);
+                    b.ToTable("LoyaltyTransactions");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.MaintenanceTicket", b =>
@@ -1986,7 +1994,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("TicketNo")
                         .IsUnique();
 
-                    b.ToTable("MaintenanceTickets", (string)null);
+                    b.ToTable("MaintenanceTickets");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Order", b =>
@@ -2083,7 +2091,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TerminalId");
 
-                    b.ToTable("Orders", (string)null);
+                    b.ToTable("Orders");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.OrderFee", b =>
@@ -2109,7 +2117,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OrderId");
 
-                    b.ToTable("OrderFees", (string)null);
+                    b.ToTable("OrderFees");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.OrderLine", b =>
@@ -2121,9 +2129,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<int?>("BundleId")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("ConsumedRemnantId")
                         .HasColumnType("int");
 
                     b.Property<decimal>("DiscountPct")
@@ -2194,13 +2199,11 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("BundleId");
 
-                    b.HasIndex("ConsumedRemnantId");
-
                     b.HasIndex("OrderId");
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("OrderLines", (string)null);
+                    b.ToTable("OrderLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.OrderPayment", b =>
@@ -2238,7 +2241,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OrderId");
 
-                    b.ToTable("OrderPayments", (string)null);
+                    b.ToTable("OrderPayments");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ParkedSale", b =>
@@ -2287,7 +2290,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("TicketNo")
                         .IsUnique();
 
-                    b.ToTable("ParkedSales", (string)null);
+                    b.ToTable("ParkedSales");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ParkedSaleLine", b =>
@@ -2314,7 +2317,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("ParkedSaleLines", (string)null);
+                    b.ToTable("ParkedSaleLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.PermissionsEpoch", b =>
@@ -2330,7 +2333,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("PermissionsEpochs", (string)null);
+                    b.ToTable("PermissionsEpochs");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Plan", b =>
@@ -2382,7 +2385,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Plans", (string)null);
+                    b.ToTable("Plans");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.PlanUsageEntitlement", b =>
@@ -2423,7 +2426,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("SubscriptionId");
 
-                    b.ToTable("PlanUsageEntitlements", (string)null);
+                    b.ToTable("PlanUsageEntitlements");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.PricingRule", b =>
@@ -2519,7 +2522,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("BranchId");
 
-                    b.ToTable("PricingRules", (string)null);
+                    b.ToTable("PricingRules");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.PrintJob", b =>
@@ -2563,7 +2566,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TerminalId");
 
-                    b.ToTable("PrintJobs", (string)null);
+                    b.ToTable("PrintJobs");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Product", b =>
@@ -2607,6 +2610,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsCutToSize")
                         .HasColumnType("tinyint(1)");
 
+                    b.Property<bool>("IsSoldByWeight")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<decimal?>("MinCutQty")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
@@ -2627,6 +2633,9 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("ReorderQty")
                         .HasColumnType("int");
+
+                    b.Property<bool>("RequiresSerialTracking")
+                        .HasColumnType("tinyint(1)");
 
                     b.Property<bool>("Returnable")
                         .HasColumnType("tinyint(1)");
@@ -2684,7 +2693,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("VariantGroupId");
 
-                    b.ToTable("Products", (string)null);
+                    b.ToTable("Products");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductAttribute", b =>
@@ -2711,7 +2720,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProductId", "Name")
                         .IsUnique();
 
-                    b.ToTable("ProductAttributes", (string)null);
+                    b.ToTable("ProductAttributes");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductBundle", b =>
@@ -2778,7 +2787,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("ProductBundles", (string)null);
+                    b.ToTable("ProductBundles");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductUomConversion", b =>
@@ -2805,7 +2814,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProductId", "Uom")
                         .IsUnique();
 
-                    b.ToTable("ProductUomConversions", (string)null);
+                    b.ToTable("ProductUomConversions");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ProductVariantGroup", b =>
@@ -2851,7 +2860,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("ProductVariantGroups", (string)null);
+                    b.ToTable("ProductVariantGroups");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.PurchaseOrder", b =>
@@ -2910,7 +2919,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("SupplierId");
 
-                    b.ToTable("PurchaseOrders", (string)null);
+                    b.ToTable("PurchaseOrders");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.PurchaseOrderLine", b =>
@@ -2965,7 +2974,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("PurchaseOrderLines", (string)null);
+                    b.ToTable("PurchaseOrderLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Quotation", b =>
@@ -3050,7 +3059,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("QuoteNo")
                         .IsUnique();
 
-                    b.ToTable("Quotations", (string)null);
+                    b.ToTable("Quotations");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.QuotationLine", b =>
@@ -3093,7 +3102,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("QuotationId");
 
-                    b.ToTable("QuotationLines", (string)null);
+                    b.ToTable("QuotationLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.QzCertificate", b =>
@@ -3120,7 +3129,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("QzCertificates", (string)null);
+                    b.ToTable("QzCertificates");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.RefreshToken", b =>
@@ -3157,69 +3166,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("RefreshTokens", (string)null);
-                });
-
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.Remnant", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("BranchId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<decimal>("DiscountPct")
-                        .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal?>("HeightM")
-                        .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal?>("LengthM")
-                        .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("longtext");
-
-                    b.Property<int>("ProductId")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("Qty")
-                        .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<int?>("SourceOrderLineId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<decimal?>("WidthM")
-                        .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BranchId");
-
-                    b.HasIndex("ProductId");
-
-                    b.HasIndex("SourceOrderLineId");
-
-                    b.ToTable("Remnants", (string)null);
+                    b.ToTable("RefreshTokens");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ReportDefinition", b =>
@@ -3267,7 +3214,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ReportDefinitions", (string)null);
+                    b.ToTable("ReportDefinitions");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Return", b =>
@@ -3367,7 +3314,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("ReturnNo")
                         .IsUnique();
 
-                    b.ToTable("Returns", (string)null);
+                    b.ToTable("Returns");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ReturnExchangeLine", b =>
@@ -3414,7 +3361,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ReturnId");
 
-                    b.ToTable("ReturnExchangeLines", (string)null);
+                    b.ToTable("ReturnExchangeLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ReturnLine", b =>
@@ -3462,7 +3409,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ReturnId");
 
-                    b.ToTable("ReturnLines", (string)null);
+                    b.ToTable("ReturnLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ReturnToSupplier", b =>
@@ -3526,7 +3473,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("ReturnToSuppliers", (string)null);
+                    b.ToTable("ReturnToSuppliers");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ReturnToSupplierLine", b =>
@@ -3560,7 +3507,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ReturnToSupplierId");
 
-                    b.ToTable("ReturnToSupplierLines", (string)null);
+                    b.ToTable("ReturnToSupplierLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Role", b =>
@@ -3636,7 +3583,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Roles", (string)null);
+                    b.ToTable("Roles");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.RolePermission", b =>
@@ -3678,7 +3625,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("RoleId", "ModuleKey")
                         .IsUnique();
 
-                    b.ToTable("RolePermissions", (string)null);
+                    b.ToTable("RolePermissions");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.RuleDefinition", b =>
@@ -3735,7 +3682,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("RuleDefinitions", (string)null);
+                    b.ToTable("RuleDefinitions");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.SavedDashboardView", b =>
@@ -3767,7 +3714,65 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("SavedDashboardViews", (string)null);
+                    b.ToTable("SavedDashboardViews");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.SerializedUnit", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BranchId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("longtext");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ReceivedDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("SerialNo")
+                        .IsRequired()
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<int?>("SoldOrderId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SoldOrderLineId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("WarrantyExpiresAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("SoldOrderId");
+
+                    b.HasIndex("SoldOrderLineId");
+
+                    b.HasIndex("ProductId", "SerialNo")
+                        .IsUnique();
+
+                    b.ToTable("SerializedUnits");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Setting", b =>
@@ -3821,7 +3826,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Settings", (string)null);
+                    b.ToTable("Settings");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockAdjustment", b =>
@@ -3863,7 +3868,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("StockAdjustments", (string)null);
+                    b.ToTable("StockAdjustments");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockAdjustmentLine", b =>
@@ -3897,7 +3902,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("StockAdjustmentLines", (string)null);
+                    b.ToTable("StockAdjustmentLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockBatch", b =>
@@ -3947,7 +3952,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("StockBatches", (string)null);
+                    b.ToTable("StockBatches");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockCount", b =>
@@ -4048,7 +4053,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("StockCounts", (string)null);
+                    b.ToTable("StockCounts");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockCountLine", b =>
@@ -4092,7 +4097,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("StockCountId");
 
-                    b.ToTable("StockCountLines", (string)null);
+                    b.ToTable("StockCountLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockLevel", b =>
@@ -4130,7 +4135,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProductId", "WarehouseId")
                         .IsUnique();
 
-                    b.ToTable("StockLevels", (string)null);
+                    b.ToTable("StockLevels");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockMovement", b =>
@@ -4182,7 +4187,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("StockMovements", (string)null);
+                    b.ToTable("StockMovements");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockTransfer", b =>
@@ -4245,7 +4250,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("TransferNo")
                         .IsUnique();
 
-                    b.ToTable("StockTransfers", (string)null);
+                    b.ToTable("StockTransfers");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockTransferLine", b =>
@@ -4286,7 +4291,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TransferId");
 
-                    b.ToTable("StockTransferLines", (string)null);
+                    b.ToTable("StockTransferLines");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Supplier", b =>
@@ -4355,7 +4360,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("Suppliers", (string)null);
+                    b.ToTable("Suppliers");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.SupplierPayment", b =>
@@ -4405,7 +4410,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("SupplierId");
 
-                    b.ToTable("SupplierPayments", (string)null);
+                    b.ToTable("SupplierPayments");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.TaxCode", b =>
@@ -4465,7 +4470,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("GlAccountId");
 
-                    b.ToTable("TaxCodes", (string)null);
+                    b.ToTable("TaxCodes");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Terminal", b =>
@@ -4542,7 +4547,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OperatorUserId");
 
-                    b.ToTable("Terminals", (string)null);
+                    b.ToTable("Terminals");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.User", b =>
@@ -4607,7 +4612,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("RoleId");
 
-                    b.ToTable("Users", (string)null);
+                    b.ToTable("Users");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.UserPermissionOverride", b =>
@@ -4649,7 +4654,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("UserId", "ModuleKey")
                         .IsUnique();
 
-                    b.ToTable("UserPermissionOverrides", (string)null);
+                    b.ToTable("UserPermissionOverrides");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Vehicle", b =>
@@ -4703,7 +4708,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("Registration")
                         .IsUnique();
 
-                    b.ToTable("Vehicles", (string)null);
+                    b.ToTable("Vehicles");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Warehouse", b =>
@@ -4748,7 +4753,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("Warehouses", (string)null);
+                    b.ToTable("Warehouses");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.WarehouseBin", b =>
@@ -4788,7 +4793,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("WarehouseBins", (string)null);
+                    b.ToTable("WarehouseBins");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.WorkShift", b =>
@@ -4844,7 +4849,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("WorkShifts", (string)null);
+                    b.ToTable("WorkShifts");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ZatcaIdentity", b =>
@@ -4917,7 +4922,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("BranchId")
                         .IsUnique();
 
-                    b.ToTable("ZatcaIdentities", (string)null);
+                    b.ToTable("ZatcaIdentities");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ZatcaInvoice", b =>
@@ -4992,7 +4997,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OrderId");
 
-                    b.ToTable("ZatcaInvoices", (string)null);
+                    b.ToTable("ZatcaInvoices");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.ZatcaSettings", b =>
@@ -5044,7 +5049,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.HasIndex("BranchId")
                         .IsUnique();
 
-                    b.ToTable("ZatcaSettingsList", (string)null);
+                    b.ToTable("ZatcaSettingsList");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
@@ -5063,7 +5068,7 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DataProtectionKeys", (string)null);
+                    b.ToTable("DataProtectionKeys");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Account", b =>
@@ -5097,6 +5102,11 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("RelatedOrderId");
 
+                    b.HasOne("EcrBuilding.Domain.Entities.OrderLine", "RelatedOrderLine")
+                        .WithMany()
+                        .HasForeignKey("RelatedOrderLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("EcrBuilding.Domain.Entities.User", "RequestedBy")
                         .WithMany()
                         .HasForeignKey("RequestedByUserId")
@@ -5110,6 +5120,8 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("RelatedDeliveryOrder");
 
                     b.Navigation("RelatedOrder");
+
+                    b.Navigation("RelatedOrderLine");
 
                     b.Navigation("RequestedBy");
                 });
@@ -5646,11 +5658,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("BundleId");
 
-                    b.HasOne("EcrBuilding.Domain.Entities.Remnant", "ConsumedRemnant")
-                        .WithMany()
-                        .HasForeignKey("ConsumedRemnantId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("EcrBuilding.Domain.Entities.Order", "Order")
                         .WithMany("Lines")
                         .HasForeignKey("OrderId")
@@ -5664,8 +5671,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Bundle");
-
-                    b.Navigation("ConsumedRemnant");
 
                     b.Navigation("Order");
 
@@ -5930,32 +5935,6 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("EcrBuilding.Domain.Entities.Remnant", b =>
-                {
-                    b.HasOne("EcrBuilding.Domain.Entities.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("EcrBuilding.Domain.Entities.Product", "Product")
-                        .WithMany()
-                        .HasForeignKey("ProductId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("EcrBuilding.Domain.Entities.OrderLine", "SourceOrderLine")
-                        .WithMany()
-                        .HasForeignKey("SourceOrderLineId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("Product");
-
-                    b.Navigation("SourceOrderLine");
-                });
-
             modelBuilder.Entity("EcrBuilding.Domain.Entities.Return", b =>
                 {
                     b.HasOne("EcrBuilding.Domain.Entities.User", "ApprovedBy")
@@ -6093,6 +6072,39 @@ namespace EcrBuilding.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("EcrBuilding.Domain.Entities.SerializedUnit", b =>
+                {
+                    b.HasOne("EcrBuilding.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("EcrBuilding.Domain.Entities.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("EcrBuilding.Domain.Entities.Order", "SoldOrder")
+                        .WithMany()
+                        .HasForeignKey("SoldOrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("EcrBuilding.Domain.Entities.OrderLine", "SoldOrderLine")
+                        .WithMany()
+                        .HasForeignKey("SoldOrderLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("Product");
+
+                    b.Navigation("SoldOrder");
+
+                    b.Navigation("SoldOrderLine");
                 });
 
             modelBuilder.Entity("EcrBuilding.Domain.Entities.StockAdjustment", b =>

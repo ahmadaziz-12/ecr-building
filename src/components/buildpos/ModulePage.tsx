@@ -53,6 +53,8 @@ import {
 } from "@/lib/api/finance";
 import { ApproveExchangeDialog } from "@/components/buildpos/pos/ApproveExchangeDialog";
 import { NoReceiptReturnDialog } from "@/components/buildpos/pos/NoReceiptReturnDialog";
+import { PrintLabelDialog } from "@/components/buildpos/pos/PrintLabelDialog";
+import { PrintBarcodeDialog } from "@/components/buildpos/pos/PrintBarcodeDialog";
 import { useModuleLiveData } from "@/lib/api/module-live-data";
 import type { LiveKpi } from "@/lib/api/admin";
 import { useFlowSubmitHandlers } from "@/lib/api/flow-submit-handlers";
@@ -202,6 +204,10 @@ export function ModulePage({
   // Qty · Refund Amount" tags field with no real backing) — replaced with a real customer/product
   // picker that actually creates a return with no original order.
   const [noReceiptDialogOpen, setNoReceiptDialogOpen] = useState(false);
+  // Product Catalog's "Print Barcode"/"Print Label" row actions open these instead of firing a
+  // default-template print blind — see PrintBarcodeDialog.tsx / PrintLabelDialog.tsx.
+  const [printingBarcodeProduct, setPrintingBarcodeProduct] = useState<{ id: number; sku: string; name: string; barcode: string | null } | null>(null);
+  const [printingLabelProduct, setPrintingLabelProduct] = useState<{ id: number; sku: string; name: string; sellingPrice: number } | null>(null);
   const { data: returnPolicyConfig } = useReturnPolicyConfig(pathname === "/finance/returns");
   const [activeTab, setActiveTab] = useState(0);
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
@@ -244,6 +250,8 @@ export function ModulePage({
     setEditingPricingRule,
     setApprovingExchangeReturn,
     setEditingBundle,
+    setPrintingBarcodeProduct,
+    setPrintingLabelProduct,
   );
   const rowDetailFor = useRowDetails(pathname, detailRow?.id);
   const showDetail = (id: number, row: (string | number)[]) => setDetailRow({ id, row });
@@ -1030,6 +1038,16 @@ export function ModulePage({
           }
         }}
         editingBundle={editingBundle}
+      />
+      <PrintBarcodeDialog
+        open={!!printingBarcodeProduct}
+        onOpenChange={(v) => { if (!v) setPrintingBarcodeProduct(null); }}
+        product={printingBarcodeProduct}
+      />
+      <PrintLabelDialog
+        open={!!printingLabelProduct}
+        onOpenChange={(v) => { if (!v) setPrintingLabelProduct(null); }}
+        product={printingLabelProduct}
       />
       <ReturnPolicySettingsDialog
         open={returnPolicyDialogOpen}

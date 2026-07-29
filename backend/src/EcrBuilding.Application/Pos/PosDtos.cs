@@ -38,7 +38,7 @@ public record OrderLineDto(int ProductId, string Sku, string ProductName, decima
     decimal? MeasuredQty = null, decimal? SourceQty = null, decimal? RemnantQty = null, string? RemnantAction = null,
     // Cut Optimization: set when this cut was fulfilled from an existing Remnant instead of bulk stock.
     int? ConsumedRemnantId = null);
-public record OrderPaymentDto(string Method, decimal Amount, string? ReferenceNumber, string Status, DateTime CreatedAt);
+public record OrderPaymentDto(int Id, string Method, decimal Amount, string? ReferenceNumber, string Status, DateTime CreatedAt);
 public record OrderFeeDto(string Label, decimal Amount);
 public record OrderDto(
     int Id, string OrderNo, int BranchId, string BranchName, int? TerminalId, string CashierName, int? CustomerId, string CustomerName,
@@ -79,7 +79,9 @@ public record OrderDto(
 // SourceQty/RemnantAction still work exactly the same on top (a bigger remnant can itself leave a
 // smaller remnant behind), just measured against the consumed remnant's own size instead of a
 // hand-typed one.
-public record CartLineInput(int ProductId, decimal Qty, string? Uom = null, decimal? LengthM = null, decimal? WidthM = null, bool RequiresDelivery = false, decimal? HeightM = null, string? Notes = null, decimal? ManualDiscountPct = null, decimal? ManualUnitPrice = null, decimal? SourceQty = null, string? RemnantAction = null, int? ConsumeRemnantId = null);
+public record CartLineInput(int ProductId, decimal Qty, string? Uom = null, decimal? LengthM = null, decimal? WidthM = null, bool RequiresDelivery = false, decimal? HeightM = null, string? Notes = null, decimal? ManualDiscountPct = null, decimal? ManualUnitPrice = null, decimal? SourceQty = null, string? RemnantAction = null, int? ConsumeRemnantId = null,
+    // Serial Number Tracking: required (one per unit sold) when the product has RequiresSerialTracking set.
+    List<string>? SerialNumbers = null);
 
 // BRD §3.5: captured once per checkout (not per line) — every delivery-flagged line in the cart ships
 // to this single address/date. ZoneId (optional): when set, the delivery fee auto-calculates from the
@@ -171,8 +173,15 @@ public record UpdateQuotationRequest(int? CustomerId, List<CartLineInput> Lines,
 
 public record ApprovalRequestDto(
     int Id, string Type, int BranchId, string RequestedByName, string? ApproverName, decimal Amount, string Reason,
-    string Status, int? RelatedOrderId, string? RelatedOrderNo, DateTime CreatedAt, DateTime? ResolvedAt);
-public record CreateApprovalRequestInput(string Type, int BranchId, decimal Amount, string Reason, int? RelatedOrderId);
+    string Status, int? RelatedOrderId, string? RelatedOrderNo, DateTime CreatedAt, DateTime? ResolvedAt, int? RelatedOrderLineId = null);
+public record CreateApprovalRequestInput(string Type, int BranchId, decimal Amount, string Reason, int? RelatedOrderId, int? RelatedOrderLineId = null);
+
+// Approval Center: request DTOs for the three sensitive post-checkout actions, each requiring an
+// already-Approved ApprovalRequest of the matching type — same "attach the approval id" pattern as
+// CreateOrderRequest.PriceOverrideApprovalRequestId/CreditOverrideApprovalRequestId in Checkout.
+public record DeleteOrderRequest(int ApprovalRequestId, string Reason);
+public record ChangePaymentMethodRequest(int ApprovalRequestId, int OrderPaymentId, string NewMethod, string Reason);
+public record DeleteOrderLineRequest(int ApprovalRequestId, int OrderLineId, string Reason);
 
 // BranchId/BranchName null = applies company-wide.
 // ValidFrom (BRD §7 CR-040): a Promotional rule's start date — null = active immediately.

@@ -14,7 +14,7 @@ namespace EcrBuilding.Api.Controllers;
 [ApiController]
 [Route("api/pos/approvals")]
 [Authorize]
-[RequireModule("/operate/pos-checkout", PermissionAction.View)]
+[RequireModule("/operate/approval-center", PermissionAction.View)]
 public class ApprovalsController(AppDbContext db, IAuditService audit) : ControllerBase
 {
     [HttpGet]
@@ -38,6 +38,7 @@ public class ApprovalsController(AppDbContext db, IAuditService audit) : Control
         {
             Type = Enum.Parse<ApprovalType>(request.Type), BranchId = request.BranchId, RequestedByUserId = cashierId,
             Amount = request.Amount, Reason = request.Reason, RelatedOrderId = request.RelatedOrderId,
+            RelatedOrderLineId = request.RelatedOrderLineId,
         };
         db.ApprovalRequests.Add(approval);
         await db.SaveChangesAsync(ct);
@@ -48,11 +49,11 @@ public class ApprovalsController(AppDbContext db, IAuditService audit) : Control
     }
 
     [HttpPut("{id:int}/approve")]
-    [RequireModule("/operate/pos-checkout", PermissionAction.Approve)]
+    [RequireModule("/operate/approval-center", PermissionAction.Approve)]
     public Task<ActionResult<ApprovalRequestDto>> Approve(int id, CancellationToken ct) => Resolve(id, ApprovalStatus.Approved, "APPROVAL_GRANTED", ct);
 
     [HttpPut("{id:int}/reject")]
-    [RequireModule("/operate/pos-checkout", PermissionAction.Approve)]
+    [RequireModule("/operate/approval-center", PermissionAction.Approve)]
     public Task<ActionResult<ApprovalRequestDto>> Reject(int id, CancellationToken ct) => Resolve(id, ApprovalStatus.Rejected, "APPROVAL_REJECTED", ct);
 
     private async Task<ActionResult<ApprovalRequestDto>> Resolve(int id, ApprovalStatus to, string auditEvent, CancellationToken ct)
@@ -81,5 +82,5 @@ public class ApprovalsController(AppDbContext db, IAuditService audit) : Control
 
     private static ApprovalRequestDto Map(ApprovalRequest a) => new(
         a.Id, a.Type.ToString(), a.BranchId, a.RequestedBy?.Name ?? "", a.Approver?.Name, a.Amount, a.Reason,
-        a.Status.ToString(), a.RelatedOrderId, a.RelatedOrder?.OrderNo, a.CreatedAt, a.ResolvedAt);
+        a.Status.ToString(), a.RelatedOrderId, a.RelatedOrder?.OrderNo, a.CreatedAt, a.ResolvedAt, a.RelatedOrderLineId);
 }

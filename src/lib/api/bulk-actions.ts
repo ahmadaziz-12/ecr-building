@@ -19,7 +19,9 @@ import {
 import { useWarehouses, useCreateStockTransfer, useCreateStockAdjustment } from "./inventory";
 import { useProducts } from "./catalog";
 import { usePricingRules, useUpdatePricingRuleStatus, useTestPricingRule } from "./pos";
-import { useTestPrint } from "./print";
+import { useTestPrint, usePrintLabelsBatch } from "./print";
+import { getLabelFeedLines } from "@/lib/buildpos/label-print-settings";
+import { qzIsConnected, qzPrintRaw } from "@/lib/qz";
 import { useZatcaInvoices, useSubmitZatcaInvoice } from "./zatca";
 import {
   useInsightsSales, useInsightsReports, useSetReportStatus, useInsightsKpi, useUpdateKpiTarget, mapKpis,
@@ -86,7 +88,7 @@ export function useBulkActions(
   const forceSyncTerminal = useForceSyncTerminal();
   const { data: users } = useUsers(pathname === "/admin/users" || pathname === "/network/terminals" || pathname === "/admin/maintenance");
 
-  const { data: devices } = useDevices(pathname === "/network/devices");
+  const { data: devices } = useDevices(pathname === "/network/devices" || pathname === "/stock/inventory");
   const openDrawer = useOpenDrawer();
   const testPrint = useTestPrint();
 
@@ -111,7 +113,8 @@ export function useBulkActions(
   const { data: warehouses } = useWarehouses(pathname === "/stock/warehouses");
   const createStockTransfer = useCreateStockTransfer();
   const createStockAdjustment = useCreateStockAdjustment();
-  const { data: products } = useProducts(pathname === "/stock/warehouses");
+  const { data: products } = useProducts(pathname === "/stock/warehouses" || pathname === "/stock/inventory");
+  const printLabelsBatch = usePrintLabelsBatch();
 
   const { data: suppliers } = useSuppliers(pathname === "/suppliers/suppliers");
   const recordSupplierPayment = useRecordSupplierPayment();
@@ -297,6 +300,49 @@ export function useBulkActions(
             const idx = table.ids?.indexOf(id) ?? -1;
             if (idx < 0) throw new Error("Device not found.");
             showDetail(id, table.rows[idx]);
+          },
+        },
+      };
+    }
+
+    case "/stock/inventory": {
+      const list = products ?? [];
+      // Reuses whichever printer device is already mapped to a QZ printer — usually the same Receipt
+      // Printer already working for receipts at the till, not a separate Label Printer pairing (most
+      // tills only have the one physical thermal printer either way).
+      const labelPrinters = (devices ?? [])
+        .filter((d) => (d.type === "LabelPrinter" || d.type === "ReceiptPrinter") && d.qzPrinterName);
+      return {
+        "Print Barcodes": {
+          title: "Print Barcodes", confirmLabel: "Print",
+          description: "One barcode label per selected product (1 copy each, actual product price). For custom copy counts, use the row-level \"Print Barcode\" action instead.",
+          rows: list.map((p) => ({ id: p.id, primary: p.nameEn, secondary: p.sku })),
+          emptyMessage: "No products found.",
+          run: async (id) => {
+            const jobs = await printLabelsBatch.mutateAsync({
+              items: [{ productId: id, copies: 1 }], terminalId: null, template: "Barcode", extraFeedLines: getLabelFeedLines(),
+            });
+            const job = jobs[0];
+            const mapped = labelPrinters[0];
+            if (job && mapped?.qzPrinterName && qzIsConnected()) {
+              await qzPrintRaw(job.escPosBase64, mapped.qzPrinterName);
+            }
+          },
+        },
+        "Print Labels": {
+          title: "Print Labels", confirmLabel: "Print",
+          description: "One shelf label per selected product (1 copy each, actual price, name/SKU/price + barcode). For a per-label price override, use the row-level \"Print Label\" action instead.",
+          rows: list.map((p) => ({ id: p.id, primary: p.nameEn, secondary: p.sku })),
+          emptyMessage: "No products found.",
+          run: async (id) => {
+            const jobs = await printLabelsBatch.mutateAsync({
+              items: [{ productId: id, copies: 1 }], terminalId: null, template: "Label", extraFeedLines: getLabelFeedLines(),
+            });
+            const job = jobs[0];
+            const mapped = labelPrinters[0];
+            if (job && mapped?.qzPrinterName && qzIsConnected()) {
+              await qzPrintRaw(job.escPosBase64, mapped.qzPrinterName);
+            }
           },
         },
       };

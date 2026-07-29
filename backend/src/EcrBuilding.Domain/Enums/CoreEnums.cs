@@ -82,3 +82,12 @@ public enum DeviceSyncStatus
     Pending = 1,
     Failed = 2
 }
+
+// Two deliberately separate print actions (see PrintBarcodeDialog.tsx / PrintLabelDialog.tsx):
+// Barcode prints the Code128 symbol + its digits for identification/scanning; Label prints shelf/
+// price-tag data (name, SKU, price) with no barcode symbol at all.
+public enum LabelTemplate
+{
+    Barcode = 0,
+    Label = 1
+}

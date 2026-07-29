@@ -71,6 +71,7 @@ export type OrderLineDto = {
   consumedRemnantId?: number | null;
 };
 export type OrderPaymentDto = {
+  id: number;
   method: string;
   amount: number;
   referenceNumber: string | null;
@@ -597,6 +598,40 @@ export function useVoidOrderLine() {
   });
 }
 
+// Approval Center: the three sensitive post-checkout actions, each requiring an already-Approved
+// ApprovalRequest of the matching type (see RequestApprovalDialog / ApprovalCenterPage) attached by
+// id — same "attach the approval id" shape as CreditOverride/PriceOverride at checkout.
+export function useDeleteOrder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, approvalRequestId, reason }: { id: number; approvalRequestId: number; reason: string }) =>
+      apiDelete<OrderDto>(`/api/pos/orders/${id}`, { approvalRequestId, reason }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "orders"] }),
+  });
+}
+
+export function useDeleteOrderLine() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id, orderLineId, approvalRequestId, reason,
+    }: { id: number; orderLineId: number; approvalRequestId: number; reason: string }) =>
+      apiDelete<OrderDto>(`/api/pos/orders/${id}/lines/${orderLineId}`, { orderLineId, approvalRequestId, reason }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "orders"] }),
+  });
+}
+
+export function useChangeOrderPaymentMethod() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id, orderPaymentId, approvalRequestId, newMethod, reason,
+    }: { id: number; orderPaymentId: number; approvalRequestId: number; newMethod: string; reason: string }) =>
+      apiPut<OrderDto>(`/api/pos/orders/${id}/payment-method`, { orderPaymentId, approvalRequestId, newMethod, reason }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "orders"] }),
+  });
+}
+
 export type ValidateCouponResponse = {
   valid: boolean;
   code: string | null;
@@ -894,6 +929,7 @@ export type ApprovalRequestDto = {
   relatedOrderNo: string | null;
   createdAt: string;
   resolvedAt: string | null;
+  relatedOrderLineId: number | null;
 };
 export type CreateApprovalRequestInput = {
   type: string;
@@ -901,6 +937,7 @@ export type CreateApprovalRequestInput = {
   amount: number;
   reason: string;
   relatedOrderId?: number | null;
+  relatedOrderLineId?: number | null;
 };
 
 export const useApprovalRequests = (enabled = true, status?: string) =>

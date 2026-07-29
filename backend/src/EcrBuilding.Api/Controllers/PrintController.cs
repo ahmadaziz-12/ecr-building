@@ -54,7 +54,7 @@ public class PrintController(AppDbContext db, IAuditService audit) : ControllerB
         var product = await db.Products.FirstOrDefaultAsync(p => p.Id == request.ProductId, ct);
         if (product is null) return NotFound();
 
-        var label = EscPosBuilder.BuildLabel(product.Sku, product.Barcode, product.NameEn, product.SellingPrice);
+        var label = EscPosBuilder.BuildLabel(ParseTemplate(request.Template), product.Sku, product.Barcode, product.NameEn, product.SellingPrice, product.VatRate, request.OverridePrice, request.ExtraFeedLines ?? 4);
         var job = new PrintJob
         {
             TerminalId = request.TerminalId, Type = PrintJobType.Label,
@@ -65,6 +65,57 @@ public class PrintController(AppDbContext db, IAuditService audit) : ControllerB
         await audit.LogAsync("inventory", "LABEL_PRINTED", product.Id.ToString(), cancellationToken: ct);
         return Ok(Map(job));
     }
+
+    // Bulk shelf-restock / re-labeling: prints N copies of each selected product's label as ONE
+    // combined print job per product (copies concatenated into a single ESC/POS byte stream, each
+    // with its own partial-cut) so a single QZ send lays down the whole run back-to-back instead of
+    // requiring one network round-trip per copy.
+    [HttpPost("labels/batch")]
+    [RequireModule("/stock/inventory", PermissionAction.Edit)]
+    public async Task<ActionResult<List<PrintJobDto>>> PrintLabelsBatch(BatchLabelPrintRequest request, CancellationToken ct)
+    {
+        if (request.Items.Count == 0) return BadRequest(new { error = "Select at least one product to print." });
+
+        var template = ParseTemplate(request.Template);
+        var productIds = request.Items.Select(i => i.ProductId).Distinct().ToList();
+        var products = await db.Products.Where(p => productIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, ct);
+
+        var jobs = new List<PrintJob>();
+        foreach (var item in request.Items)
+        {
+            if (!products.TryGetValue(item.ProductId, out var product)) continue;
+            var copies = Math.Clamp(item.Copies, 1, 200);
+
+            using var combined = new MemoryStream();
+            string? firstPreview = null;
+            for (var i = 0; i < copies; i++)
+            {
+                var label = EscPosBuilder.BuildLabel(template, product.Sku, product.Barcode, product.NameEn, product.SellingPrice, product.VatRate, item.OverridePrice, request.ExtraFeedLines ?? 4);
+                firstPreview ??= label.PreviewText;
+                var labelBytes = Convert.FromBase64String(label.EscPosBase64);
+                combined.Write(labelBytes, 0, labelBytes.Length);
+            }
+
+            var job = new PrintJob
+            {
+                TerminalId = request.TerminalId, Type = PrintJobType.Label,
+                EscPosBase64 = Convert.ToBase64String(combined.ToArray()),
+                PreviewText = $"{copies}x {product.NameEn}\n{firstPreview}",
+                Status = PrintJobStatus.Printed,
+            };
+            db.PrintJobs.Add(job);
+            jobs.Add(job);
+        }
+
+        if (jobs.Count == 0) return BadRequest(new { error = "None of the selected products could be found." });
+
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "LABELS_BATCH_PRINTED", string.Join(",", productIds), cancellationToken: ct);
+        return Ok(jobs.Select(Map).ToList());
+    }
+
+    private static LabelTemplate ParseTemplate(string? template) =>
+        Enum.TryParse<LabelTemplate>(template, ignoreCase: true, out var parsed) ? parsed : LabelTemplate.Barcode;
 
     [HttpPost("test")]
     [RequireModule("/operate/pos-checkout", PermissionAction.Edit)]
@@ -92,4 +143,11 @@ public class PrintController(AppDbContext db, IAuditService audit) : ControllerB
 }
 
 public record TestPrintRequest(int DeviceId);
-public record PrintLabelRequest(int ProductId, int? TerminalId);
+// OverridePrice: prints this price instead of the product's stored SellingPrice — a Label-only,
+// per-print cosmetic override (e.g. a temporary markdown) that never touches the product record.
+// ExtraFeedLines: how far to feed past the content before the cutter fires — a physical constant of
+// the specific printer (print-head-to-cutter distance) that can't be known here, so it's a value the
+// user tunes themselves in the print dialog (see EscPosBuilder.BuildLabel's doc comment).
+public record PrintLabelRequest(int ProductId, int? TerminalId, string? Template = null, decimal? OverridePrice = null, int? ExtraFeedLines = null);
+public record BatchLabelItem(int ProductId, int Copies, decimal? OverridePrice = null);
+public record BatchLabelPrintRequest(List<BatchLabelItem> Items, int? TerminalId, string? Template = null, int? ExtraFeedLines = null);

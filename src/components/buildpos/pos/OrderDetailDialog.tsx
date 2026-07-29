@@ -1,16 +1,23 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
+import { Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/buildpos/sections";
 import { statusTone } from "./shared";
-import type { OrderDto } from "@/lib/api/pos";
+import type { OrderDto, OrderLineDto } from "@/lib/api/pos";
 import { CurrencyText } from "@/lib/buildpos/currency";
+import { DeleteOrderLineDialog } from "./DeleteOrderLineDialog";
 
 function fmtSar(n: number): string {
   return `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} ر.س`;
 }
 
 export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; onClose: () => void }) {
+  const [deletingLine, setDeletingLine] = useState<OrderLineDto | null>(null);
+  const canDeleteLines = (order?.lines.length ?? 0) > 1 && order?.status !== "Voided" && order?.status !== "Deleted";
   return (
+    <>
     <Dialog open={order !== null} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-2xl">
         {order && (
@@ -63,11 +70,12 @@ export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; 
                     <th className="px-3 py-2 text-right">Discount</th>
                     <th className="px-3 py-2 text-right">Weight</th>
                     <th className="px-3 py-2 text-right">Line Total</th>
+                    {canDeleteLines && <th className="w-8 px-3 py-2" />}
                   </tr>
                 </thead>
                 <tbody>
                   {order.lines.map((l) => (
-                    <tr key={l.productId} className="border-t border-black/5">
+                    <tr key={l.id} className="border-t border-black/5">
                       <td className="px-3 py-2 font-mono text-xs">{l.sku}</td>
                       <td className="px-3 py-2">{l.productName}</td>
                       <td className="px-3 py-2 text-right">{l.qty}</td>
@@ -75,6 +83,15 @@ export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; 
                       <td className="px-3 py-2 text-right text-muted-foreground">{l.discountPct > 0 ? `${l.discountPct}%` : "—"}</td>
                       <td className="px-3 py-2 text-right text-muted-foreground">{l.lineWeight > 0 ? `${l.lineWeight.toFixed(1)} kg` : "—"}</td>
                       <td className="px-3 py-2 text-right font-medium"><CurrencyText value={fmtSar(l.lineTotal)} /></td>
+                      {canDeleteLines && (
+                        <td className="px-2 py-2 text-right">
+                          {!l.bundleId && (
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-critical" onClick={() => setDeletingLine(l)}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -133,5 +150,7 @@ export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; 
         )}
       </DialogContent>
     </Dialog>
+    <DeleteOrderLineDialog order={order} line={deletingLine} onClose={() => setDeletingLine(null)} />
+    </>
   );
 }

@@ -53,6 +53,7 @@ function baseOrder(overrides: Partial<OrderDto> = {}): OrderDto {
     ],
     payments: [
       {
+        id: 1,
         method: "Cash",
         amount: 100,
         referenceNumber: null,

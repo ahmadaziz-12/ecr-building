@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Text;
 using EcrBuilding.Domain.Entities;
+using EcrBuilding.Domain.Enums;
 
 namespace EcrBuilding.Infrastructure.Printing;
 
@@ -173,7 +174,24 @@ public static class EscPosBuilder
         return new ReceiptPayload(Convert.ToBase64String(bytes.ToArray()), preview.ToString());
     }
 
-    public static ReceiptPayload BuildLabel(string sku, string? barcode, string nameEn, decimal price)
+    // Two distinct label print options (deliberately separate actions in the UI, not tabs of one
+    // dialog — see PrintBarcodeDialog.tsx / PrintLabelDialog.tsx):
+    //  - Barcode: the Code128 symbol and its digits only — a minimal sticker for re-labeling/scanning,
+    //    no product info.
+    //  - Label: the full shelf/price tag — name, SKU, price (VAT-inclusive shown alongside), AND the
+    //    barcode symbol + digits underneath (matching a standard retail price-tag layout). overridePrice
+    //    lets the cashier print a different price than the product's actual SellingPrice for just this
+    //    run (e.g. a temporary markdown) without changing the stored product record.
+    // Digits print exactly ONCE, via the printer's own HRI (GS H) tightly attached under the symbol —
+    // no separate text line, which would double them up on hardware that already renders HRI.
+    //
+    // extraFeedLines: how far to feed past the printed content before the cut. This is fundamentally
+    // a physical constant of the printer (the fixed distance between its print head and its cutter
+    // blade) that varies by model — too little and the cutter slices through the last printed line;
+    // too much and every label has a large blank margin. There is no way to know or test this value
+    // from here, so it's a caller-supplied, user-tunable number (see PrintBarcodeDialog.tsx /
+    // PrintLabelDialog.tsx's "Feed before cut" field) rather than a hardcoded guess.
+    public static ReceiptPayload BuildLabel(LabelTemplate template, string sku, string? barcode, string nameEn, decimal price, decimal vatRate = 0, decimal? overridePrice = null, int extraFeedLines = 4)
     {
         using var bytes = new MemoryStream();
         var preview = new StringBuilder();
@@ -187,19 +205,51 @@ public static class EscPosBuilder
             preview.AppendLine(center ? text.PadLeft((32 + text.Length) / 2) : text);
         }
 
-        Write(bytes, [Esc, (byte)'@']); // init
-        Line(nameEn.Length > 32 ? nameEn[..32] : nameEn, bold: true, center: true);
-        Line($"SKU: {sku}", center: true);
-        Line($"SAR {price:F2}", bold: true, center: true);
-        if (!string.IsNullOrWhiteSpace(barcode))
+        var hasBarcode = false;
+        void PrintBarcodeSymbol()
         {
-            // GS k — print Code128 barcode (system 73 = CODE128), height 80 dots.
+            if (string.IsNullOrWhiteSpace(barcode)) return;
+            hasBarcode = true;
+            // GS H 2 — printer prints the HRI (human-readable digits) BELOW the barcode symbol
+            // itself. This IS the digit display; no separate text line follows it.
+            Write(bytes, [Gs, (byte)'H', 2]);
             Write(bytes, [Gs, (byte)'h', 80]);
-            Write(bytes, [Gs, (byte)'k', 73, (byte)barcode.Length]);
-            WriteText(bytes, barcode);
+            // CODE128 data must lead with a code-set selector ({A/{B/{C) — without it, most printers
+            // either reject the barcode outright or decode/render it garbled and truncated. {B (Code
+            // Set B) covers the full printable ASCII range, which is every barcode this catalog
+            // stores (EAN-13 digits or an alphanumeric SKU-style code).
+            var codeSetBData = Encoding.ASCII.GetBytes("{B" + barcode);
+            Write(bytes, [Gs, (byte)'k', 73, (byte)codeSetBData.Length]);
+            bytes.Write(codeSetBData, 0, codeSetBData.Length);
             preview.AppendLine($"[ BARCODE {barcode} ]");
         }
-        Write(bytes, [Esc, (byte)'d', 3]); // feed 3 lines
+
+        Write(bytes, [Esc, (byte)'@']); // init
+        // No lead-in feed here — separation between consecutive prints is entirely governed by the
+        // TRAILING feed (extraFeedLines, tunable in the print dialog) of whichever job printed before
+        // this one. A fixed lead-in on top of that only adds unwanted blank space above this label's
+        // own content, most visible on a Barcode print (no product info to fill that space).
+        var title = nameEn.Length > 32 ? nameEn[..32] : nameEn;
+        var effectivePrice = overridePrice ?? price;
+
+        switch (template)
+        {
+            case LabelTemplate.Label:
+                Line(title, bold: true, center: true);
+                Line($"SKU: {sku}", center: true);
+                Line($"SAR {effectivePrice:F2} (incl. VAT: {effectivePrice * (1 + vatRate / 100):F2})", bold: true, center: true);
+                PrintBarcodeSymbol();
+                break;
+            default: // Barcode — the symbol and its digits, nothing else.
+                PrintBarcodeSymbol();
+                break;
+        }
+
+        // Feed clear of the cutter before cutting — same fix as BuildReceipt's QR footer. A barcode
+        // symbol is physically taller than a text line, so it gets one extra line on top of whatever
+        // the caller tuned for plain content.
+        var feedLines = Math.Clamp(extraFeedLines, 0, 40) + (hasBarcode ? 1 : 0);
+        Write(bytes, [Esc, (byte)'d', (byte)feedLines]);
         Write(bytes, [0x1D, (byte)'V', 0]); // partial cut
 
         return new ReceiptPayload(Convert.ToBase64String(bytes.ToArray()), preview.ToString());

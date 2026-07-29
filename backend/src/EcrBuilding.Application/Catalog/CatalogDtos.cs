@@ -20,11 +20,16 @@ public record ProductDto(int Id, string Sku, string? Barcode, string NameEn, str
     // BRD §2.3 enhancement: minimum billable qty (stock UOM) for a cut-to-size line — null = no minimum.
     decimal? MinCutQty = null,
     // Product Variants: optional family link (e.g. Steel Rebar 12MM/16MM) — null for standalone SKUs.
-    int? VariantGroupId = null, string? VariantGroupName = null);
+    int? VariantGroupId = null, string? VariantGroupName = null,
+    // Weighing Scale integration: sold-by-weight products take their qty from a live scale reading at
+    // checkout instead of manual entry — mutually exclusive with IsCutToSize in the POS UI.
+    bool IsSoldByWeight = false,
+    // Serial Number Tracking: checkout requires one registered serial number per unit sold.
+    bool RequiresSerialTracking = false);
 public record UpsertProductRequest(string Sku, string? Barcode, string NameEn, string? NameAr, int CategoryId, string? Brand, decimal CostPrice, decimal SellingPrice, decimal VatRate, string StockUom, string[] SellUoms, decimal Weight, bool Returnable, int ReorderLevel, int ReorderQty, string? ImageUrl, List<ProductUomConversionDto>? UomConversions = null, bool IsCutToSize = false,
     List<ProductAttributeDto>? Attributes = null, int? SupplierId = null, string? BinLocation = null, string CutToSizeUnit = "Area",
     decimal? ContractorPrice = null, decimal? WholesalePrice = null, decimal? ProjectPrice = null, decimal? MinCutQty = null,
-    int? VariantGroupId = null);
+    int? VariantGroupId = null, bool IsSoldByWeight = false, bool RequiresSerialTracking = false);
 
 // Product Variants: a family of independent Product SKUs (own price/stock/barcode) that share a
 // display grouping in POS/catalog, e.g. "Steel Rebar" grouping the 12MM/16MM SKUs. VariantCount is

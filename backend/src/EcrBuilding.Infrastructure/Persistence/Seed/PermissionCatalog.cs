@@ -23,6 +23,7 @@ public static class PermissionCatalog
         new("/operate/customers", "Orders", "Customers & Contractors"),
         new("/operate/cashier-workspace", "Pos", "Cashier Workspace"),
         new("/operate/cashier-shift", "Pos", "Cashier Shifts"),
+        new("/operate/approval-center", "Pos", "Approval Center"),
         new("/operate/customer-display", "Pos", "Customer Display"),
 
         new("/stock/inventory", "Inventory", "Product Catalog"),
@@ -36,6 +37,7 @@ public static class PermissionCatalog
         new("/stock/expiry", "Inventory", "Expiry"),
         new("/stock/transfers", "Inventory", "Stock Transfers"),
         new("/stock/bundles", "Inventory", "Bundles & Systems"),
+        new("/stock/serial-tracking", "Inventory", "Serial Number Tracking"),
 
         new("/suppliers/suppliers", "Suppliers", "Suppliers"),
         new("/finance/purchase-orders", "Suppliers", "Purchase Orders"),

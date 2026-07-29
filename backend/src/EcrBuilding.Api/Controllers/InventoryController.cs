@@ -920,3 +920,106 @@ public class StockMovementsController(AppDbContext db) : ControllerBase
             m.RefTable, m.RefId, m.UserId is not null && userNames.TryGetValue(m.UserId.Value, out var n) ? n : null)).ToList());
     }
 }
+
+// Serial Number Tracking: register serialized units (manual entry or at PO receiving), look one up
+// by its serial for warranty/support, and transition status (returned/warranty/scrapped/back in
+// stock). Checkout (OrdersController) is what actually marks a unit Sold, linking it to the order/line
+// that sold it — this controller only covers registration, lookup, and manual status changes.
+[ApiController]
+[Route("api/inventory/serials")]
+[Authorize]
+[RequireModule("/stock/serial-tracking", PermissionAction.View)]
+public class SerialNumbersController(AppDbContext db, IAuditService audit) : ControllerBase
+{
+    [HttpGet]
+    public async Task<ActionResult<List<SerializedUnitDto>>> List(
+        [FromQuery] int? productId, [FromQuery] int? branchId, [FromQuery] string? status, [FromQuery] string? search, CancellationToken ct)
+    {
+        var query = Query();
+        if (productId is not null) query = query.Where(s => s.ProductId == productId);
+        if (branchId is not null) query = query.Where(s => s.BranchId == branchId);
+        if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<SerialUnitStatus>(status, ignoreCase: true, out var parsedStatus))
+        {
+            query = query.Where(s => s.Status == parsedStatus);
+        }
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(s => s.SerialNo.Contains(term) || s.Product!.Sku.Contains(term) || s.Product!.NameEn.Contains(term));
+        }
+        var rows = await query.OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
+        return Ok(rows.Select(Map).ToList());
+    }
+
+    // Warranty/support lookup — find the exact unit (and which order it was sold on) by its serial.
+    [HttpGet("{serialNo}")]
+    public async Task<ActionResult<SerializedUnitDto>> LookupBySerial(string serialNo, CancellationToken ct)
+    {
+        var unit = await Query().FirstOrDefaultAsync(s => s.SerialNo == serialNo, ct);
+        if (unit is null) return NotFound();
+        return Ok(Map(unit));
+    }
+
+    [HttpPost]
+    [RequireModule("/stock/serial-tracking", PermissionAction.Create)]
+    public async Task<ActionResult<List<SerializedUnitDto>>> Register(RegisterSerializedUnitsRequest request, CancellationToken ct)
+    {
+        var product = await db.Products.FindAsync([request.ProductId], ct);
+        if (product is null) return BadRequest(new { error = "Unknown product." });
+        if (!await db.Branches.AnyAsync(b => b.Id == request.BranchId, ct)) return BadRequest(new { error = "Unknown branch." });
+
+        var serials = request.SerialNumbers.Select(s => s.Trim()).Where(s => s.Length > 0).Distinct().ToList();
+        if (serials.Count == 0) return BadRequest(new { error = "Enter at least one serial number." });
+
+        var existing = await db.SerializedUnits.Where(s => s.ProductId == request.ProductId && serials.Contains(s.SerialNo)).Select(s => s.SerialNo).ToListAsync(ct);
+        if (existing.Count > 0)
+        {
+            return Conflict(new { error = $"Already registered for {product.Sku}: {string.Join(", ", existing)}." });
+        }
+
+        var units = serials.Select(serial => new SerializedUnit
+        {
+            ProductId = request.ProductId, SerialNo = serial, BranchId = request.BranchId,
+            WarrantyExpiresAt = request.WarrantyExpiresAt, Notes = request.Notes,
+        }).ToList();
+        db.SerializedUnits.AddRange(units);
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "SERIALS_REGISTERED", product.Id.ToString(), newValue: new { product.Sku, serials }, cancellationToken: ct);
+
+        var ids = units.Select(u => u.Id).ToList();
+        var created = await Query().Where(s => ids.Contains(s.Id)).ToListAsync(ct);
+        return Ok(created.Select(Map).ToList());
+    }
+
+    [HttpPut("{id:int}/status")]
+    [RequireModule("/stock/serial-tracking", PermissionAction.Edit)]
+    public async Task<ActionResult<SerializedUnitDto>> UpdateStatus(int id, UpdateSerialStatusRequest request, CancellationToken ct)
+    {
+        var unit = await Query().FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (unit is null) return NotFound();
+        if (!Enum.TryParse<SerialUnitStatus>(request.Status, ignoreCase: true, out var status))
+        {
+            return BadRequest(new { error = $"Unknown status \"{request.Status}\"." });
+        }
+        if (unit.Status == SerialUnitStatus.Sold && status == SerialUnitStatus.InStock)
+        {
+            return BadRequest(new { error = "A sold unit can't be marked back in stock directly — process a return instead, which sets this automatically." });
+        }
+
+        var oldStatus = unit.Status;
+        unit.Status = status;
+        if (request.Notes is not null) unit.Notes = request.Notes;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "SERIAL_STATUS_CHANGED", id.ToString(),
+            oldValue: new { Status = oldStatus.ToString() }, newValue: new { Status = status.ToString() }, cancellationToken: ct);
+        return Ok(Map(unit));
+    }
+
+    private IQueryable<SerializedUnit> Query() => db.SerializedUnits
+        .Include(s => s.Product).Include(s => s.Branch).Include(s => s.SoldOrder);
+
+    private static SerializedUnitDto Map(SerializedUnit s) => new(
+        s.Id, s.ProductId, s.Product?.Sku ?? "", s.Product?.NameEn ?? "", s.SerialNo, s.Status.ToString(),
+        s.BranchId, s.Branch?.NameEn ?? "", s.ReceivedDate, s.SoldOrderId, s.SoldOrder?.OrderNo,
+        s.WarrantyExpiresAt, s.Notes, s.CreatedAt);
+}

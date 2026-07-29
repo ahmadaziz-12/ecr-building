@@ -61,6 +61,12 @@ export type ProductDto = {
   // standalone SKUs. Every variant still keeps its own price/stock/barcode/attributes.
   variantGroupId?: number | null;
   variantGroupName?: string | null;
+  // Weighing Scale integration: qty comes from a live scale reading at checkout instead of manual/
+  // cut-to-size entry — mutually exclusive with isCutToSize in the POS UI.
+  isSoldByWeight?: boolean;
+  // Serial Number Tracking: checkout requires one registered serial number per unit sold instead of
+  // just decrementing a quantity — see src/lib/api/serials.ts.
+  requiresSerialTracking?: boolean;
 };
 
 // A family of independent Product SKUs (own price/stock/barcode) sharing a display grouping in
@@ -176,6 +182,8 @@ export type CreateProductRequest = {
   projectPrice?: number | null;
   minCutQty?: number | null;
   variantGroupId?: number | null;
+  isSoldByWeight?: boolean;
+  requiresSerialTracking?: boolean;
 };
 
 export function useCreateProduct() {

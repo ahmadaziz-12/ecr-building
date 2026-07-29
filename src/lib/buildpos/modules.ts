@@ -357,7 +357,7 @@ export const catalog: ModuleCatalog[] = [
       ],
     ],
     statusCol: 10,
-    actions: ["Add SKU", "Add Product with Variants", "Export"],
+    actions: ["Add SKU", "Add Product with Variants", "Print Barcodes", "Print Labels", "Export"],
     primaryAction: "Add SKU",
   },
   {
