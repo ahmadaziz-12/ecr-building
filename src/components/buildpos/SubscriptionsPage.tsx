@@ -12,6 +12,8 @@ import starter from "@/assets/plans/starter.jpg";
 import growth from "@/assets/plans/growth.jpg";
 import business from "@/assets/plans/business.jpg";
 import enterprise from "@/assets/plans/enterprise.jpg";
+import { SARIcon } from "@/lib/buildpos/currency";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 type Plan = {
   id: string;
@@ -281,7 +283,7 @@ export function SubscriptionsPage() {
                   ) : (
                     <>
                       <span className="font-display text-3xl font-bold text-foreground">{price}</span>
-                      <span className="text-sm font-medium text-muted-foreground">ر.س / mo</span>
+                      <span className="text-sm font-medium text-muted-foreground"><SARIcon /> / mo</span>
                     </>
                   )}
                   {yearly && price > 0 && (
@@ -365,7 +367,7 @@ export function SubscriptionsPage() {
                     <Icon className="h-5 w-5" />
                   </div>
                   <div className="text-right">
-                    <p className="font-display text-lg font-bold text-foreground">{a.price}</p>
+                    <p className="font-display text-lg font-bold text-foreground"><CurrencyText value={a.price} /></p>
                     <p className="text-[10px] text-muted-foreground">{a.per}</p>
                   </div>
                 </div>

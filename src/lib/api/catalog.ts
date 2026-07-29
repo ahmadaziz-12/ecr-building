@@ -247,6 +247,7 @@ export function mapCategories(rows: CategoryDto[]): LiveTable {
   // gets listed, unindented, rather than silently disappearing from the table.
   const orphans = rows.filter((c) => c.parentId != null && !topLevelIds.has(c.parentId));
   const ordered = [...topLevel.flatMap((c) => [c, ...(childrenOf.get(c.id) ?? [])]), ...orphans];
+  const nonReturnableCodes = new Set(rows.filter((c) => !c.returnable).map((c) => c.code));
 
   return {
     columns: ["Code", "Category", "SKUs", "Attributes", "Return Rule", "Default UOM", "Status"],
@@ -273,24 +274,42 @@ export function mapCategories(rows: CategoryDto[]): LiveTable {
         value: String(rows.reduce((s, c) => s + c.skuCount, 0)),
         sub: "Across all categories",
         tone: "success",
+        // Row shape: [Code, Category, SKUs, Attributes, Return Rule, Default UOM, Status].
+        filter: (row) => Number(row[2]) > 0,
       },
       {
         label: "Non-Returnable",
         value: String(rows.filter((c) => !c.returnable).length),
         sub: "Return rule blocked",
         tone: "warning",
+        // Matched by code rather than by the displayed Return Rule text — `returnable` is the flag
+        // the count is taken from, and the rule column is free-form copy that can say anything.
+        filter: (row) => nonReturnableCodes.has(String(row[0])),
       },
       {
         label: "Empty Categories",
         value: String(rows.filter((c) => c.skuCount === 0).length),
         sub: "No SKUs mapped",
         tone: rows.some((c) => c.skuCount === 0) ? "warning" : "success",
+        filter: (row) => Number(row[2]) === 0,
       },
     ],
   };
 }
 
 export function mapProducts(rows: ProductDto[]): LiveTable {
+  // Low stock is a comparison between two fields that never reach the table (totalAvailable vs
+  // reorderLevel), so the card's filter matches on the SKU column against the set it counted.
+  const lowStockSkus = new Set(
+    rows
+      .filter((p) => p.totalAvailable > 0 && p.totalAvailable <= p.reorderLevel)
+      .map((p) => p.sku),
+  );
+  // The Status column shows "Non-Returnable" in place of the lifecycle status for non-returnable
+  // products, so an Active/Inactive card can't match on that column — match the SKU instead, or a
+  // non-returnable Active SKU would be counted by the card and then filtered out of its own list.
+  const activeSkus = new Set(rows.filter((p) => p.status === "Active").map((p) => p.sku));
+  const inactiveSkus = new Set(rows.filter((p) => p.status === "Inactive").map((p) => p.sku));
   return {
     columns: [
       "SKU",
@@ -323,31 +342,35 @@ export function mapProducts(rows: ProductDto[]): LiveTable {
       p.returnable ? p.status : "Non-Returnable",
     ]),
     kpis: [
+      // Row shape: [SKU, Barcode, Name, Category, Brand, Price, VAT, Stock UOM, Selling UOMs,
+      // Attributes, Stock, Status].
       {
         label: "Active SKUs",
-        value: String(rows.filter((p) => p.status === "Active").length),
+        value: String(activeSkus.size),
         sub: `${rows.length} total`,
         tone: "success",
+        filter: (row) => activeSkus.has(String(row[0])),
       },
       {
         label: "Inactive SKUs",
-        value: String(rows.filter((p) => p.status === "Inactive").length),
+        value: String(inactiveSkus.size),
         sub: "Discontinued",
         tone: "muted",
+        filter: (row) => inactiveSkus.has(String(row[0])),
       },
       {
         label: "Low Stock SKUs",
-        value: String(
-          rows.filter((p) => p.totalAvailable > 0 && p.totalAvailable <= p.reorderLevel).length,
-        ),
+        value: String(lowStockSkus.size),
         sub: "Reorder now",
         tone: "warning",
+        filter: (row) => lowStockSkus.has(String(row[0])),
       },
       {
         label: "Missing Barcode",
         value: String(rows.filter((p) => !p.barcode).length),
         sub: "Blocks POS scan",
         tone: rows.some((p) => !p.barcode) ? "critical" : "success",
+        filter: (row) => String(row[1]) === "—",
       },
     ],
   };

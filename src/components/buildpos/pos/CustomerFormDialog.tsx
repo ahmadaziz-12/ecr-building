@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCreateCustomer, useUpdateCustomer, type CustomerDto } from "@/lib/api/pos";
+import { SARIcon } from "@/lib/buildpos/currency";
 
 const TYPES = ["WalkIn", "Retail", "Contractor", "B2B"];
 const TYPE_LABELS: Record<string, string> = { WalkIn: "Walk-in", Retail: "Retail", Contractor: "Contractor", B2B: "B2B" };
@@ -127,7 +128,7 @@ export function CustomerFormDialog({ customer, open, onOpenChange }: { customer:
                 <Input type="number" value={form.creditTermDays} onChange={(e) => set("creditTermDays", e.target.value)} placeholder="30" />
               </div>
               <div>
-                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Credit Limit (ر.س)</label>
+                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Credit Limit (<SARIcon />)</label>
                 <Input type="number" value={form.creditLimit} onChange={(e) => set("creditLimit", e.target.value)} />
               </div>
             </>

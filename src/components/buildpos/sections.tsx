@@ -116,6 +116,8 @@ import { useSuppliers } from "@/lib/api/procurement";
 import { useDepartmentsApi } from "@/lib/api/hr";
 import { useSavedViews, useCreateSavedView, useDeleteSavedView } from "@/lib/api/insights";
 import { exportToCsv } from "@/components/buildpos/pos/shared";
+import { NamePromptDialog } from "@/components/buildpos/NamePromptDialog";
+import { CurrencyText, SARIcon } from "@/lib/buildpos/currency";
 import cementImg from "@/assets/cat-cement.jpg";
 import steelImg from "@/assets/cat-steel.jpg";
 import tilesImg from "@/assets/cat-tiles.jpg";
@@ -203,7 +205,13 @@ export function SectionCard({
             {title && (
               <h2 className="font-display text-base font-semibold text-foreground">{title}</h2>
             )}
-            {desc && <p className="mt-0.5 text-xs text-muted-foreground">{desc}</p>}
+            {/* Section descriptions routinely carry a total ("Today · 12,400 ر.س collected"), so
+                they go through the same currency renderer as every other amount. */}
+            {desc && (
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                <CurrencyText value={desc} />
+              </p>
+            )}
           </div>
           {action}
         </div>
@@ -254,6 +262,7 @@ export function FilterBar({
   const { hasAccess } = useAuth();
   const [moreOpen, setMoreOpen] = useState(false);
   const [viewsOpen, setViewsOpen] = useState(false);
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
   // The static blueprint option names ("Cement & Binders", "Riyadh Main Branch") don't match the
   // live category/branch/terminal/cashier/contractor/supplier/department names, so wired consumers
   // would filter everything to nothing — swap in the real names once loaded.
@@ -355,15 +364,10 @@ export function FilterBar({
                 size="sm"
                 className="mb-2 h-8 w-full bg-brand text-xs text-brand-foreground hover:bg-brand/90"
                 onClick={() => {
-                  const name = window.prompt("Name this view:");
-                  if (!name) return;
-                  createSavedView.mutate(
-                    { name, filtersJson: JSON.stringify({ values, dateRange }) },
-                    {
-                      onSuccess: () => toast.success(`View "${name}" saved.`),
-                      onError: () => toast.error("Couldn't save this view."),
-                    },
-                  );
+                  // window.prompt is blocked outright in the sandboxed preview iframe — it returns
+                  // null without ever showing, so this button appeared to do nothing at all.
+                  setViewsOpen(false);
+                  setSaveViewOpen(true);
                 }}
               >
                 Save current filters as new view
@@ -523,6 +527,23 @@ export function FilterBar({
           ))}
         </div>
       )}
+
+      <NamePromptDialog
+        open={saveViewOpen}
+        onOpenChange={setSaveViewOpen}
+        title="Save this view"
+        label="View name"
+        placeholder="e.g. Riyadh · last 7 days"
+        onConfirm={(name) =>
+          createSavedView.mutate(
+            { name, filtersJson: JSON.stringify({ values, dateRange }) },
+            {
+              onSuccess: () => toast.success(`View "${name}" saved.`),
+              onError: () => toast.error("Couldn't save this view."),
+            },
+          )
+        }
+      />
     </div>
   );
 }
@@ -544,7 +565,9 @@ export function KpiGrid({ items = kpis }: { items?: typeof kpis }) {
                 <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   {k.title}
                 </p>
-                <p className="mt-1.5 font-display text-2xl font-bold text-foreground">{k.value}</p>
+                <p className="mt-1.5 break-words font-display text-2xl font-bold text-foreground">
+                  <CurrencyText value={String(k.value)} />
+                </p>
               </div>
               <div className={`grid h-10 w-10 place-items-center rounded-xl ${toneIcon[k.tone]}`}>
                 <Icon className="h-5 w-5" />
@@ -718,7 +741,9 @@ export function PaymentCollection() {
                 <span className="font-medium text-foreground">{p.method}</span>
                 <span className="text-muted-foreground">· {p.tx} tx</span>
               </span>
-              <span className="font-semibold text-foreground">{formatSAR(p.amount)}</span>
+              <span className="font-semibold text-foreground">
+                <CurrencyText value={formatSAR(p.amount)} />
+              </span>
             </div>
           ))}
         </div>
@@ -814,7 +839,7 @@ export function TopCategories() {
               <div className="p-3">
                 <p className="text-sm font-medium text-foreground">{c.name}</p>
                 <p className="mt-1 font-display text-lg font-bold text-foreground">
-                  {formatSAR(c.sales)}
+                  <CurrencyText value={formatSAR(c.sales)} />
                 </p>
                 <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
                   <span>{c.units}</span>
@@ -880,7 +905,9 @@ export function InventoryHealth({
         {summary.map((s) => (
           <div key={s.label} className="rounded-lg border border-black/5 bg-canvas p-2.5">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{s.label}</p>
-            <p className="mt-1 text-sm font-semibold text-foreground">{s.value}</p>
+            <p className="mt-1 text-sm font-semibold text-foreground">
+              <CurrencyText value={String(s.value)} />
+            </p>
           </div>
         ))}
       </div>
@@ -1010,16 +1037,24 @@ export function CashierActivity() {
                 <TableRow key={s.id} className="hover:bg-canvas">
                   <TableCell className="font-mono text-xs">{s.id}</TableCell>
                   <TableCell className="font-medium">{s.cashier}</TableCell>
-                  <TableCell>{formatSAR(s.opening)}</TableCell>
-                  <TableCell>{formatSAR(s.cash)}</TableCell>
-                  <TableCell>{formatSAR(s.expected)}</TableCell>
-                  <TableCell>{formatSAR(s.counted)}</TableCell>
+                  <TableCell>
+                    <CurrencyText value={formatSAR(s.opening)} />
+                  </TableCell>
+                  <TableCell>
+                    <CurrencyText value={formatSAR(s.cash)} />
+                  </TableCell>
+                  <TableCell>
+                    <CurrencyText value={formatSAR(s.expected)} />
+                  </TableCell>
+                  <TableCell>
+                    <CurrencyText value={formatSAR(s.counted)} />
+                  </TableCell>
                   <TableCell
                     className={
                       s.variance < 0 ? "font-semibold text-critical" : "text-muted-foreground"
                     }
                   >
-                    {s.variance === 0 ? "0 ر.س" : formatSAR(s.variance)}
+                    <CurrencyText value={s.variance === 0 ? "0 ر.س" : formatSAR(s.variance)} />
                   </TableCell>
                   <TableCell>
                     <Pill tone={toneForStatus(s.status)}>{s.status}</Pill>
@@ -1081,7 +1116,9 @@ export function DeliveryQueue() {
                 <TableCell>
                   <Pill tone={toneForStatus(String(d.status))}>{String(d.status)}</Pill>
                 </TableCell>
-                <TableCell className="font-semibold">{d.amount}</TableCell>
+                <TableCell className="font-semibold">
+                  <CurrencyText value={String(d.amount)} />
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -1153,7 +1190,9 @@ export function ReturnsRefunds() {
         {returnsSummary.map((s) => (
           <div key={s.label} className="rounded-lg border border-black/5 bg-canvas p-2.5">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{s.label}</p>
-            <p className="mt-1 text-sm font-semibold text-foreground">{s.value}</p>
+            <p className="mt-1 text-sm font-semibold text-foreground">
+              <CurrencyText value={String(s.value)} />
+            </p>
           </div>
         ))}
       </div>
@@ -1230,10 +1269,14 @@ export function BranchPerformance({ rows = branches }: { rows?: typeof branches 
             {rows.map((b) => (
               <TableRow key={b.branch} className="hover:bg-canvas">
                 <TableCell className="font-medium">{b.branch}</TableCell>
-                <TableCell className="font-semibold">{b.sales}</TableCell>
+                <TableCell className="font-semibold">
+                  <CurrencyText value={String(b.sales)} />
+                </TableCell>
                 <TableCell>{b.tx}</TableCell>
                 <TableCell className="text-muted-foreground">{b.returns}</TableCell>
-                <TableCell>{b.basket}</TableCell>
+                <TableCell>
+                  <CurrencyText value={String(b.basket)} />
+                </TableCell>
                 <TableCell>{b.low}</TableCell>
                 <TableCell>{b.shifts}</TableCell>
                 <TableCell>
@@ -1402,10 +1445,12 @@ export function CommandKpis() {
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                   {t.label}
                 </p>
-                <p className="mt-1.5 font-display text-[22px] font-bold leading-none text-foreground">
-                  {t.value}
+                <p className="mt-1.5 break-words font-display text-[22px] font-bold leading-tight text-foreground">
+                  <CurrencyText value={t.value} />
                 </p>
-                <p className="mt-1.5 text-[11px] text-muted-foreground">{t.hint}</p>
+                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                  <CurrencyText value={t.hint} />
+                </p>
               </div>
               <div
                 className={`grid h-11 w-11 flex-none place-items-center rounded-xl ${iconTone[t.tone]}`}
@@ -1469,7 +1514,9 @@ export function ContractorOrders() {
                 <TableCell>
                   <Pill tone={o.credit === "Approved" ? "success" : "warning"}>{o.credit}</Pill>
                 </TableCell>
-                <TableCell className="font-semibold">{o.value}</TableCell>
+                <TableCell className="font-semibold">
+                  <CurrencyText value={String(o.value)} />
+                </TableCell>
                 <TableCell className="text-muted-foreground">{o.delivery}</TableCell>
                 <TableCell className="text-muted-foreground">{o.invoice}</TableCell>
                 <TableCell className="text-muted-foreground">{o.pay}</TableCell>
@@ -1550,7 +1597,9 @@ export function DispatchBoard() {
                     </p>
                     <div className="mt-1.5 flex items-center justify-between text-[11px]">
                       <span className="text-muted-foreground">🚚 {d.driver}</span>
-                      <span className="font-semibold text-foreground">{d.amount}</span>
+                      <span className="font-semibold text-foreground">
+                        <CurrencyText value={String(d.amount)} />
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -1716,28 +1765,37 @@ export function DashboardHeader({ subtitle }: { subtitle: string }) {
 
 export function OverviewKpis({ items = overviewKpis }: { items?: typeof overviewKpis }) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    // Six across only from 2xl up. At xl these were ~200px wide, which a formatted money value
+    // overflows — the cards then wrapped to different heights and the row read as ragged.
+    // `items-stretch` + `h-full` keeps every card in a row the same height regardless of how many
+    // lines its caption takes.
+    <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
       {items.map((k, i) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
           <div
             key={k.key}
-            className={`bp-enter stagger-${(i % 6) + 1} group relative overflow-hidden rounded-2xl border border-black/5 bg-white p-4 shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-md`}
+            className={`bp-enter stagger-${(i % 6) + 1} group relative flex h-full flex-col overflow-hidden rounded-2xl border border-black/5 bg-white p-4 shadow-[0_1px_2px_rgba(15,10,50,0.04)] transition hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-md`}
           >
             <div className="pointer-events-none absolute inset-0 blueprint-grid opacity-25" />
             <div className="relative flex items-start justify-between">
-              <div className={`grid h-9 w-9 place-items-center rounded-lg ${toneIcon[k.tone]}`}>
+              <div
+                className={`grid h-9 w-9 flex-none place-items-center rounded-lg ${toneIcon[k.tone]}`}
+              >
                 <Icon className="h-4 w-4" />
               </div>
-              <Pill tone={k.tone}>{k.sub.split(" ")[0]}</Pill>
             </div>
             <p className="relative mt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               {k.title}
             </p>
-            <p className="relative mt-0.5 font-display text-[22px] font-bold tabular-nums leading-tight text-foreground">
-              {k.value}
+            {/* The whole caption is spelled out below; the pill here used to show only its first
+                word ("286", "Ex-VAT") which read as a stray, meaningless badge. */}
+            <p className="relative mt-0.5 break-words font-display text-xl font-bold tabular-nums leading-tight text-foreground xl:text-[22px]">
+              <CurrencyText value={k.value} />
             </p>
-            <p className="relative mt-0.5 text-[11px] text-muted-foreground">{k.sub}</p>
+            <p className="relative mt-auto pt-1 text-[11px] text-muted-foreground">
+              <CurrencyText value={k.sub} />
+            </p>
           </div>
         );
       })}
@@ -1772,8 +1830,8 @@ export function HourlySummary({
         ].map((c) => (
           <div key={c.l} className="rounded-lg border border-black/5 bg-canvas p-2.5">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{c.l}</p>
-            <p className="mt-1 font-display text-base font-bold tabular-nums text-foreground">
-              {c.v}
+            <p className="mt-1 break-words font-display text-base font-bold tabular-nums text-foreground">
+              <CurrencyText value={c.v} />
             </p>
           </div>
         ))}
@@ -1891,7 +1949,9 @@ export function DispatchPipelinePreview({
               <span className="text-muted-foreground">
                 <Clock className="mr-0.5 inline h-2.5 w-2.5" /> {d.promised.replace("Today, ", "")}
               </span>
-              <span className="font-semibold">{d.amount}</span>
+              <span className="font-semibold">
+                <CurrencyText value={String(d.amount)} />
+              </span>
             </div>
           </div>
         ))}
@@ -1930,20 +1990,20 @@ export function CashierWorkspaceSummary({
       title="Cashier Workspace Summary"
       desc="Terminals, shifts and cash reconciliation at a glance."
     >
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 items-stretch gap-2 sm:grid-cols-3 lg:grid-cols-6">
         {rows.map((t, i) => (
           <div
             key={t.l}
-            className={`bp-enter stagger-${(i % 6) + 1} rounded-lg border border-black/5 bg-canvas p-2.5 transition hover:bg-white hover:shadow-sm`}
+            className={`bp-enter stagger-${(i % 6) + 1} h-full rounded-lg border border-black/5 bg-canvas p-2.5 transition hover:bg-white hover:shadow-sm`}
           >
-            <div className="flex items-center justify-between">
+            <div className="flex items-start justify-between gap-1.5">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{t.l}</p>
               <span
-                className={`h-1.5 w-1.5 rounded-full ${t.tone === "critical" ? "bg-critical" : t.tone === "warning" ? "bg-warning" : t.tone === "success" ? "bg-success" : "bg-info"}`}
+                className={`mt-1 h-1.5 w-1.5 flex-none rounded-full ${t.tone === "critical" ? "bg-critical" : t.tone === "warning" ? "bg-warning" : t.tone === "success" ? "bg-success" : "bg-info"}`}
               />
             </div>
-            <p className="mt-1 font-display text-sm font-bold tabular-nums text-foreground">
-              {t.v}
+            <p className="mt-1 break-words font-display text-sm font-bold tabular-nums text-foreground">
+              <CurrencyText value={t.v} />
             </p>
           </div>
         ))}
@@ -2034,7 +2094,9 @@ export function TopCategoriesCompact({
                     <span className="font-medium text-foreground">{c.name}</span>
                   </span>
                 </TableCell>
-                <TableCell className="font-semibold tabular-nums">{formatSAR(c.sales)}</TableCell>
+                <TableCell className="font-semibold tabular-nums">
+                  <CurrencyText value={formatSAR(c.sales)} />
+                </TableCell>
                 <TableCell className="text-muted-foreground">{c.units}</TableCell>
                 <TableCell>
                   <Pill tone={tone}>{c.health}</Pill>
@@ -2053,26 +2115,30 @@ export function TopCategoriesCompact({
 
 export function SalesPerfKpis({ items = salesPerfKpis }: { items?: typeof salesPerfKpis }) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
       {items.map((k, i) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
           <div
             key={k.key}
-            className={`bp-enter stagger-${(i % 6) + 1} rounded-2xl border border-black/5 bg-white p-4 shadow-sm`}
+            className={`bp-enter stagger-${(i % 6) + 1} flex h-full flex-col rounded-2xl border border-black/5 bg-white p-4 shadow-sm`}
           >
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between gap-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                 {k.title}
               </p>
-              <div className={`grid h-7 w-7 place-items-center rounded ${toneIcon[k.tone]}`}>
+              <div
+                className={`grid h-7 w-7 flex-none place-items-center rounded ${toneIcon[k.tone]}`}
+              >
                 <Icon className="h-3.5 w-3.5" />
               </div>
             </div>
-            <p className="mt-2 font-display text-xl font-bold tabular-nums text-foreground">
-              {k.value}
+            <p className="mt-2 break-words font-display text-xl font-bold tabular-nums text-foreground">
+              <CurrencyText value={k.value} />
             </p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">{k.sub}</p>
+            <p className="mt-auto pt-1 text-[11px] text-muted-foreground">
+              <CurrencyText value={k.sub} />
+            </p>
           </div>
         );
       })}
@@ -2124,7 +2190,9 @@ export function RecentOrdersTable({
               <TableCell className="font-mono text-xs">{o.id}</TableCell>
               <TableCell className="font-medium">{o.customer}</TableCell>
               <TableCell>{o.type}</TableCell>
-              <TableCell className="font-semibold tabular-nums">{o.value}</TableCell>
+              <TableCell className="font-semibold tabular-nums">
+                <CurrencyText value={String(o.value)} />
+              </TableCell>
               <TableCell>
                 <Pill tone={toneForStatus(o.status)}>{o.status}</Pill>
               </TableCell>
@@ -2142,26 +2210,30 @@ export function RecentOrdersTable({
 
 export function InventoryKpiGrid({ items = inventoryKpis }: { items?: typeof inventoryKpis }) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
       {items.map((k, i) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
           <div
             key={k.key}
-            className={`bp-enter stagger-${(i % 6) + 1} rounded-2xl border border-black/5 bg-white p-4 shadow-sm`}
+            className={`bp-enter stagger-${(i % 6) + 1} flex h-full flex-col rounded-2xl border border-black/5 bg-white p-4 shadow-sm`}
           >
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between gap-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                 {k.title}
               </p>
-              <div className={`grid h-7 w-7 place-items-center rounded ${toneIcon[k.tone]}`}>
+              <div
+                className={`grid h-7 w-7 flex-none place-items-center rounded ${toneIcon[k.tone]}`}
+              >
                 <Icon className="h-3.5 w-3.5" />
               </div>
             </div>
-            <p className="mt-2 font-display text-xl font-bold tabular-nums text-foreground">
-              {k.value}
+            <p className="mt-2 break-words font-display text-xl font-bold tabular-nums text-foreground">
+              <CurrencyText value={k.value} />
             </p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">{k.sub}</p>
+            <p className="mt-auto pt-1 text-[11px] text-muted-foreground">
+              <CurrencyText value={k.sub} />
+            </p>
           </div>
         );
       })}
@@ -2228,7 +2300,9 @@ export function DeliveryPipelineBoard({
                       <span className="text-muted-foreground">
                         {d.area} · {d.weight}
                       </span>
-                      <span className="font-semibold">{d.amount}</span>
+                      <span className="font-semibold">
+                        <CurrencyText value={String(d.amount)} />
+                      </span>
                     </div>
                     <p className="mt-0.5 text-[10px] text-muted-foreground">
                       Promised {d.promised}
@@ -2269,26 +2343,30 @@ export function DeliveryPipelineBoard({
 
 export function CashierKpiGrid({ items = cashierKpis }: { items?: typeof cashierKpis }) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
       {items.map((k, i) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
           <div
             key={k.key}
-            className={`bp-enter stagger-${(i % 6) + 1} rounded-2xl border border-black/5 bg-white p-4 shadow-sm`}
+            className={`bp-enter stagger-${(i % 6) + 1} flex h-full flex-col rounded-2xl border border-black/5 bg-white p-4 shadow-sm`}
           >
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between gap-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                 {k.title}
               </p>
-              <div className={`grid h-7 w-7 place-items-center rounded ${toneIcon[k.tone]}`}>
+              <div
+                className={`grid h-7 w-7 flex-none place-items-center rounded ${toneIcon[k.tone]}`}
+              >
                 <Icon className="h-3.5 w-3.5" />
               </div>
             </div>
-            <p className="mt-2 font-display text-xl font-bold tabular-nums text-foreground">
-              {k.value}
+            <p className="mt-2 break-words font-display text-xl font-bold tabular-nums text-foreground">
+              <CurrencyText value={k.value} />
             </p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">{k.sub}</p>
+            <p className="mt-auto pt-1 text-[11px] text-muted-foreground">
+              <CurrencyText value={k.sub} />
+            </p>
           </div>
         );
       })}
@@ -2409,8 +2487,8 @@ export function PaymentBreakdownTiles({
               <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
                 {p.method}
               </p>
-              <p className="mt-0.5 font-display text-base font-bold tabular-nums text-foreground">
-                {p.amount}
+              <p className="mt-0.5 break-words font-display text-base font-bold tabular-nums text-foreground">
+                <CurrencyText value={p.amount} />
               </p>
             </div>
           );
@@ -2430,12 +2508,13 @@ export function ReturnBreakdownTiles({
       title="Return Summary"
       desc="Standard, damaged, surplus, exchanges, VAT reversal and restocking."
     >
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+      {/* 6 tiles in a 7-column grid left a permanent ragged gap on the right. */}
+      <div className="grid grid-cols-2 items-stretch gap-2 sm:grid-cols-3 lg:grid-cols-6">
         {items.map((r) => (
-          <div key={r.label} className="rounded-lg border border-black/5 bg-canvas p-2.5">
+          <div key={r.label} className="h-full rounded-lg border border-black/5 bg-canvas p-2.5">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{r.label}</p>
-            <p className="mt-1 font-display text-sm font-bold tabular-nums text-foreground">
-              {r.value}
+            <p className="mt-1 break-words font-display text-sm font-bold tabular-nums text-foreground">
+              <CurrencyText value={r.value} />
             </p>
           </div>
         ))}

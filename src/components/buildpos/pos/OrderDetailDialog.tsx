@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Pill } from "@/components/buildpos/sections";
 import { statusTone } from "./shared";
 import type { OrderDto } from "@/lib/api/pos";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 function fmtSar(n: number): string {
   return `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} ر.س`;
@@ -70,10 +71,10 @@ export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; 
                       <td className="px-3 py-2 font-mono text-xs">{l.sku}</td>
                       <td className="px-3 py-2">{l.productName}</td>
                       <td className="px-3 py-2 text-right">{l.qty}</td>
-                      <td className="px-3 py-2 text-right">{fmtSar(l.unitPrice)}</td>
+                      <td className="px-3 py-2 text-right"><CurrencyText value={fmtSar(l.unitPrice)} /></td>
                       <td className="px-3 py-2 text-right text-muted-foreground">{l.discountPct > 0 ? `${l.discountPct}%` : "—"}</td>
                       <td className="px-3 py-2 text-right text-muted-foreground">{l.lineWeight > 0 ? `${l.lineWeight.toFixed(1)} kg` : "—"}</td>
-                      <td className="px-3 py-2 text-right font-medium">{fmtSar(l.lineTotal)}</td>
+                      <td className="px-3 py-2 text-right font-medium"><CurrencyText value={fmtSar(l.lineTotal)} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -82,15 +83,15 @@ export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; 
 
             <div className="grid grid-cols-2 gap-y-1 text-sm">
               <span className="text-muted-foreground">Subtotal</span>
-              <span className="text-right">{fmtSar(order.subTotal)}</span>
+              <span className="text-right"><CurrencyText value={fmtSar(order.subTotal)} /></span>
               <span className="text-muted-foreground">Discount</span>
-              <span className="text-right">-{fmtSar(order.discountTotal)}</span>
+              <span className="text-right">-<CurrencyText value={fmtSar(order.discountTotal)} /></span>
               <span className="text-muted-foreground">VAT</span>
-              <span className="text-right">{fmtSar(order.vatTotal)}</span>
+              <span className="text-right"><CurrencyText value={fmtSar(order.vatTotal)} /></span>
               {order.feesTotal > 0 && (
                 <>
                   <span className="text-muted-foreground">Fees</span>
-                  <span className="text-right">{fmtSar(order.feesTotal)}</span>
+                  <span className="text-right"><CurrencyText value={fmtSar(order.feesTotal)} /></span>
                 </>
               )}
               {order.lines.some((l) => l.lineWeight > 0) && (
@@ -100,7 +101,7 @@ export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; 
                 </>
               )}
               <span className="font-semibold text-foreground">Grand Total</span>
-              <span className="text-right font-semibold text-foreground">{fmtSar(order.grandTotal)}</span>
+              <span className="text-right font-semibold text-foreground"><CurrencyText value={fmtSar(order.grandTotal)} /></span>
             </div>
 
             {order.deliveryOrderNo && (
@@ -122,7 +123,7 @@ export function OrderDetailDialog({ order, onClose }: { order: OrderDto | null; 
                 <div className="flex flex-wrap gap-2">
                   {order.payments.map((p, i) => (
                     <Pill key={i} tone={statusTone(p.status)}>
-                      {p.method} · {fmtSar(p.amount)}
+                      {p.method} · <CurrencyText value={fmtSar(p.amount)} />
                     </Pill>
                   ))}
                 </div>

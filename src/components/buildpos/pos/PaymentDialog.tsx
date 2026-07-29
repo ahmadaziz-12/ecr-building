@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CustomerDto, PaymentInput } from "@/lib/api/pos";
 import { useLoyaltyConfig } from "@/lib/api/pos";
+import { CurrencyText, SARIcon } from "@/lib/buildpos/currency";
 
 const QUICK_CASH = [50, 100, 200, 500, 1000];
 const CARD_METHODS = [
@@ -45,8 +46,14 @@ export function PaymentDialog({
   // prefilled/"Exact" tender — is the 2-dp figure, so comparisons and charges must use the SAME
   // rounded number or exact cash reads as an underpayment and Confirm stays disabled.
   const totalDue = Math.round(total * 100) / 100;
+  // Starts empty, like the card method below: a pre-filled exact amount rendered "Exact" as a
+  // permanently highlighted button nobody had pressed, so the tender looked already chosen. The
+  // cashier types the amount or presses a denomination, and only then does Confirm come alive.
   const [cashGiven, setCashGiven] = useState("");
-  const [cardMethod, setCardMethod] = useState("Mada");
+  // Deliberately empty, not "Mada": a pre-filled default rendered as a solid brand-filled button
+  // the cashier had never touched, so the card type looked already confirmed. Nothing is selected
+  // until someone selects it, and Confirm stays disabled until then.
+  const [cardMethod, setCardMethod] = useState("");
   const [cardStatus, setCardStatus] = useState<"idle" | "waiting" | "success" | "failed">("idle");
   const [splitCash, setSplitCash] = useState("");
   const [splitCard, setSplitCard] = useState("");
@@ -69,7 +76,8 @@ export function PaymentDialog({
   useEffect(() => {
     if (open) {
       setTab(initialTab);
-      setCashGiven(totalDue.toFixed(2));
+      setCashGiven("");
+      setCardMethod("");
       setCardStatus("idle");
       setSplitCash("");
       setSplitCard("");
@@ -85,8 +93,13 @@ export function PaymentDialog({
   const redeemAboveMax = redeemAmt > maxRedeemSar + 0.001;
   const redeemValid = redeemAmt > 0 && !redeemBelowMin && !redeemAboveMax;
 
+  const exactCash = totalDue.toFixed(2);
+  const cashEntered = cashGiven.trim() !== "";
   const received = Number(cashGiven) || 0;
   const exchange = Math.max(0, received - totalDue);
+  // A tender is only "chosen" once it covers the total — that's the same condition Confirm enables
+  // on, so the highlighted button and the live button always agree.
+  const cashValid = cashEntered && Number.isFinite(Number(cashGiven)) && received >= totalDue;
   const splitCashAmt = Number(splitCash) || 0;
   const splitCardAmt = Number(splitCard) || 0;
   const splitSum = splitCashAmt + splitCardAmt;
@@ -112,7 +125,7 @@ export function PaymentDialog({
     <Dialog open={open} onOpenChange={(v) => !processing && onOpenChange(v)}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Charge {money(totalDue)}</DialogTitle>
+          <DialogTitle>Charge <CurrencyText value={money(totalDue)} /></DialogTitle>
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
@@ -134,39 +147,62 @@ export function PaymentDialog({
 
           <TabsContent value="cash" className="mt-4 space-y-3">
             <div>
-              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer Gives</label>
-              <Input type="number" value={cashGiven} onChange={(e) => setCashGiven(e.target.value)} className="h-11 text-lg font-semibold" />
+              <label htmlFor="cash-given" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer Gives</label>
+              <Input
+                id="cash-given"
+                type="number"
+                value={cashGiven}
+                onChange={(e) => setCashGiven(e.target.value)}
+                placeholder="Enter amount or pick one below"
+                className="h-11 text-lg font-semibold"
+              />
             </div>
             <div className="grid grid-cols-3 gap-1.5">
               {QUICK_CASH.map((amt) => (
                 <button
                   key={amt}
                   type="button"
+                  aria-pressed={cashGiven === String(amt)}
                   onClick={() => setCashGiven(String(amt))}
-                  className="rounded-lg border border-black/10 bg-canvas py-1.5 text-xs font-medium hover:border-brand/40 hover:bg-brand/5"
+                  className={`rounded-lg border py-1.5 text-xs font-medium transition ${
+                    cashGiven === String(amt)
+                      ? "border-brand bg-brand text-brand-foreground"
+                      : "border-black/10 bg-canvas hover:border-brand/40 hover:bg-brand/5"
+                  }`}
                 >
                   {amt}
                 </button>
               ))}
               <button
                 type="button"
-                onClick={() => setCashGiven(totalDue.toFixed(2))}
-                className="rounded-lg border border-brand/30 bg-brand/5 py-1.5 text-xs font-medium text-brand hover:bg-brand/10"
+                aria-pressed={cashGiven === exactCash}
+                onClick={() => setCashGiven(exactCash)}
+                className={`rounded-lg border py-1.5 text-xs font-medium transition ${
+                  cashGiven === exactCash
+                    ? "border-brand bg-brand text-brand-foreground"
+                    : "border-black/10 bg-canvas hover:border-brand/40 hover:bg-brand/5"
+                }`}
               >
                 Exact
               </button>
             </div>
             <div className="flex items-center justify-between rounded-lg bg-canvas px-3 py-2 text-sm">
               <span className="text-muted-foreground">Exchange due</span>
-              <span className="font-display text-base font-bold text-foreground">{money(exchange)}</span>
+              <span className="font-display text-base font-bold text-foreground"><CurrencyText value={money(exchange)} /></span>
             </div>
+            {cashEntered && !cashValid && (
+              <p className="text-xs text-critical">
+                Short by <CurrencyText value={money(Math.max(0, totalDue - received))} /> — the tender must cover the total.
+              </p>
+            )}
             {errorMsg && <p className="text-xs text-critical">{errorMsg}</p>}
             <Button
               className="h-11 w-full gap-2 bg-brand text-brand-foreground hover:bg-brand/90"
-              disabled={received < totalDue || processing}
+              disabled={!cashValid || processing}
               onClick={() => charge([{ method: "Cash", amount: totalDue }])}
             >
-              {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Confirm Cash Payment
+              {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}{" "}
+              {cashEntered ? "Confirm Cash Payment" : "Enter the cash received"}
             </Button>
           </TabsContent>
 
@@ -189,7 +225,7 @@ export function PaymentDialog({
               </div>
             </div>
             <div className="rounded-lg border border-black/10 bg-canvas p-3 text-center text-xs">
-              {cardStatus === "idle" && <p className="text-muted-foreground">Card machine: Geidea Terminal — ready</p>}
+              {cardStatus === "idle" && <p className="text-muted-foreground">{cardMethod ? "Card machine: Geidea Terminal — ready" : "Choose the card method the customer is paying with."}</p>}
               {cardStatus === "waiting" && (
                 <p className="flex items-center justify-center gap-1.5 text-brand"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for card…</p>
               )}
@@ -198,10 +234,10 @@ export function PaymentDialog({
             </div>
             <Button
               className="h-11 w-full gap-2 bg-brand text-brand-foreground hover:bg-brand/90"
-              disabled={processing}
+              disabled={!cardMethod || processing}
               onClick={() => charge([{ method: cardMethod, amount: totalDue }])}
             >
-              {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Confirm Card Payment
+              {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {cardMethod ? "Confirm Card Payment" : "Select a card method"}
             </Button>
           </TabsContent>
 
@@ -217,7 +253,7 @@ export function PaymentDialog({
               </div>
             </div>
             <div className={`rounded-lg px-3 py-2 text-xs font-medium ${splitOk ? "bg-success/10 text-success" : "bg-warning/15 text-[oklch(0.4_0.13_70)]"}`}>
-              {splitOk ? `Sum ✓ ${money(splitSum)}` : `Need ${money(totalDue - splitSum)} more to match total`}
+              {splitOk ? <>Sum ✓ <CurrencyText value={money(splitSum)} /></> : <>Need <CurrencyText value={money(totalDue - splitSum)} /> more to match total</>}
             </div>
             {errorMsg && <p className="text-xs text-critical">{errorMsg}</p>}
             <Button
@@ -232,10 +268,10 @@ export function PaymentDialog({
           {accountEligible && customer && (
             <TabsContent value="account" className="mt-4 space-y-3">
               <div className="rounded-lg border border-black/10 bg-canvas p-3 text-xs">
-                <div className="flex justify-between text-muted-foreground"><span>Credit limit</span><span>{money(customer.creditLimit)}</span></div>
-                <div className="flex justify-between text-muted-foreground"><span>Outstanding</span><span>{money(customer.outstanding)}</span></div>
+                <div className="flex justify-between text-muted-foreground"><span>Credit limit</span><span><CurrencyText value={money(customer.creditLimit)} /></span></div>
+                <div className="flex justify-between text-muted-foreground"><span>Outstanding</span><span><CurrencyText value={money(customer.outstanding)} /></span></div>
                 <div className="mt-1 flex justify-between border-t border-black/5 pt-1 font-semibold text-foreground">
-                  <span>Available credit</span><span>{money(Math.max(0, availableCredit))}</span>
+                  <span>Available credit</span><span><CurrencyText value={money(Math.max(0, availableCredit))} /></span>
                 </div>
               </div>
               {totalDue > availableCredit && (
@@ -258,22 +294,22 @@ export function PaymentDialog({
             <TabsContent value="points" className="mt-4 space-y-3">
               <div className="rounded-lg border border-black/10 bg-canvas p-3 text-xs">
                 <div className="flex justify-between text-muted-foreground">
-                  <span>Points balance</span><span>{customer.loyaltyPoints.toLocaleString("en-US")} pts ({money(balanceSar)})</span>
+                  <span>Points balance</span><span>{customer.loyaltyPoints.toLocaleString("en-US")} pts (<CurrencyText value={money(balanceSar)} />)</span>
                 </div>
                 <div className="flex justify-between text-muted-foreground">
-                  <span>Redeemable this sale</span><span>Up to {money(maxRedeemSar)} ({maxRedeemPct}% of total)</span>
+                  <span>Redeemable this sale</span><span>Up to <CurrencyText value={money(maxRedeemSar)} /> ({maxRedeemPct}% of total)</span>
                 </div>
               </div>
 
               {customer.loyaltyPoints < minRedeemPoints ? (
                 <p className="text-xs text-muted-foreground">
-                  {customer.nameEn} needs at least {minRedeemPoints.toLocaleString("en-US")} points ({money(minRedeemSar)}) to redeem.
+                  {customer.nameEn} needs at least {minRedeemPoints.toLocaleString("en-US")} points (<CurrencyText value={money(minRedeemSar)} />) to redeem.
                 </p>
               ) : (
                 <>
                   <div>
                     <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Redeem (ر.س) — min {money(minRedeemSar)}
+                      Redeem (<SARIcon />) — min <CurrencyText value={money(minRedeemSar)} />
                     </label>
                     <div className="flex gap-1.5">
                       <Input type="number" value={redeemAmount} onChange={(e) => setRedeemAmount(e.target.value)} className="h-10" />
@@ -285,14 +321,14 @@ export function PaymentDialog({
                         Max
                       </button>
                     </div>
-                    {redeemBelowMin && <p className="mt-1 text-[11px] text-critical">Minimum redemption is {money(minRedeemSar)}.</p>}
-                    {redeemAboveMax && <p className="mt-1 text-[11px] text-critical">Maximum redemption is {money(maxRedeemSar)}.</p>}
+                    {redeemBelowMin && <p className="mt-1 text-[11px] text-critical">Minimum redemption is <CurrencyText value={money(minRedeemSar)} />.</p>}
+                    {redeemAboveMax && <p className="mt-1 text-[11px] text-critical">Maximum redemption is <CurrencyText value={money(maxRedeemSar)} />.</p>}
                   </div>
 
                   {redeemValid && redeemRemainder > 0 && (
                     <div>
                       <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Remaining {money(redeemRemainder)} via
+                        Remaining <CurrencyText value={money(redeemRemainder)} /> via
                       </label>
                       <div className="grid grid-cols-2 gap-1.5">
                         {(["Cash", "Mada"] as const).map((m) => (

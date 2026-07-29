@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useCashMovement, type CashierShiftDto } from "@/lib/api/pos";
+import { SARIcon } from "@/lib/buildpos/currency";
 
 export function CashMovementDialog({ shift, onClose }: { shift: (CashierShiftDto & { direction: "in" | "out" }) | null; onClose: () => void }) {
   const [amount, setAmount] = useState("");
@@ -32,7 +33,7 @@ export function CashMovementDialog({ shift, onClose }: { shift: (CashierShiftDto
       <DialogContent className="max-w-sm">
         <DialogHeader><DialogTitle>Cash {shift?.direction === "in" ? "In" : "Out"} — {shift?.terminalName}</DialogTitle></DialogHeader>
         <div>
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Amount (ر.س) <span className="text-critical">*</span></label>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Amount (<SARIcon />) <span className="text-critical">*</span></label>
           <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
         </div>
         <div>

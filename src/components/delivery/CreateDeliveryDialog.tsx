@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { useDeliveryStore, type DeliveryLine, type DeliveryOrder } from "@/lib/delivery/store";
 import { useHrStore, driverAvailable, employeeName } from "@/lib/hr/store";
 import { useBranches } from "@/lib/api/admin";
+import { SARIcon } from "@/lib/buildpos/currency";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 const STEPS = ["Source Order", "Items", "Address", "Schedule", "Driver & Vehicle", "Charges", "Review"];
 
@@ -357,9 +359,9 @@ export function CreateDeliveryDialog({ open, onOpenChange, sourceOrderId }: { op
                   <Field label="Heavy Material Fee" type="number" v={String(f.heavy)} onChange={(v) => setF({ ...f, heavy: Number(v) })} />
                   <Field label="Discount" type="number" v={String(f.discount)} onChange={(v) => setF({ ...f, discount: Number(v) })} />
                   <div className="md:col-span-2 rounded-xl border border-black/5 bg-canvas p-3 text-sm">
-                    <div className="flex justify-between"><span>Subtotal</span><span className="font-mono">{chargesSubtotal.toFixed(2)} ر.س</span></div>
-                    <div className="flex justify-between"><span>VAT 15%</span><span className="font-mono">{vat.toFixed(2)} ر.س</span></div>
-                    <div className="mt-1 flex justify-between border-t border-black/5 pt-1 text-base font-semibold"><span>Total Delivery Charge</span><span className="font-mono">{totalCharge.toFixed(2)} ر.س</span></div>
+                    <div className="flex justify-between"><span>Subtotal</span><span className="font-mono">{chargesSubtotal.toFixed(2)} <SARIcon /></span></div>
+                    <div className="flex justify-between"><span>VAT 15%</span><span className="font-mono">{vat.toFixed(2)} <SARIcon /></span></div>
+                    <div className="mt-1 flex justify-between border-t border-black/5 pt-1 text-base font-semibold"><span>Total Delivery Charge</span><span className="font-mono">{totalCharge.toFixed(2)} <SARIcon /></span></div>
                   </div>
                 </div>
               )}
@@ -450,7 +452,7 @@ function Summary({ k, v }: { k: string; v: string }) {
   return (
     <div>
       <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{k}</p>
-      <p className="font-medium text-foreground">{v}</p>
+      <p className="font-medium text-foreground"><CurrencyText value={v} /></p>
     </div>
   );
 }

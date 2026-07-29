@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPut } from "./client";
-import type { LiveTable } from "./admin";
+import { byStatus, type LiveTable } from "./admin";
 
 export type BundleLineDto = {
   productId: number;
@@ -147,6 +147,7 @@ export function mapBundles(rows: BundleDto[]): LiveTable {
         value: String(rows.filter((b) => b.effectiveStatus === "Active").length),
         sub: `${rows.length} total`,
         tone: "success",
+        filter: byStatus(6, "Active"),
       },
       {
         label: "Avg Components",

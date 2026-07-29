@@ -19,6 +19,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useBranches } from "@/lib/api/admin";
 import { useProducts } from "@/lib/api/catalog";
+import { CurrencyText, SARIcon } from "@/lib/buildpos/currency";
 import {
   useCreatePricingRule,
   useUpdatePricingRule,
@@ -733,7 +734,9 @@ export function CreatePricingRuleDialog({
                   </div>
                 </div>
                 <div>
-                  <label className={labelClass}>Price per unit within a full tier (ر.س)</label>
+                  <label className={labelClass}>
+                    Price per unit within a full tier (<SARIcon />)
+                  </label>
                   <input
                     type="number"
                     min={0}
@@ -835,7 +838,9 @@ export function CreatePricingRuleDialog({
               <div className="rounded-xl border border-black/5 bg-canvas/50 p-4 space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className={labelClass}>Cart total threshold (ر.س)</label>
+                    <label className={labelClass}>
+                      Cart total threshold (<SARIcon />)
+                    </label>
                     <input
                       type="number"
                       min={0}
@@ -903,7 +908,13 @@ export function CreatePricingRuleDialog({
                   </div>
                   <div>
                     <label className={labelClass}>
-                      {couponKind === "Percentage" ? "Percent off" : "Amount off (ر.س)"}
+                      {couponKind === "Percentage" ? (
+                        <>Percent off</>
+                      ) : (
+                        <>
+                          Amount off (<SARIcon />)
+                        </>
+                      )}
                     </label>
                     <input
                       type="number"
@@ -1058,7 +1069,7 @@ export function CreatePricingRuleDialog({
                   <label className={labelClass}>What it gives</label>
                   <input
                     className={inputClass}
-                    placeholder="e.g. 150 ر.س off"
+                    placeholder="e.g. 150 off"
                     value={manualAction}
                     onChange={(e) => setManualAction(e.target.value)}
                   />
@@ -1075,7 +1086,9 @@ export function CreatePricingRuleDialog({
             {preview && (
               <div className="flex items-start gap-2 rounded-xl border border-success/20 bg-success/5 p-3.5">
                 <Check className="mt-0.5 h-4 w-4 flex-none text-success" />
-                <p className="text-sm text-foreground/90">{preview}</p>
+                <p className="text-sm text-foreground/90">
+                  <CurrencyText value={preview} />
+                </p>
               </div>
             )}
 

@@ -19,6 +19,7 @@ import {
 import { RESUME_HOLD_KEY } from "@/components/buildpos/PosCheckout";
 import { useAuth } from "@/lib/api/auth";
 import { useBranches } from "@/lib/api/admin";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 const APPROVAL_TYPES = ["Discount", "PriceOverride", "Refund"];
 const APPROVAL_TYPE_LABELS: Record<string, string> = { Discount: "Discount", PriceOverride: "Price Override", Refund: "Refund" };
@@ -150,7 +151,7 @@ export function CashierWorkspacePage() {
         resultLabel={`${filteredParked.length} parked · ${filteredApprovals.length} approvals`}
       />
 
-      <KpiGrid items={kpis} />
+      <KpiGrid items={kpis} scope="cashier-workspace" />
 
       <SectionCard
         title="Parked Sales"
@@ -181,7 +182,7 @@ export function CashierWorkspacePage() {
                   <TableCell className="font-mono text-xs">{p.ticketNo}</TableCell>
                   <TableCell>{p.customerName ?? "Walk-in"}</TableCell>
                   <TableCell className="text-right">{p.lines.reduce((s, l) => s + l.qty, 0)}</TableCell>
-                  <TableCell className="text-right font-medium">{fmtSar(p.total)}</TableCell>
+                  <TableCell className="text-right font-medium"><CurrencyText value={fmtSar(p.total)} /></TableCell>
                   <TableCell className="text-muted-foreground">{fmtTime(p.createdAt)}</TableCell>
                   <TableCell className="text-muted-foreground">{p.notes ?? "—"}</TableCell>
                   <TableCell>
@@ -224,7 +225,7 @@ export function CashierWorkspacePage() {
                 <TableRow key={a.id}>
                   <TableCell>{APPROVAL_TYPE_LABELS[a.type] ?? a.type}</TableCell>
                   <TableCell>{a.requestedByName}</TableCell>
-                  <TableCell className="text-right">{fmtSar(a.amount)}</TableCell>
+                  <TableCell className="text-right"><CurrencyText value={fmtSar(a.amount)} /></TableCell>
                   <TableCell className="max-w-xs truncate text-muted-foreground">{a.reason}</TableCell>
                   <TableCell><Pill tone={statusTone(a.status)}>{a.status}</Pill></TableCell>
                   <TableCell>

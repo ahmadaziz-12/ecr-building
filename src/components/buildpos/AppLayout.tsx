@@ -47,6 +47,10 @@ import {
   FileSignature,
   Activity,
   ChevronRight,
+  ChevronLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Menu,
   Globe,
   QrCode,
   Warehouse,
@@ -56,7 +60,7 @@ import {
   ClipboardCheck,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
-import logoAsset from "@/assets/mimony-logo.png.asset.json";
+import { BrandLogo } from "@/components/buildpos/BrandLogo";
 import { statusBar } from "@/lib/buildpos/data";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useAuth } from "@/lib/api/auth";
@@ -66,9 +70,11 @@ import { DeliverySync } from "@/lib/api/delivery-sync";
 // import { HrSync } from "@/lib/api/hr-sync";
 import { useNotifications } from "@/lib/api/notifications";
 import { useProducts } from "@/lib/api/catalog";
-import { useCustomers, useCashierShifts } from "@/lib/api/pos";
+import { useCustomers, useCashierShifts, useOrders, useQuotations } from "@/lib/api/pos";
 import { useTerminals } from "@/lib/api/admin";
 import { useZatcaIdentity } from "@/lib/api/zatca";
+import { SARIcon } from "@/lib/buildpos/currency";
+import { globalSearch, hasGlobalSearchResults } from "@/lib/buildpos/global-search";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -215,8 +221,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [pinDialogOpen, setPinDialogOpen] = useState(false);
   const canSearchProducts = hasAccess("/stock/inventory");
   const canSearchCustomers = hasAccess("/operate/customers");
-  const { data: searchProducts } = useProducts(canSearchProducts && search.trim().length > 0);
-  const { data: searchCustomers } = useCustomers(canSearchCustomers && search.trim().length > 0);
+  const canSearchOrders = hasAccess("/operate/orders");
+  const searching = search.trim().length > 0;
+  const { data: searchProducts } = useProducts(canSearchProducts && searching);
+  const { data: searchCustomers } = useCustomers(canSearchCustomers && searching);
+  // Orders and quotations are searchable from here too — an order number is the single most common
+  // thing anyone types into a global search box, and leaving it out is what made a valid
+  // "ORD-2026-0024" come back as "No matches".
+  const { data: searchOrders } = useOrders(canSearchOrders && searching);
+  const { data: searchQuotations } = useQuotations(canSearchOrders && searching);
   const { data: notifications } = useNotifications();
   const { data: terminals } = useTerminals(hasAccess("/network/terminals"));
   const { data: cashierShifts } = useCashierShifts(hasAccess("/operate/cashier-shift"));
@@ -239,39 +252,49 @@ export function AppLayout({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const searchResults = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return { products: [], customers: [] };
-    const products = (searchProducts ?? [])
-      .filter(
-        (p) =>
-          p.sku.toLowerCase().includes(q) ||
-          p.nameEn.toLowerCase().includes(q) ||
-          (p.barcode?.toLowerCase().includes(q) ?? false),
-      )
-      .slice(0, 5);
-    const customers = (searchCustomers ?? [])
-      .filter(
-        (c) => c.nameEn.toLowerCase().includes(q) || (c.phone?.toLowerCase().includes(q) ?? false),
-      )
-      .slice(0, 5);
-    return { products, customers };
-  }, [search, searchProducts, searchCustomers]);
-  const hasSearchResults = searchResults.products.length > 0 || searchResults.customers.length > 0;
+  const searchResults = useMemo(
+    () =>
+      globalSearch(search, {
+        products: searchProducts,
+        customers: searchCustomers,
+        orders: searchOrders,
+        quotations: searchQuotations,
+      }),
+    [search, searchProducts, searchCustomers, searchOrders, searchQuotations],
+  );
+  const hasSearchResults = hasGlobalSearchResults(searchResults);
 
   const openShift = cashierShifts?.find((s) => s.cashierName === user?.name && s.status === "Open");
   const criticalCount = notifications?.filter((n) => n.severity === "Critical").length ?? 0;
   const currentTerminal = terminals?.find((t) => t.branchId === user?.branchId) ?? null;
 
-  function goToSearchResult(to: string) {
-    navigate({ to });
+  // Navigating with the term in the URL matters: ModulePage seeds its own search/column filters from
+  // `?sku=` / `?category=`, so the destination opens already narrowed. Landing on an unfiltered list
+  // of thousands of rows is what "the search returns no results" actually looked like.
+  function goToSearchResult(to: string, searchParams?: Record<string, string>) {
+    navigate({ to, search: searchParams });
     setSearch("");
     setSearchFocused(false);
   }
 
+  // Leaving the page clears the box. A term left behind from a previous screen keeps reopening its
+  // stale dropdown on the next page, which reads as the search being stuck on an old query.
+  useEffect(() => {
+    setSearch("");
+    setSearchFocused(false);
+  }, [pathname]);
+
   function handleSearchEnter(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== "Enter") return;
-    if (searchResults.products.length > 0) goToSearchResult("/stock/inventory");
+    const term = search.trim();
+    if (!term) return;
+    // Orders first: when a term matches an order/quote number it matches nothing else, and jumping
+    // to the catalog for it would land on an empty product list.
+    if (searchResults.orders.length > 0) goToSearchResult("/operate/orders", { orderNo: term });
+    else if (searchResults.quotations.length > 0)
+      goToSearchResult("/operate/orders", { quoteNo: term });
+    else if (searchResults.products.length > 0 || searchResults.categories.length > 0)
+      goToSearchResult("/stock/inventory", { sku: term });
     else if (searchResults.customers.length > 0) goToSearchResult("/operate/customers");
   }
 
@@ -297,34 +320,101 @@ export function AppLayout({ children }: { children: ReactNode }) {
     setOpen(activeGroupName ? { [activeGroupName]: true } : {});
   }, [activeGroupName]);
 
+  // Sidebar visibility. Two separate concerns: on desktop the rail collapses to reclaim width (and
+  // the choice persists across reloads and pages); on mobile/tablet there is no rail at all, so the
+  // same button opens it as an overlay drawer instead. The toggle lives in the app header, which
+  // every page renders — it used to exist nowhere, so the sidebar could neither be closed nor
+  // reopened, and there was no way to reach navigation below the `lg` breakpoint at all.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  useEffect(() => {
+    try {
+      setSidebarCollapsed(localStorage.getItem("buildpos.sidebar-collapsed") === "1");
+    } catch {
+      // Private-mode / blocked storage: the sidebar just starts expanded every time.
+    }
+  }, []);
+  function toggleSidebar() {
+    // Below `lg` the rail isn't rendered, so the same control drives the overlay drawer.
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches) {
+      setMobileNavOpen((v) => !v);
+      return;
+    }
+    setSidebarCollapsed((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem("buildpos.sidebar-collapsed", next ? "1" : "0");
+      } catch {
+        // Persisting the preference is best-effort; the toggle still works for this session.
+      }
+      return next;
+    });
+  }
+  // Navigating away closes the mobile drawer — otherwise it stays over the page you just opened.
+  useEffect(() => setMobileNavOpen(false), [pathname]);
+
   async function handleLogout() {
     await logout();
     navigate({ to: "/" });
   }
 
-  return (
-    <div className="flex min-h-screen bg-canvas font-sans text-foreground">
-      {hasAccess("/delivery/dashboard") && <DeliverySync />}
-      {/* HRM module temporarily disabled — see the commented-out "HRMS" nav group below. */}
-      {/* {hasAccess("/hrms/dashboard") && <HrSync />} */}
-      {/* Sidebar */}
-      {/* Narrower than the usual 16rem: the reports console renders 20-plus-column tables, and the
-          reclaimed 2rem is what keeps them inside their own scroller instead of pushing the page
-          itself sideways. */}
-      <aside className="sticky top-0 hidden h-screen w-56 flex-none flex-col border-r border-black/5 bg-sidebar-bg text-sidebar-fg lg:flex relative">
-        <div className="pointer-events-none absolute inset-0 blueprint-grid-dark opacity-60" />
-        <div className="relative flex h-16 items-center border-b border-white/10 px-4">
-          <div className="flex h-10 w-full items-center justify-center rounded-xl bg-white/95 px-3 shadow-sm">
-            <img src={logoAsset.url} alt="Mi Money" className="h-6 w-auto" />
-          </div>
+  // Rendered by both the desktop rail and the mobile drawer below, so navigation is identical in
+  // either presentation.
+  const sidebarInner = (
+    <>
+      <div className="pointer-events-none absolute inset-0 blueprint-grid-dark opacity-60" />
+      <div className="relative flex h-16 items-center gap-2 border-b border-white/10 px-4">
+        <div className="flex h-10 min-w-0 flex-1 items-center justify-center rounded-xl bg-white/95 px-3 shadow-sm">
+          <BrandLogo />
         </div>
-        <nav className="relative flex-1 space-y-3 overflow-y-auto p-3">
-          {visibleNav.map((g) => {
-            const isOpen = open[g.name] ?? false;
-            if (!g.name) {
-              // ungrouped standalone (Dashboard)
-              return (
-                <ul key="__standalone" className="space-y-0.5">
+        <button
+          type="button"
+          onClick={() => setMobileNavOpen(false)}
+          className="grid h-8 w-8 flex-none place-items-center rounded-md text-white/60 hover:bg-white/10 hover:text-white lg:hidden"
+          aria-label="Close navigation"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+      </div>
+      <nav className="relative flex-1 space-y-3 overflow-y-auto p-3">
+        {visibleNav.map((g) => {
+          const isOpen = open[g.name] ?? false;
+          if (!g.name) {
+            // ungrouped standalone (Dashboard)
+            return (
+              <ul key="__standalone" className="space-y-0.5">
+                {g.items.map((m) => {
+                  const Icon = m.icon;
+                  const isActive = pathname === m.to;
+                  return (
+                    <li key={m.to}>
+                      <Link
+                        to={m.to}
+                        className={`flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13px] transition ${
+                          isActive ? "bg-white text-brand shadow-sm" : "text-white hover:bg-white/5"
+                        }`}
+                      >
+                        <Icon className="h-4 w-4 flex-none" />
+                        <span className="font-bold uppercase tracking-wide">{m.label}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            );
+          }
+          return (
+            <div key={g.name}>
+              <button
+                type="button"
+                onClick={() => setOpen(isOpen ? {} : { [g.name]: true })}
+                className="flex w-full items-center justify-between px-3 py-1.5 text-[13px] font-bold uppercase tracking-wide text-white hover:text-white"
+              >
+                {g.name}
+                <ChevronDown className={`h-3.5 w-3.5 transition ${isOpen ? "" : "-rotate-90"}`} />
+              </button>
+              {isOpen && (
+                <ul className="mt-0.5 space-y-0.5 pl-1.5">
                   {g.items.map((m) => {
                     const Icon = m.icon;
                     const isActive = pathname === m.to;
@@ -332,86 +422,100 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       <li key={m.to}>
                         <Link
                           to={m.to}
-                          className={`flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13px] transition ${
+                          className={`flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-[11.5px] transition ${
                             isActive
-                              ? "bg-white text-brand shadow-sm"
-                              : "text-white hover:bg-white/5"
+                              ? "bg-white font-semibold text-brand shadow-sm"
+                              : "text-white/70 hover:bg-white/5 hover:text-white"
                           }`}
                         >
-                          <Icon className="h-4 w-4 flex-none" />
-                          <span className="font-bold uppercase tracking-wide">{m.label}</span>
+                          <Icon className="h-3.5 w-3.5 flex-none" />
+                          <span className="font-medium">{m.label}</span>
                         </Link>
                       </li>
                     );
                   })}
                 </ul>
-              );
-            }
-            return (
-              <div key={g.name}>
-                <button
-                  type="button"
-                  onClick={() => setOpen(isOpen ? {} : { [g.name]: true })}
-                  className="flex w-full items-center justify-between px-3 py-1.5 text-[13px] font-bold uppercase tracking-wide text-white hover:text-white"
-                >
-                  {g.name}
-                  <ChevronDown className={`h-3.5 w-3.5 transition ${isOpen ? "" : "-rotate-90"}`} />
-                </button>
-                {isOpen && (
-                  <ul className="mt-0.5 space-y-0.5 pl-1.5">
-                    {g.items.map((m) => {
-                      const Icon = m.icon;
-                      const isActive = pathname === m.to;
-                      return (
-                        <li key={m.to}>
-                          <Link
-                            to={m.to}
-                            className={`flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-[11.5px] transition ${
-                              isActive
-                                ? "bg-white font-semibold text-brand shadow-sm"
-                                : "text-white/70 hover:bg-white/5 hover:text-white"
-                            }`}
-                          >
-                            <Icon className="h-3.5 w-3.5 flex-none" />
-                            <span className="font-medium">{m.label}</span>
-                          </Link>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            );
-          })}
-        </nav>
-        <div className="relative border-t border-white/10 p-3">
-          <div className="rounded-lg bg-white/5 p-3 text-xs">
-            <div className="flex items-center gap-2">
-              <div className="grid h-8 w-8 place-items-center rounded-full bg-teal text-teal-foreground font-semibold">
-                {(user?.name ?? "?").charAt(0)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-medium text-white">{user?.name ?? statusBar.user}</p>
-                <p className="truncate text-white/50">{user?.role ?? statusBar.role}</p>
-              </div>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="grid h-7 w-7 place-items-center rounded-md text-white/50 hover:bg-white/5 hover:text-white"
-                title="Sign out"
-              >
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
+              )}
             </div>
+          );
+        })}
+      </nav>
+      <div className="relative border-t border-white/10 p-3">
+        <div className="rounded-lg bg-white/5 p-3 text-xs">
+          <div className="flex items-center gap-2">
+            <div className="grid h-8 w-8 place-items-center rounded-full bg-teal text-teal-foreground font-semibold">
+              {(user?.name ?? "?").charAt(0)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium text-white">{user?.name ?? statusBar.user}</p>
+              <p className="truncate text-white/50">{user?.role ?? statusBar.role}</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="grid h-7 w-7 place-items-center rounded-md text-white/50 hover:bg-white/5 hover:text-white"
+              title="Sign out"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
-      </aside>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="flex min-h-screen bg-canvas font-sans text-foreground">
+      {hasAccess("/delivery/dashboard") && <DeliverySync />}
+      {/* HRM module temporarily disabled — see the commented-out "HRMS" nav group below. */}
+      {/* {hasAccess("/hrms/dashboard") && <HrSync />} */}
+
+      {/* Sidebar rail (lg and up). */}
+      {/* Narrower than the usual 16rem: the reports console renders 20-plus-column tables, and the
+          reclaimed 2rem is what keeps them inside their own scroller instead of pushing the page
+          itself sideways. */}
+      {!sidebarCollapsed && (
+        <aside className="sticky top-0 hidden h-screen w-56 flex-none flex-col border-r border-black/5 bg-sidebar-bg text-sidebar-fg lg:flex relative">
+          {sidebarInner}
+        </aside>
+      )}
+
+      {/* Sidebar drawer (below lg). The rail is never rendered at these widths, so without this
+          there is no way to navigate at all on a tablet or phone. */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            onClick={() => setMobileNavOpen(false)}
+            className="absolute inset-0 bg-black/50"
+          />
+          <aside className="relative flex h-full w-64 flex-col border-r border-black/5 bg-sidebar-bg text-sidebar-fg shadow-2xl">
+            {sidebarInner}
+          </aside>
+        </div>
+      )}
 
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-black/5 bg-white/90 px-4 backdrop-blur md:px-6">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            aria-expanded={!sidebarCollapsed}
+            title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            className="grid h-9 w-9 flex-none place-items-center rounded-lg border border-black/10 bg-white text-foreground hover:bg-canvas"
+          >
+            <Menu className="h-4 w-4 lg:hidden" />
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="hidden h-4 w-4 lg:block" />
+            ) : (
+              <PanelLeftClose className="hidden h-4 w-4 lg:block" />
+            )}
+          </button>
           <div className="lg:hidden">
-            <img src={logoAsset.url} alt="Mi Money" className="h-6 w-auto" />
+            <BrandLogo />
           </div>
           <div className="hidden items-center gap-2 lg:flex">
             <active.icon className="h-4 w-4 text-brand" />
@@ -429,15 +533,95 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 onFocus={() => setSearchFocused(true)}
                 onBlur={() => window.setTimeout(() => setSearchFocused(false), 150)}
                 onKeyDown={handleSearchEnter}
-                placeholder="Search SKU, customer…"
+                placeholder="Search order #, product, category, customer…"
                 className="h-9 w-64 rounded-lg border border-black/10 bg-canvas pl-8 pr-3 text-sm outline-none focus:border-brand"
               />
               {searchFocused && search.trim() !== "" && (
-                <div className="absolute right-0 top-full z-20 mt-1 w-80 rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
+                <div
+                  // Keep focus on the input while a result is being clicked: the blur handler above
+                  // tears this panel down on a timer, and losing that race swallowed the click —
+                  // the result row highlighted, then nothing happened.
+                  onMouseDown={(e) => e.preventDefault()}
+                  className="absolute right-0 top-full z-20 mt-1 max-h-[70vh] w-80 overflow-y-auto rounded-lg border border-black/10 bg-white p-1.5 shadow-lg"
+                >
                   {!hasSearchResults && (
                     <p className="px-2.5 py-2 text-xs text-muted-foreground">
-                      No matches for "{search}"
+                      {!canSearchProducts && !canSearchCustomers && !canSearchOrders
+                        ? "Search needs access to Product Catalog, Orders, or Customers."
+                        : `No matches for "${search.trim()}"`}
                     </p>
+                  )}
+                  {/* Orders lead: an order number is the most common thing typed here, and it
+                      matches nothing else, so burying it under the catalog groups is what made a
+                      real order look like it didn't exist. */}
+                  {searchResults.orders.length > 0 && (
+                    <div className="mb-1">
+                      <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Orders
+                      </p>
+                      {searchResults.orders.map((o) => (
+                        <button
+                          key={o.id}
+                          onClick={() => goToSearchResult("/operate/orders", { orderNo: o.orderNo })}
+                          className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
+                        >
+                          <span className="truncate font-mono text-xs">{o.orderNo}</span>
+                          <span className="ml-2 flex-none truncate text-[10px] text-muted-foreground">
+                            {o.customerName} · {o.status}
+                          </span>
+                        </button>
+                      ))}
+                      {searchResults.orderTotal > searchResults.orders.length && (
+                        <button
+                          onClick={() =>
+                            goToSearchResult("/operate/orders", { orderNo: search.trim() })
+                          }
+                          className="w-full rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-brand hover:bg-canvas"
+                        >
+                          See all {searchResults.orderTotal} orders matching "{search.trim()}"
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {searchResults.quotations.length > 0 && (
+                    <div className="mb-1">
+                      <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Quotations
+                      </p>
+                      {searchResults.quotations.map((q) => (
+                        <button
+                          key={q.id}
+                          onClick={() => goToSearchResult("/operate/orders", { quoteNo: q.quoteNo })}
+                          className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
+                        >
+                          <span className="truncate font-mono text-xs">{q.quoteNo}</span>
+                          <span className="ml-2 flex-none truncate text-[10px] text-muted-foreground">
+                            {q.customerName} · {q.status}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {/* Categories first: a broad term like "wire" has one useful answer — which kind —
+                      and picking one narrows the catalog instead of scrolling every match. */}
+                  {searchResults.categories.length > 0 && (
+                    <div className="mb-1">
+                      <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Categories
+                      </p>
+                      {searchResults.categories.map((c) => (
+                        <button
+                          key={c.name}
+                          onClick={() => goToSearchResult("/stock/inventory", { category: c.name })}
+                          className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
+                        >
+                          <span className="truncate">{c.name}</span>
+                          <span className="ml-2 flex-none text-[10px] text-muted-foreground">
+                            {c.count} SKU{c.count === 1 ? "" : "s"}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   )}
                   {searchResults.products.length > 0 && (
                     <div className="mb-1">
@@ -447,7 +631,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       {searchResults.products.map((p) => (
                         <button
                           key={p.id}
-                          onClick={() => goToSearchResult("/stock/inventory")}
+                          onClick={() => goToSearchResult("/stock/inventory", { sku: p.sku })}
                           className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
                         >
                           <span className="truncate">{p.nameEn}</span>
@@ -456,6 +640,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
                           </span>
                         </button>
                       ))}
+                      {searchResults.productTotal > searchResults.products.length && (
+                        <button
+                          onClick={() =>
+                            goToSearchResult("/stock/inventory", { sku: search.trim() })
+                          }
+                          className="w-full rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-brand hover:bg-canvas"
+                        >
+                          See all {searchResults.productTotal} products matching "{search.trim()}"
+                        </button>
+                      )}
                     </div>
                   )}
                   {searchResults.customers.length > 0 && (
@@ -611,7 +805,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             })}
           </span>
           <span className="ml-auto flex items-center gap-1 text-foreground/60">
-            <Globe className="h-3 w-3" /> {statusBar.currency} · auto-refresh 60s
+            <Globe className="h-3 w-3" /> <SARIcon /> · auto-refresh 60s
           </span>
         </div>
 

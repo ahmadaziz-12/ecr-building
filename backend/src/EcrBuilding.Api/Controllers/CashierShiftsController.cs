@@ -45,6 +45,27 @@ public class CashierShiftsController(AppDbContext db, IAuditService audit) : Con
         return Ok(dtos);
     }
 
+    // Every till this caller may open a shift on. Branch-scoped users see their own branch's tills;
+    // an unscoped (HQ) user sees all of them, ordered so the busy ones sort last.
+    [HttpGet("terminals")]
+    public async Task<ActionResult<List<ShiftTerminalDto>>> Terminals(CancellationToken ct)
+    {
+        var query = db.Terminals.Include(t => t.Branch).AsQueryable();
+        if (this.GetScopedBranchId() is int scopedBranchId) query = query.Where(t => t.BranchId == scopedBranchId);
+        var terminals = await query.OrderBy(t => t.Branch!.NameEn).ThenBy(t => t.Code).ToListAsync(ct);
+
+        // GroupBy, not ToDictionary: the Open endpoint below rejects a second concurrent shift, but a
+        // duplicate left by older data would turn this picker into a 500 instead of a list.
+        var openShifts = (await db.CashierShifts.Include(s => s.Cashier)
+                .Where(s => s.Status == CashierShiftStatus.Open).ToListAsync(ct))
+            .GroupBy(s => s.TerminalId)
+            .ToDictionary(g => g.Key, g => g.First().Cashier?.Name ?? "another cashier");
+
+        return Ok(terminals.Select(t => new ShiftTerminalDto(
+            t.Id, t.Code, t.Name, t.BranchId, t.Branch?.NameEn ?? "—", t.Status.ToString(),
+            openShifts.TryGetValue(t.Id, out var cashier) ? cashier : null)).ToList());
+    }
+
     [HttpPost("open")]
     [RequireModule("/operate/cashier-shift", PermissionAction.Create)]
     public async Task<ActionResult<CashierShiftDto>> Open(OpenShiftRequest request, CancellationToken ct)

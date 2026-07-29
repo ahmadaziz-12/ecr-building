@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useCreateReturn } from "@/lib/api/finance";
 import { useProducts } from "@/lib/api/catalog";
 import { useCustomers } from "@/lib/api/pos";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ر.س";
 
@@ -147,7 +148,7 @@ export function NoReceiptReturnDialog({ open, onClose }: { open: boolean; onClos
                   className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-brand/5"
                 >
                   <span className="truncate font-medium text-foreground">{p.sku} — {p.nameEn}</span>
-                  <span className="shrink-0 font-mono text-muted-foreground">{money(p.sellingPrice)}</span>
+                  <span className="shrink-0 font-mono text-muted-foreground"><CurrencyText value={money(p.sellingPrice)} /></span>
                 </button>
               ))}
             </div>
@@ -160,7 +161,7 @@ export function NoReceiptReturnDialog({ open, onClose }: { open: boolean; onClos
               <div key={i.productId} className="flex items-center justify-between gap-2 rounded-md bg-canvas px-2 py-1.5 text-xs">
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{i.name}</p>
-                  <p className="font-mono text-[10px] text-muted-foreground">{i.sku} · {money(i.sellingPrice)} each</p>
+                  <p className="font-mono text-[10px] text-muted-foreground">{i.sku} · <CurrencyText value={money(i.sellingPrice)} /> each</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <button type="button" onClick={() => setQty(i.productId, i.qty - 1)} className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-black/5">
@@ -192,10 +193,10 @@ export function NoReceiptReturnDialog({ open, onClose }: { open: boolean; onClos
 
         {items.length > 0 && (
           <div className="space-y-1 rounded-lg bg-canvas p-3 text-xs">
-            <div className="flex justify-between"><span className="text-muted-foreground">Refund (excl. VAT)</span><span className="font-mono">{money(grossRefund)}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">VAT reversal</span><span className="font-mono">{money(vatReversal)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Refund (excl. VAT)</span><span className="font-mono"><CurrencyText value={money(grossRefund)} /></span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">VAT reversal</span><span className="font-mono"><CurrencyText value={money(vatReversal)} /></span></div>
             <div className="flex justify-between border-t border-black/10 pt-1 text-sm font-semibold">
-              <span>Store credit</span><span className="font-mono">{money(netCashback)}</span>
+              <span>Store credit</span><span className="font-mono"><CurrencyText value={money(netCashback)} /></span>
             </div>
           </div>
         )}

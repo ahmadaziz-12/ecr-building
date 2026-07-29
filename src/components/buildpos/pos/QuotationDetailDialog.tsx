@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/buildpos/sections";
 import { statusTone } from "./shared";
 import type { QuotationDto } from "@/lib/api/pos";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 function fmtSar(n: number): string {
   return `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} ر.س`;
@@ -80,9 +81,9 @@ export function QuotationDetailDialog({
                       <td className="px-3 py-2 font-mono text-xs">{l.sku}</td>
                       <td className="px-3 py-2">{l.productName}</td>
                       <td className="px-3 py-2 text-right">{l.qty}</td>
-                      <td className="px-3 py-2 text-right">{fmtSar(l.unitPrice)}</td>
+                      <td className="px-3 py-2 text-right"><CurrencyText value={fmtSar(l.unitPrice)} /></td>
                       <td className="px-3 py-2 text-right text-muted-foreground">{l.discountPct > 0 ? `${l.discountPct}%` : "—"}</td>
-                      <td className="px-3 py-2 text-right font-medium">{fmtSar(l.lineTotal)}</td>
+                      <td className="px-3 py-2 text-right font-medium"><CurrencyText value={fmtSar(l.lineTotal)} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -91,13 +92,13 @@ export function QuotationDetailDialog({
 
             <div className="grid grid-cols-2 gap-y-1 text-sm">
               <span className="text-muted-foreground">Subtotal</span>
-              <span className="text-right">{fmtSar(quotation.subTotal)}</span>
+              <span className="text-right"><CurrencyText value={fmtSar(quotation.subTotal)} /></span>
               <span className="text-muted-foreground">Discount</span>
-              <span className="text-right">-{fmtSar(quotation.discountTotal)}</span>
+              <span className="text-right">-<CurrencyText value={fmtSar(quotation.discountTotal)} /></span>
               <span className="text-muted-foreground">VAT</span>
-              <span className="text-right">{fmtSar(quotation.vatTotal)}</span>
+              <span className="text-right"><CurrencyText value={fmtSar(quotation.vatTotal)} /></span>
               <span className="font-semibold text-foreground">Grand Total</span>
-              <span className="text-right font-semibold text-foreground">{fmtSar(quotation.grandTotal)}</span>
+              <span className="text-right font-semibold text-foreground"><CurrencyText value={fmtSar(quotation.grandTotal)} /></span>
             </div>
 
             {quotation.notes && (

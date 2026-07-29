@@ -30,6 +30,8 @@ import { LoyaltyProgramSettingsDialog } from "./LoyaltyProgramSettingsDialog";
 import { useCustomers } from "@/lib/api/pos";
 import { useLoyaltyTransactions, useLoyaltyProgramConfig, type LoyaltyConfigDto } from "@/lib/api/loyalty";
 import { Settings2 } from "lucide-react";
+import { CurrencyText } from "@/lib/buildpos/currency";
+import { SARIcon } from "@/lib/buildpos/currency";
 
 const TABS = ["All", "Earn", "Redeem", "Adjust", "Reversal", "Welcome"] as const;
 type Tab = (typeof TABS)[number];
@@ -271,7 +273,7 @@ export function LoyaltyPage() {
         resultLabel={`${filtered.length} of ${all.length}${isFetching ? " · refreshing…" : ""}`}
       />
 
-      <KpiGrid items={kpis} />
+      <KpiGrid items={kpis} scope="loyalty" />
 
       <SectionCard
         title="Program Settings"
@@ -290,11 +292,11 @@ export function LoyaltyPage() {
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div>
             <p className="text-xs text-muted-foreground">Earn rate</p>
-            <p className="font-display text-base font-bold text-foreground">{config.pointsPerSarEarned} pt / ر.س 1</p>
+            <p className="font-display text-base font-bold text-foreground">{config.pointsPerSarEarned} pt / <SARIcon /> 1</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Redemption value</p>
-            <p className="font-display text-base font-bold text-foreground">{fmtSar(sarPerPoint)} / pt</p>
+            <p className="font-display text-base font-bold text-foreground"><CurrencyText value={fmtSar(sarPerPoint)} /> / pt</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Min to redeem</p>
@@ -307,15 +309,15 @@ export function LoyaltyPage() {
         </div>
         <div className="mt-4 grid grid-cols-3 gap-3 border-t border-black/5 pt-4 text-xs">
           <div>
-            <p className="font-semibold text-info">Silver — {fmtSar(config.silverThreshold)}+</p>
+            <p className="font-semibold text-info">Silver — <CurrencyText value={fmtSar(config.silverThreshold)} />+</p>
             <p className="text-muted-foreground">{config.silverMultiplier}x points · {config.silverDiscountPct}% off</p>
           </div>
           <div>
-            <p className="font-semibold text-warning">Gold — {fmtSar(config.goldThreshold)}+</p>
+            <p className="font-semibold text-warning">Gold — <CurrencyText value={fmtSar(config.goldThreshold)} />+</p>
             <p className="text-muted-foreground">{config.goldMultiplier}x points · {config.goldDiscountPct}% off</p>
           </div>
           <div>
-            <p className="font-semibold text-success">Platinum — {fmtSar(config.platinumThreshold)}+</p>
+            <p className="font-semibold text-success">Platinum — <CurrencyText value={fmtSar(config.platinumThreshold)} />+</p>
             <p className="text-muted-foreground">{config.platinumMultiplier}x points · {config.platinumDiscountPct}% off</p>
           </div>
         </div>

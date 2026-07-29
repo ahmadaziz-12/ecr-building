@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { POS_TIER_PRESETS, posTierFromCeilings, type PosCeilingsDto } from "@/lib/api/admin";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 type BooleanField = Exclude<keyof PosCeilingsDto, "discountCeilingPercent" | "surplusReturnCeilingAmount">;
 
@@ -145,7 +146,7 @@ function NumericCeiling({
           disabled={disabled || uncapped}
           onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
         />
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{suffix}</span>
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground"><CurrencyText value={suffix} /></span>
       </div>
       <p className="text-[11px] text-muted-foreground">{hint}</p>
     </div>

@@ -488,7 +488,11 @@ function ageFrom(iso: string): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-export type LiveKpi = { label: string; value: string; sub: string; tone: "critical" | "warning" | "success" | "info" | "muted" };
+// `filter` makes a summary card a real control: given a row of the same LiveTable this KPI belongs
+// to, it returns true for the rows the card counted, and ModulePage renders the card as a clickable
+// toggle that narrows the table to exactly those. Omit it for pure totals ("Categories", "Total
+// Users"), where "filter to every row" would be a control that does nothing.
+export type LiveKpi = { label: string; value: string; sub: string; tone: "critical" | "warning" | "success" | "info" | "muted"; filter?: (row: (string | number)[]) => boolean };
 export type LiveProgressStat = { label: string; pct: number; tone: "critical" | "warning" | "success" | "info" | "muted" };
 // ids[i] is the DB id of rows[i] — lets ModulePage's row menu act on the exact record without
 // re-deriving it from display text (which is lossy, e.g. duplicate names).
@@ -496,6 +500,19 @@ export type LiveTable = {
   columns: string[]; rows: (string | number)[][]; statusCol: number; kpis?: LiveKpi[]; ids?: number[];
   progressStats?: LiveProgressStat[];
 };
+
+// Most summary cards count rows whose status column holds one of a few values, so the predicate is
+// the same shape every time. `byCol` covers the rest (a card counting a non-status column, e.g.
+// "Missing Barcode" over the Barcode column).
+export const byStatus =
+  (statusCol: number, ...values: string[]) =>
+  (row: (string | number)[]) =>
+    values.includes(String(row[statusCol] ?? ""));
+
+export const byCol =
+  (col: number, ...values: string[]) =>
+  (row: (string | number)[]) =>
+    values.includes(String(row[col] ?? ""));
 
 export function mapUsers(users: UserDto[]): LiveTable {
   const active = users.filter((u) => u.status === "Active").length;
@@ -509,10 +526,10 @@ export function mapUsers(users: UserDto[]): LiveTable {
     ids: users.map((u) => u.id),
     kpis: [
       { label: "Total Users", value: String(users.length), sub: `${new Set(users.map((u) => u.roleId)).size} roles`, tone: "info" },
-      { label: "Active", value: String(active), sub: `${Math.round((active / total) * 100)}%`, tone: "success" },
-      { label: "Suspended", value: String(suspended), sub: suspended > 0 ? "Needs review" : "None", tone: suspended > 0 ? "warning" : "muted" },
-      { label: "Inactive", value: String(inactive), sub: "Left / deactivated", tone: "muted" },
-      { label: "Biometric Enabled", value: String(biometric), sub: `${Math.round((biometric / total) * 100)}% coverage`, tone: "info" },
+      { label: "Active", value: String(active), sub: `${Math.round((active / total) * 100)}%`, tone: "success", filter: byStatus(8, "Active") },
+      { label: "Suspended", value: String(suspended), sub: suspended > 0 ? "Needs review" : "None", tone: suspended > 0 ? "warning" : "muted", filter: byStatus(8, "Suspended") },
+      { label: "Inactive", value: String(inactive), sub: "Left / deactivated", tone: "muted", filter: byStatus(8, "Inactive") },
+      { label: "Biometric Enabled", value: String(biometric), sub: `${Math.round((biometric / total) * 100)}% coverage`, tone: "info", filter: byCol(6, "Yes") },
     ],
     rows: users.map((u) => [
       `USR-${String(u.id).padStart(3, "0")}`, u.name, u.roleName, u.branchName ?? "All Branches", u.email,
@@ -530,7 +547,7 @@ export function mapBranches(branches: BranchDto[]): LiveTable {
     statusCol: 7,
     ids: branches.map((b) => b.id),
     kpis: [
-      { label: "Active Branches", value: String(activeCount), sub: `${activeCount}/${branches.length} branches`, tone: "success" },
+      { label: "Active Branches", value: String(activeCount), sub: `${activeCount}/${branches.length} branches`, tone: "success", filter: byStatus(7, "Active") },
       { label: "Total Orders", value: totalOrders.toLocaleString("en-US"), sub: "All branches", tone: "info" },
       { label: "Total Terminals", value: String(totalTerminals), sub: "Registered", tone: "info" },
     ],
@@ -550,9 +567,9 @@ export function mapTerminals(terminals: TerminalDto[]): LiveTable {
     ids: terminals.map((t) => t.id),
     kpis: [
       { label: "Total Terminals", value: String(terminals.length), sub: `${new Set(terminals.map((t) => t.branchId)).size} branches`, tone: "info" },
-      { label: "Online", value: String(online), sub: terminals.length ? `${Math.round((online / terminals.length) * 100)}% uptime` : "—", tone: "success" },
-      { label: "Offline", value: String(offline), sub: offline > 0 ? "Needs attention" : "All clear", tone: offline > 0 ? "critical" : "success" },
-      { label: "Idle", value: String(idle), sub: "No activity", tone: idle > 0 ? "warning" : "muted" },
+      { label: "Online", value: String(online), sub: terminals.length ? `${Math.round((online / terminals.length) * 100)}% uptime` : "—", tone: "success", filter: byStatus(5, "Online") },
+      { label: "Offline", value: String(offline), sub: offline > 0 ? "Needs attention" : "All clear", tone: offline > 0 ? "critical" : "success", filter: byStatus(5, "Offline") },
+      { label: "Idle", value: String(idle), sub: "No activity", tone: idle > 0 ? "warning" : "muted", filter: byStatus(5, "Idle") },
     ],
     rows: terminals.map((t) => [
       t.code, t.branchName, t.assignedCashierName ?? "Unassigned", `${t.ipAddress ?? "—"} / ${t.macAddress ?? "—"}`,
@@ -573,9 +590,9 @@ export function mapDevices(devices: DeviceDto[]): LiveTable {
     ids: devices.map((d) => d.id),
     kpis: [
       { label: "Total Devices", value: String(devices.length), sub: `${new Set(devices.map((d) => d.terminalId)).size} terminals`, tone: "info" },
-      { label: "Healthy", value: String(healthy), sub: `${Math.round((healthy / total) * 100)}%`, tone: "success" },
-      { label: "Needs Attention", value: String(faulty), sub: faulty > 0 ? "Maintenance ticket" : "None", tone: faulty > 0 ? "warning" : "muted" },
-      { label: "Network OK", value: `${synced}/${devices.length}`, sub: "Synced", tone: synced === devices.length ? "success" : "warning" },
+      { label: "Healthy", value: String(healthy), sub: `${Math.round((healthy / total) * 100)}%`, tone: "success", filter: byStatus(7, "Healthy") },
+      { label: "Needs Attention", value: String(faulty), sub: faulty > 0 ? "Maintenance ticket" : "None", tone: faulty > 0 ? "warning" : "muted", filter: byStatus(7, "Faulty") },
+      { label: "Network OK", value: `${synced}/${devices.length}`, sub: "Synced", tone: synced === devices.length ? "success" : "warning", filter: byCol(5, "Synced") },
     ],
     progressStats: [
       { label: "Device Health", pct: Math.round((healthy / total) * 100), tone: "success" },

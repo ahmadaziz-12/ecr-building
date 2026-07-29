@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/buildpos/sections";
 import { statusTone, exportToCsv } from "./shared";
 import { useCustomerLedger, useCustomerStatement, useRecordCustomerPayment } from "@/lib/api/pos";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 function fmtSar(n: number): string {
   return `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
@@ -48,7 +49,7 @@ function RecordPaymentForm({ customerId, onDone }: { customerId: number; onDone:
   return (
     <div className="grid grid-cols-2 gap-2 rounded-lg border border-black/5 bg-canvas p-3">
       <Input
-        placeholder="Amount (ر.س)"
+        placeholder="Amount"
         type="number"
         min="0"
         step="0.01"
@@ -137,13 +138,13 @@ export function CustomerStatementDialog({
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Credit Limit
                 </p>
-                <p className="mt-0.5 font-medium">{fmtSar(statement.creditLimit)}</p>
+                <p className="mt-0.5 font-medium"><CurrencyText value={fmtSar(statement.creditLimit)} /></p>
               </div>
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Outstanding
                 </p>
-                <p className="mt-0.5 font-medium">{fmtSar(statement.outstanding)}</p>
+                <p className="mt-0.5 font-medium"><CurrencyText value={fmtSar(statement.outstanding)} /></p>
               </div>
             </div>
 
@@ -207,7 +208,7 @@ export function CustomerStatementDialog({
                             year: "numeric",
                           })}
                         </td>
-                        <td className="px-3 py-2 text-right font-medium">{fmtSar(o.grandTotal)}</td>
+                        <td className="px-3 py-2 text-right font-medium"><CurrencyText value={fmtSar(o.grandTotal)} /></td>
                         <td className="px-3 py-2">{o.paymentStatus}</td>
                         <td className="px-3 py-2">
                           <Pill tone={statusTone(o.status)}>{o.status}</Pill>
@@ -252,10 +253,10 @@ export function CustomerStatementDialog({
                         <td className="px-3 py-2 font-mono text-xs">{l.reference}</td>
                         <td className="px-3 py-2">{l.description}</td>
                         <td className="px-3 py-2 text-right font-medium">
-                          {l.debit > 0 ? fmtSar(l.debit) : "—"}
+                          <CurrencyText value={l.debit > 0 ? fmtSar(l.debit) : "—"} />
                         </td>
                         <td className="px-3 py-2 text-right font-medium text-success">
-                          {l.credit > 0 ? fmtSar(l.credit) : "—"}
+                          <CurrencyText value={l.credit > 0 ? fmtSar(l.credit) : "—"} />
                         </td>
                       </tr>
                     ))}

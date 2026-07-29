@@ -61,6 +61,7 @@ export function DeliveryDashboard() {
           { label: "Delivery Fees Collected", value: `${kpis.fees.toFixed(0)} ر.س`, sub: "Today", tone: "success" },
           { label: "On-Time Rate", value: `${kpis.onTime}%`, sub: "Delivered vs attempts", tone: kpis.onTime >= 90 ? "success" : "warning" },
         ]}
+        scope="delivery-dashboard"
       />
 
       <div className="grid gap-4 lg:grid-cols-3">

@@ -26,6 +26,7 @@ import { resolveDateRangeBounds, type DateRangeValue } from "@/components/buildp
 import { CustomerFormDialog } from "./CustomerFormDialog";
 import { CustomerStatementDialog } from "./CustomerStatementDialog";
 import { useArchiveCustomer, useCustomers, type CustomerDto } from "@/lib/api/pos";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 const TABS = ["All", "Walk-in", "Retail", "Contractor / B2B", "Loyalty"] as const;
 type Tab = (typeof TABS)[number];
@@ -232,7 +233,7 @@ export function CustomersPage() {
         resultLabel={`${filtered.length} of ${all.length}${isFetching ? " · refreshing…" : ""}`}
       />
 
-      <KpiGrid items={kpis} />
+      <KpiGrid items={kpis} scope="customers" />
 
       <SectionCard title="Customer Directory" desc={`${filtered.length} records`}>
         <div className="overflow-x-auto">
@@ -268,9 +269,9 @@ export function CustomersPage() {
                   <TableCell className="text-muted-foreground">{c.phone ?? "—"}</TableCell>
                   <TableCell className="text-muted-foreground">{c.vatNo ?? "—"}</TableCell>
                   <TableCell className="text-right">
-                    {c.creditLimit > 0 ? fmtSar(c.creditLimit) : "—"}
+                    <CurrencyText value={c.creditLimit > 0 ? fmtSar(c.creditLimit) : "—"} />
                   </TableCell>
-                  <TableCell className="text-right">{fmtSar(c.outstanding)}</TableCell>
+                  <TableCell className="text-right"><CurrencyText value={fmtSar(c.outstanding)} /></TableCell>
                   <TableCell>
                     <Pill tone={statusTone(c.status)}>{c.status}</Pill>
                   </TableCell>

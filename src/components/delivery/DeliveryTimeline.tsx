@@ -1,6 +1,7 @@
 import { Pill } from "@/components/buildpos/sections";
 import { STAGE_TONE, type DeliveryOrder } from "@/lib/delivery/store";
 import { CheckCircle2 } from "lucide-react";
+import { SARIcon } from "@/lib/buildpos/currency";
 
 export function DeliveryTimeline({ order }: { order: DeliveryOrder }) {
   const events = [
@@ -17,7 +18,7 @@ export function DeliveryTimeline({ order }: { order: DeliveryOrder }) {
         <div><span className="text-muted-foreground">Stage:</span> <strong><Pill tone={STAGE_TONE[order.stage]}>{order.stage}</Pill></strong></div>
         <div><span className="text-muted-foreground">Driver:</span> <strong>{order.driverName ?? "—"}</strong></div>
         <div><span className="text-muted-foreground">Vehicle:</span> <strong>{order.vehicleId ?? "—"}</strong></div>
-        <div><span className="text-muted-foreground">Amount:</span> <strong>{order.amount} ر.س</strong></div>
+        <div><span className="text-muted-foreground">Amount:</span> <strong>{order.amount} <SARIcon /></strong></div>
       </div>
       <div className="overflow-x-auto rounded-lg border border-black/5">
         <table className="w-full text-sm">

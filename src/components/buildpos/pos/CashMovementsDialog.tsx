@@ -1,6 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Pill } from "@/components/buildpos/sections";
 import { useCashMovements } from "@/lib/api/pos";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 function fmtSar(n: number): string {
   return `${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ر.س`;
@@ -45,7 +46,9 @@ export function CashMovementsDialog({
                   <td className="px-3 py-2">
                     <Pill tone={m.direction === "In" ? "success" : "warning"}>{m.direction}</Pill>
                   </td>
-                  <td className="px-3 py-2 text-right font-medium">{fmtSar(m.amount)}</td>
+                  <td className="px-3 py-2 text-right font-medium">
+                    <CurrencyText value={fmtSar(m.amount)} />
+                  </td>
                   <td className="px-3 py-2">{m.reason}</td>
                   <td className="px-3 py-2 text-muted-foreground">{m.createdByName ?? "—"}</td>
                 </tr>

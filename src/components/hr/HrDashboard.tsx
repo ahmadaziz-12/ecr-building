@@ -56,7 +56,7 @@ export function HrDashboard() {
         { label: "Missing Check-Outs", value: k.missing, sub: "Still active", tone: "warning" },
         { label: "Open Employee Shifts", value: k.open, sub: "Active sessions", tone: "info" },
         { label: "Expiring Contracts", value: k.expiring, sub: "Docs + contracts", tone: k.expiring > 0 ? "critical" : "success" },
-      ]} />
+      ]} scope="hr-dashboard" />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <SectionCard title="Attendance Overview" desc={`As of ${today}`}>

@@ -8,6 +8,7 @@ import {
   type ReportColumn, type ReportDetail,
 } from "./report-columns";
 import { ExportMenu, runExport, type ExportFormat } from "./report-export";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 // The one table every list-shaped report renders through: sorting, client-side row search,
 // pagination, export of exactly what's on screen, and click-a-row drill-down into the line items that
@@ -120,7 +121,7 @@ export function ReportTable<T>({
                       } ${align === "right" ? "text-right" : align === "center" ? "text-center" : ""}`}
                     >
                       <span className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""}`}>
-                        {c.label}
+                        <CurrencyText value={c.label} />
                         {isSorted
                           ? sort!.dir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
                           : <ChevronsUpDown className="h-3 w-3 opacity-25" />}
@@ -156,7 +157,7 @@ export function ReportTable<T>({
                       >
                         {c.format === "status"
                           ? <Pill tone={statusTone(String(value ?? ""))}>{String(value ?? "—")}</Pill>
-                          : <span className="text-foreground/85">{formatCell(value, c.format)}</span>}
+                          : <span className="text-foreground/85"><CurrencyText value={formatCell(value, c.format)} /></span>}
                       </TableCell>
                     );
                   })}
@@ -264,7 +265,7 @@ function ReportDetailSheet<T>({
                   {fields.map((f) => (
                     <div key={f.label} className="rounded-lg bg-canvas px-3 py-2">
                       <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{f.label}</dt>
-                      <dd className="mt-0.5 truncate text-sm font-medium text-foreground">{f.value || "—"}</dd>
+                      <dd className="mt-0.5 truncate text-sm font-medium text-foreground"><CurrencyText value={f.value || "—"} /></dd>
                     </div>
                   ))}
                 </dl>
@@ -288,7 +289,7 @@ function ReportDetailSheet<T>({
                               NUMERIC_FORMATS.includes(c.format ?? "text") ? "text-right" : ""
                             }`}
                           >
-                            {c.label}
+                            <CurrencyText value={c.label} />
                           </TableHead>
                         ))}
                       </TableRow>
@@ -307,7 +308,7 @@ function ReportDetailSheet<T>({
                               >
                                 {c.format === "status"
                                   ? <Pill tone={statusTone(String(value ?? ""))}>{String(value ?? "—")}</Pill>
-                                  : formatCell(value, c.format)}
+                                  : <CurrencyText value={formatCell(value, c.format)} />}
                               </TableCell>
                             );
                           })}

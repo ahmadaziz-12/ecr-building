@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { PageHeader, KpiGrid } from "@/components/buildpos/PageHeader";
 import { Pill, SectionCard } from "@/components/buildpos/sections";
@@ -23,6 +23,7 @@ import {
 } from "@/lib/api/pos";
 import { useAuth } from "@/lib/api/auth";
 import { useBranches, useTerminals } from "@/lib/api/admin";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 const TABS = ["All Orders", "Completed", "Pending", "Delivery", "Returned", "Voided", "Quotations"] as const;
 type Tab = (typeof TABS)[number];
@@ -113,6 +114,23 @@ export function OrdersPage() {
   }));
   const [applied, setApplied] = useState<Record<string, FilterDraftValue>>(draft);
 
+  // Arriving from the app-header search (`/operate/orders?orderNo=ORD-2026-0024`) seeds the page's
+  // own search box instead of dropping the visitor on an unfiltered ledger — landing on page 1 of
+  // every order ever taken is indistinguishable from "the search found nothing".
+  const routeSearch = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
+  const seededTerm =
+    typeof routeSearch.orderNo === "string" ? routeSearch.orderNo
+      : typeof routeSearch.quoteNo === "string" ? routeSearch.quoteNo
+        : typeof routeSearch.search === "string" ? routeSearch.search
+          : "";
+  const seededQuote = typeof routeSearch.quoteNo === "string";
+  useEffect(() => {
+    if (!seededTerm) return;
+    setDraft((d) => ({ ...d, search: seededTerm }));
+    setApplied((a) => ({ ...a, search: seededTerm }));
+    setTab(seededQuote ? "Quotations" : "All Orders");
+  }, [seededTerm, seededQuote]);
+
   const allOrders = orders ?? [];
   const filteredOrders = useMemo(() => {
     const status = (applied.status as string[]) ?? [];
@@ -156,19 +174,23 @@ export function OrdersPage() {
   const ordersPagination = usePagination(filteredOrders, PAGE_SIZE, JSON.stringify(applied) + tab);
   const quotationsPagination = usePagination(filteredQuotations, PAGE_SIZE, (applied.search as string) ?? "");
 
+  // Each card drives the tab strip it summarises — clicking "Pending" shows the pending orders
+  // instead of leaving the reader to find the matching tab themselves; clicking the active one
+  // goes back to All Orders. "Orders Today" has no tab of its own, so it stays a plain readout.
   const kpis = useMemo(() => {
     const today = allOrders.filter((o) => isToday(o.createdAt));
     const completed = allOrders.filter((o) => o.status === "Completed");
     const pending = allOrders.filter((o) => o.status === "Pending");
     const voided = allOrders.filter((o) => o.status === "Voided");
+    const jump = (t: (typeof TABS)[number]) => () => setTab(tab === t ? "All Orders" : t);
     return [
       { label: "Orders Today", value: today.length, sub: `${allOrders.length} total`, tone: "success" as const },
-      { label: "Completed", value: completed.length, sub: allOrders.length ? `${Math.round((completed.length / allOrders.length) * 100)}% of total` : "—", tone: "success" as const },
-      { label: "Pending", value: pending.length, sub: "Awaiting payment", tone: "warning" as const },
-      { label: "Voided", value: voided.length, sub: "Reversed & restocked", tone: "muted" as const },
-      { label: "Quotations", value: (quotations ?? []).length, sub: `${(quotations ?? []).filter((q) => q.status === "Sent").length} awaiting reply`, tone: "info" as const },
+      { label: "Completed", value: completed.length, sub: allOrders.length ? `${Math.round((completed.length / allOrders.length) * 100)}% of total` : "—", tone: "success" as const, onSelect: jump("Completed"), active: tab === "Completed" },
+      { label: "Pending", value: pending.length, sub: "Awaiting payment", tone: "warning" as const, onSelect: jump("Pending"), active: tab === "Pending" },
+      { label: "Voided", value: voided.length, sub: "Reversed & restocked", tone: "muted" as const, onSelect: jump("Voided"), active: tab === "Voided" },
+      { label: "Quotations", value: (quotations ?? []).length, sub: `${(quotations ?? []).filter((q) => q.status === "Sent").length} awaiting reply`, tone: "info" as const, onSelect: jump("Quotations"), active: tab === "Quotations" },
     ];
-  }, [allOrders, quotations]);
+  }, [allOrders, quotations, tab]);
 
   async function handleQuotationAction(q: QuotationDto, action: "send" | "accept" | "reject" | "convert") {
     try {
@@ -249,7 +271,7 @@ export function OrdersPage() {
         resultLabel={`${(tab === "Quotations" ? filteredQuotations : filteredOrders).length} record(s)${ordersFetching || quotationsFetching ? " · refreshing…" : ""}`}
       />
 
-      <KpiGrid items={kpis} />
+      <KpiGrid items={kpis} scope="orders" />
 
       {tab === "Quotations" ? (
         <SectionCard title="Quotations" desc={`${filteredQuotations.length} records`}>
@@ -275,7 +297,7 @@ export function OrdersPage() {
                     <TableCell className="font-mono text-xs text-muted-foreground">{q.projectCode}</TableCell>
                     <TableCell className="text-muted-foreground">{q.createdByName}</TableCell>
                     <TableCell className="text-muted-foreground">{new Date(q.validUntil).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</TableCell>
-                    <TableCell className="text-right font-medium">{fmtSar(q.grandTotal)}</TableCell>
+                    <TableCell className="text-right font-medium"><CurrencyText value={fmtSar(q.grandTotal)} /></TableCell>
                     <TableCell><Pill tone={statusTone(q.status)}>{q.status}{q.convertedOrderNo ? ` → ${q.convertedOrderNo}` : ""}</Pill></TableCell>
                     <TableCell>
                       <RowActionsMenu
@@ -334,7 +356,7 @@ export function OrdersPage() {
                     <TableCell className="font-mono text-xs text-muted-foreground">{o.projectCode || "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{o.payments.map((p) => p.method).join(" + ") || "—"}</TableCell>
                     <TableCell className="text-right">{o.lines.reduce((s, l) => s + l.qty, 0)}</TableCell>
-                    <TableCell className="text-right font-medium">{fmtSar(o.grandTotal)}</TableCell>
+                    <TableCell className="text-right font-medium"><CurrencyText value={fmtSar(o.grandTotal)} /></TableCell>
                     <TableCell className="text-muted-foreground">{o.cashierName}</TableCell>
                     <TableCell><Pill tone={statusTone(o.status)}>{o.status}</Pill></TableCell>
                     <TableCell>

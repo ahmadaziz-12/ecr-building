@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Filter, MoreHorizontal, Search } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -84,6 +84,21 @@ export function FilterBar({
   onReset: () => void;
   resultLabel: string;
 }) {
+  // Search applies as you type. The staged draft/Apply model is right for the select and date
+  // filters (you pick several, then commit), but a search box that silently holds its value until
+  // you find the Apply button reads as broken — typing an order number and watching the table not
+  // move was reported as "search by order number returns no results". Debounced so a long SKU
+  // doesn't re-filter (and reset pagination) on every keystroke.
+  const searchKeys = fields.filter((f) => f.kind === "search").map((f) => f.key).join("|");
+  const searchValues = fields.filter((f) => f.kind === "search").map((f) => String(draft[f.key] ?? "")).join(" ");
+  const applyRef = useRef(onApply);
+  applyRef.current = onApply;
+  useEffect(() => {
+    if (!searchKeys) return;
+    const t = window.setTimeout(() => applyRef.current(), 250);
+    return () => window.clearTimeout(t);
+  }, [searchKeys, searchValues]);
+
   // Search reads first and widest (the filter someone reaches for first), the rest of the fields
   // sit smaller alongside it, and Date Range always trails last — regardless of the order a page
   // declared its fields in, so this layout is consistent everywhere the shared bar is used.

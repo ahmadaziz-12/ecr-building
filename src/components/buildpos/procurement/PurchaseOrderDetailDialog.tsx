@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/buildpos/sections";
 import { statusTone } from "@/components/buildpos/pos/shared";
 import { usePurchaseOrderHistory, type PurchaseOrderDto } from "@/lib/api/procurement";
+import { CurrencyText } from "@/lib/buildpos/currency";
 
 const STATUS_LABELS: Record<string, string> = {
   PendingApproval: "Pending Approval",
@@ -40,7 +41,7 @@ function InfoField({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className="mt-0.5 text-sm font-medium">{value}</p>
+      <p className="mt-0.5 text-sm font-medium"><CurrencyText value={value} /></p>
     </div>
   );
 }
@@ -113,8 +114,8 @@ export function PurchaseOrderDetailDialog({
                             <td className={`px-3 py-2 text-right ${l.receivedQty >= l.qty ? "font-medium text-foreground" : "text-muted-foreground"}`}>
                               {l.receivedQty} {unit}
                             </td>
-                            <td className="px-3 py-2 text-right">{fmtSar(l.unitCost)} / {unit}</td>
-                            <td className="px-3 py-2 text-right font-medium">{fmtSar(l.qty * l.unitCost)}</td>
+                            <td className="px-3 py-2 text-right"><CurrencyText value={fmtSar(l.unitCost)} /> / {unit}</td>
+                            <td className="px-3 py-2 text-right font-medium"><CurrencyText value={fmtSar(l.qty * l.unitCost)} /></td>
                           </tr>
                         );
                       })}
@@ -129,11 +130,11 @@ export function PurchaseOrderDetailDialog({
                 )}
                 <div className="grid grid-cols-2 gap-y-1 text-sm">
                   <span className="text-muted-foreground">Lines Subtotal</span>
-                  <span className="text-right">{fmtSar(linesValue)}</span>
+                  <span className="text-right"><CurrencyText value={fmtSar(linesValue)} /></span>
                   <span className="text-muted-foreground">Shipping</span>
-                  <span className="text-right">{fmtSar(po.shipping)}</span>
+                  <span className="text-right"><CurrencyText value={fmtSar(po.shipping)} /></span>
                   <span className="font-semibold text-foreground">Total</span>
-                  <span className="text-right font-semibold text-foreground">{fmtSar(po.totalValue)}</span>
+                  <span className="text-right font-semibold text-foreground"><CurrencyText value={fmtSar(po.totalValue)} /></span>
                 </div>
               </TabsContent>
 

@@ -639,6 +639,25 @@ export function useResumeSale() {
   });
 }
 
+// Tills this user may open a shift on. Served by the cashier-shift module rather than
+// /api/network/terminals so the picker never depends on a Network→Terminals permission the cashier
+// may not hold — a 403 there emptied the dropdown and read as "the terminal doesn't exist".
+export type ShiftTerminalDto = {
+  id: number;
+  code: string;
+  name: string;
+  branchId: number;
+  branchName: string;
+  status: string;
+  openShiftBlockedBy: string | null;
+};
+export const useShiftTerminals = (enabled = true) =>
+  useQuery({
+    queryKey: ["pos", "cashier-shifts", "terminals"],
+    queryFn: () => apiGet<ShiftTerminalDto[]>("/api/pos/cashier-shifts/terminals"),
+    enabled,
+  });
+
 export function useOpenShift() {
   const queryClient = useQueryClient();
   return useMutation({
