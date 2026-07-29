@@ -92,6 +92,12 @@ public class OrderLine
     public decimal? SourceQty { get; set; }
     public decimal? RemnantQty { get; set; }
     public string? RemnantAction { get; set; }
+    // Cut Optimization: set when the cashier fulfilled this cut from an existing Remnant (an offcut
+    // from a previous sale) instead of cutting fresh bulk stock — StockQty is 0 for these lines since
+    // no BranchStockLevel.OnHand was touched, the deduction instead came off the Remnant's own Qty.
+    // Null for every ordinary line, cut-to-size or not.
+    public int? ConsumedRemnantId { get; set; }
+    public Remnant? ConsumedRemnant { get; set; }
     // BRD §5.2: set when this line was auto-populated from a bundle — groups the constituents on the
     // receipt and feeds the Bundle Sales Report. UnitPrice on a bundle line is the constituent's
     // proportional share of the bundle price, so VAT stays per-item at each line's own rate.

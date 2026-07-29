@@ -64,6 +64,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<SupplierPayment> SupplierPayments => Set<SupplierPayment>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
+    public DbSet<Remnant> Remnants => Set<Remnant>();
     public DbSet<OrderPayment> OrderPayments => Set<OrderPayment>();
     public DbSet<CashierShift> CashierShifts => Set<CashierShift>();
     public DbSet<CashMovement> CashMovements => Set<CashMovement>();
@@ -393,6 +394,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             b.HasOne(x => x.Order).WithMany(x => x.Lines).HasForeignKey(x => x.OrderId);
             b.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId);
+            b.HasOne(x => x.ConsumedRemnant).WithMany().HasForeignKey(x => x.ConsumedRemnantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Remnant>(b =>
+        {
+            b.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.Branch).WithMany().HasForeignKey(x => x.BranchId).OnDelete(DeleteBehavior.Restrict);
+            // Restrict, not Cascade: VoidLine deletes a still-untouched remnant itself before removing
+            // its source OrderLine (see OrdersController.VoidLine) rather than relying on cascade.
+            b.HasOne(x => x.SourceOrderLine).WithMany().HasForeignKey(x => x.SourceOrderLineId).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<OrderPayment>(b =>

@@ -16,11 +16,14 @@ public enum StockMovementType
     TransferIn = 8,
     Adjustment = 9,
     WriteOff = 10,
-    // Cut-to-size remnant returned to sellable branch stock after a cut left the source piece/roll
-    // (e.g. a 1m offcut from a 3m cable roll) with usable material over. Informational only — the
-    // net BranchStockLevel change from cutting a tracked source and restocking its remnant is zero,
-    // this exists purely so reporting can see how much offcut a business generates and resells.
+    // A cut-to-size cut created a new tracked Remnant (offcut) instead of merging the leftover back
+    // into generic BranchStockLevel.OnHand — informational only (see Remnant entity), exists purely
+    // so reporting can see how much offcut a business generates.
     CutRemnantRestock = 11,
+    // Cut Optimization: a sale was fulfilled from an existing Remnant instead of cutting fresh bulk
+    // stock — informational only, never touches BranchStockLevel (the Remnant's own Qty already
+    // carries the deduction), exists so reporting can see how much offcut gets reused vs. wasted.
+    RemnantConsumed = 12,
 }
 
 // A structured ledger of every event that changed a branch's sellable (BranchStockLevel) stock, or

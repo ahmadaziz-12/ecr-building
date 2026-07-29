@@ -568,9 +568,24 @@ public class ReturnsController(AppDbContext db, IAuditService audit, IStockMovem
         {
             // BRD §3.2.3: surplus/standard stock reintegrates to sellable inventory — in STOCK UOM
             // (a returned Pallet line puts 50 Bags back). The restocking fee never reduces this.
+            // Cut Optimization/Remnants Management: ReturnLine is its own entity (no remnant-tracking
+            // columns of its own) — a FULL return of a line that consumed or created a Remnant looks
+            // up the original OrderLine and goes through RemnantReversal instead of blindly restocking
+            // to OnHand (see its own doc comment for why). A partial return of a cut-to-size line is
+            // an edge case remnant math doesn't cleanly cover (you can't un-cut half a cable) — that,
+            // and any line untouched by remnants, keeps the plain restock behavior. In practice every
+            // remnant-tracked product IsCutToSize, and those are already blocked from ever reaching
+            // this non-Damaged branch (see the eligibility check further down) — this is deliberately
+            // defensive so the moment that rule ever relaxes, remnants still can't be double-counted.
             foreach (var line in ret.Lines)
             {
-                var restockQty = line.StockQty > 0 ? line.StockQty : line.Qty;
+                var originalLine = line.OrderLineId is int origId ? await db.OrderLines.FindAsync([origId], ct) : null;
+                var isFullLineReturn = originalLine is not null && line.Qty >= originalLine.Qty;
+                var remnantTracked = originalLine is not null && (originalLine.ConsumedRemnantId is not null || originalLine.RemnantQty is > 0);
+                var restockQty = remnantTracked && isFullLineReturn
+                    ? await RemnantReversal.ReverseAsync(db, originalLine!, ct)
+                    : line.StockQty > 0 ? line.StockQty : line.Qty;
+                if (restockQty <= 0) continue;
                 var level = await db.BranchStockLevels.FirstOrDefaultAsync(s => s.ProductId == line.ProductId && s.BranchId == request.BranchId, ct);
                 if (level is null)
                 {

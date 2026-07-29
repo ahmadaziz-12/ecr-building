@@ -412,6 +412,75 @@ public class BranchStockBatchesController(AppDbContext db, IAuditService audit, 
     }
 }
 
+// Remnants Management (Cut Optimization): a tracked offcut left over from a cut-to-size sale — its
+// own sellable piece, distinct from generic BranchStockLevel.OnHand (see Remnant's own doc comment
+// for why). List is gated by pos-checkout View (not stock/expiry) so a cashier's "use an existing
+// offcut instead of cutting fresh stock?" picker at POS actually works — everything else here is an
+// inventory-admin concern, same gate as BranchStockBatches above.
+[ApiController]
+[Route("api/inventory/remnants")]
+[Authorize]
+[RequireModule("/stock/expiry", PermissionAction.View)]
+public class RemnantsController(AppDbContext db, IAuditService audit, IStockMovementService stockMovements) : ControllerBase
+{
+    [HttpGet]
+    [RequireModule("/operate/pos-checkout", PermissionAction.View)]
+    public async Task<ActionResult<List<RemnantDto>>> List([FromQuery] int? branchId, [FromQuery] int? productId, [FromQuery] string? status, CancellationToken ct)
+    {
+        var query = db.Remnants.Include(r => r.Product).Include(r => r.Branch).Include(r => r.SourceOrderLine).ThenInclude(l => l!.Order).AsQueryable();
+        if (branchId is not null) query = query.Where(r => r.BranchId == branchId);
+        if (productId is not null) query = query.Where(r => r.ProductId == productId);
+        // Default to Available only — that's the only status a POS picker or "what can I still sell"
+        // admin view cares about; pass status=All (or a specific status) to see the full history.
+        if (string.IsNullOrWhiteSpace(status)) query = query.Where(r => r.Status == RemnantStatus.Available);
+        else if (!string.Equals(status, "All", StringComparison.OrdinalIgnoreCase) && Enum.TryParse<RemnantStatus>(status, true, out var parsed)) query = query.Where(r => r.Status == parsed);
+
+        var remnants = await query.OrderBy(r => r.Qty).ToListAsync(ct);
+        return Ok(remnants.Select(Map).ToList());
+    }
+
+    [HttpPut("{id:int}")]
+    [RequireModule("/stock/expiry", PermissionAction.Edit)]
+    public async Task<ActionResult<RemnantDto>> Update(int id, UpdateRemnantRequest request, CancellationToken ct)
+    {
+        if (request.DiscountPct is < 0 or > 100) return BadRequest(new { error = "Discount must be between 0 and 100%." });
+        var remnant = await db.Remnants.Include(r => r.Product).Include(r => r.Branch).FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (remnant is null) return NotFound();
+
+        remnant.DiscountPct = request.DiscountPct;
+        remnant.Notes = request.Notes;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "REMNANT_UPDATED", remnant.Id.ToString(), newValue: request, cancellationToken: ct);
+        return Ok(Map(remnant));
+    }
+
+    [HttpPut("{id:int}/scrap")]
+    [RequireModule("/stock/expiry", PermissionAction.Delete)]
+    public async Task<ActionResult<RemnantDto>> Scrap(int id, CancellationToken ct)
+    {
+        var remnant = await db.Remnants.Include(r => r.Product).Include(r => r.Branch).FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (remnant is null) return NotFound();
+        if (remnant.Status != RemnantStatus.Available) return BadRequest(new { error = $"This remnant is already {remnant.Status}." });
+
+        var qty = remnant.Qty;
+        remnant.Status = RemnantStatus.Scrapped;
+        remnant.Qty = 0;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("inventory", "REMNANT_SCRAPPED", remnant.Id.ToString(), newValue: new { ScrappedQty = qty }, cancellationToken: ct);
+        // Informational only — this remnant was never part of BranchStockLevel.OnHand, so there is
+        // nothing to deduct from stock; this exists purely so reporting can see wasted offcuts.
+        await stockMovements.RecordAsync(remnant.ProductId, remnant.BranchId, StockMovementType.WriteOff, -qty,
+            refTable: "Remnant", refId: remnant.Id.ToString(), cancellationToken: ct);
+        return Ok(Map(remnant));
+    }
+
+    private static RemnantDto Map(Remnant r) => new(
+        r.Id, r.ProductId, r.Product?.Sku ?? "", r.Product?.NameEn ?? "", r.Product?.CutToSizeUnit ?? "Area", r.Product?.StockUom ?? "",
+        r.BranchId, r.Branch?.NameEn ?? "", r.Qty, r.LengthM, r.WidthM, r.HeightM,
+        r.Status.ToString(), r.DiscountPct, r.Notes, r.CreatedAt,
+        r.SourceOrderLineId, r.SourceOrderLine?.Order?.OrderNo);
+}
+
 [ApiController]
 [Route("api/inventory/transfers")]
 [Authorize]

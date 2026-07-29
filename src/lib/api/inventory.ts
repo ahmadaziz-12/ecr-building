@@ -285,6 +285,67 @@ export const useQuarantineBranchBatch = () => useBranchBatchAction("quarantine")
 export const useWriteOffBranchBatch = () => useBranchBatchAction("write-off");
 export const usePromoBranchBatch = () => useBranchBatchAction("move-to-promo");
 
+// Remnants Management (Cut Optimization): a tracked offcut left over from a cut-to-size sale — its
+// own sellable piece, distinct from the product's generic branch stock (see the backend Remnant
+// entity's own doc comment for why). Qty/lengthM/widthM/heightM follow the product's own
+// cutToSizeUnit convention (Length: lengthM only; Area: length×width; Volume: all three).
+export type RemnantDto = {
+  id: number;
+  productId: number;
+  sku: string;
+  productName: string;
+  cutToSizeUnit: "Length" | "Area" | "Volume";
+  stockUom: string;
+  branchId: number;
+  branchName: string;
+  qty: number;
+  lengthM: number | null;
+  widthM: number | null;
+  heightM: number | null;
+  status: "Available" | "Sold" | "Scrapped";
+  discountPct: number;
+  notes: string | null;
+  createdAt: string;
+  sourceOrderLineId: number | null;
+  sourceOrderNo: string | null;
+};
+
+// status defaults server-side to "Available" — pass "All" to see the full history (Sold/Scrapped too).
+export const useRemnants = (params: { branchId?: number; productId?: number; status?: string } = {}, enabled = true) =>
+  useQuery({
+    queryKey: ["inventory", "remnants", params],
+    queryFn: () => {
+      const qs = new URLSearchParams();
+      if (params.branchId != null) qs.set("branchId", String(params.branchId));
+      if (params.productId != null) qs.set("productId", String(params.productId));
+      if (params.status) qs.set("status", params.status);
+      const query = qs.toString();
+      return apiGet<RemnantDto[]>(`/api/inventory/remnants${query ? `?${query}` : ""}`);
+    },
+    enabled,
+  });
+
+function invalidateRemnants(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: ["inventory", "remnants"] });
+}
+
+export function useUpdateRemnant() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, discountPct, notes }: { id: number; discountPct: number; notes?: string | null }) =>
+      apiPut<RemnantDto>(`/api/inventory/remnants/${id}`, { discountPct, notes: notes ?? null }),
+    onSuccess: () => invalidateRemnants(queryClient),
+  });
+}
+
+export function useScrapRemnant() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiPut<RemnantDto>(`/api/inventory/remnants/${id}/scrap`),
+    onSuccess: () => invalidateRemnants(queryClient),
+  });
+}
+
 function invalidateTransfers(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ["inventory", "transfers"] });
   queryClient.invalidateQueries({ queryKey: ["inventory", "stock-levels"] });

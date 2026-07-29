@@ -35,7 +35,9 @@ public record OrderLineDto(int ProductId, string Sku, string ProductName, decima
     // Cut-to-size enhancement: MeasuredQty is the actual measured dimension when a minimum charge
     // raised Qty above it (null = Qty already is the measured amount). SourceQty/RemnantQty/
     // RemnantAction describe an optional remnant-tracked cut (see OrderLine).
-    decimal? MeasuredQty = null, decimal? SourceQty = null, decimal? RemnantQty = null, string? RemnantAction = null);
+    decimal? MeasuredQty = null, decimal? SourceQty = null, decimal? RemnantQty = null, string? RemnantAction = null,
+    // Cut Optimization: set when this cut was fulfilled from an existing Remnant instead of bulk stock.
+    int? ConsumedRemnantId = null);
 public record OrderPaymentDto(string Method, decimal Amount, string? ReferenceNumber, string Status, DateTime CreatedAt);
 public record OrderFeeDto(string Label, decimal Amount);
 public record OrderDto(
@@ -71,7 +73,13 @@ public record OrderDto(
 // piece/roll the cashier is cutting from — omit it to keep today's behavior (deduct exactly the
 // measured cut, no remnant). When set and larger than the measured cut, RemnantAction ("Restock" |
 // "Scrap") is required and says whether the leftover goes back to sellable stock or is written off.
-public record CartLineInput(int ProductId, decimal Qty, string? Uom = null, decimal? LengthM = null, decimal? WidthM = null, bool RequiresDelivery = false, decimal? HeightM = null, string? Notes = null, decimal? ManualDiscountPct = null, decimal? ManualUnitPrice = null, decimal? SourceQty = null, string? RemnantAction = null);
+// ConsumeRemnantId (Cut Optimization): the cashier picked a specific available Remnant to cut this
+// line from instead of fresh bulk stock — no BranchStockLevel deduction happens for this line, the
+// Remnant's own Qty is decremented instead. Mutually meaningful only alongside LengthM (cut-to-size);
+// SourceQty/RemnantAction still work exactly the same on top (a bigger remnant can itself leave a
+// smaller remnant behind), just measured against the consumed remnant's own size instead of a
+// hand-typed one.
+public record CartLineInput(int ProductId, decimal Qty, string? Uom = null, decimal? LengthM = null, decimal? WidthM = null, bool RequiresDelivery = false, decimal? HeightM = null, string? Notes = null, decimal? ManualDiscountPct = null, decimal? ManualUnitPrice = null, decimal? SourceQty = null, string? RemnantAction = null, int? ConsumeRemnantId = null);
 
 // BRD §3.5: captured once per checkout (not per line) — every delivery-flagged line in the cart ships
 // to this single address/date. ZoneId (optional): when set, the delivery fee auto-calculates from the

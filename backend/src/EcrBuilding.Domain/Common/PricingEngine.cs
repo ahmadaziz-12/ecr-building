@@ -34,8 +34,11 @@ public static class PricingEngine
     /// The shared "larger of, never stacks" rule: Trade Tier/loyalty-tier, Quantity-threshold,
     /// Promotional, and a manual/cashier % all compete for the same line — the highest wins.
     /// </summary>
-    public static decimal ResolveLineDiscountPct(decimal effectiveDiscountPct, decimal quantityPct, decimal promoPct, decimal manualLinePct) =>
-        Math.Max(Math.Max(Math.Max(effectiveDiscountPct, quantityPct), promoPct), manualLinePct);
+    // remnantDiscountPct (Cut Optimization/Remnants Management): an optional per-offcut discount set
+    // on a Remnant to help move it — competes in the same "larger of, never stacks" group as
+    // everything else here, 0 for every ordinary (non-remnant-sourced) line.
+    public static decimal ResolveLineDiscountPct(decimal effectiveDiscountPct, decimal quantityPct, decimal promoPct, decimal manualLinePct, decimal remnantDiscountPct = 0m) =>
+        Math.Max(Math.Max(Math.Max(Math.Max(effectiveDiscountPct, quantityPct), promoPct), manualLinePct), remnantDiscountPct);
 
     /// <summary>
     /// Multi-tier pallet pricing (BRD §5.1 Quantity Bundle): given a Quantity rule with PalletQty

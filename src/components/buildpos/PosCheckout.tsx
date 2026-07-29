@@ -134,6 +134,7 @@ import {
   type DeliveryDetailsInput,
 } from "@/lib/api/pos";
 import { useZonesApi, useDriversApi, useVehiclesApi } from "@/lib/api/delivery";
+import { useRemnants, type RemnantDto } from "@/lib/api/inventory";
 import { useAuth } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { BundleOverrideDialog } from "@/components/buildpos/pos/BundleOverrideDialog";
@@ -219,6 +220,11 @@ type CartLine = {
   // remnantAction says whether the leftover goes back to sellable stock or is scrapped as waste.
   sourceQty?: number;
   remnantAction?: "Restock" | "Scrap";
+  // Cut Optimization: set when sourceQty came from picking an existing tracked Remnant (an offcut
+  // from a previous sale) instead of the cashier typing a source size — the cut then draws from that
+  // specific piece instead of bulk stock. sourceQty/remnantAction still describe any leftover from
+  // cutting it exactly as they would for a hand-typed source.
+  consumeRemnantId?: number;
   // Real product photo (base64 data URL or absent) — falls back to the static demo map, then an icon.
   imageUrl?: string | null;
   // BRD §3.5: cashier flags this line for delivery instead of counter pickup — a sale can mix
@@ -390,6 +396,12 @@ export function PosCheckout() {
   // Polled so a sale rung up on another terminal at this branch (or a hold/quote reserving stock)
   // shows up in this cashier's available-qty without a manual reload.
   const { data: liveProducts } = useProducts(true, effectiveBranchId ?? undefined, 20_000);
+  // Cut Optimization: available offcuts at this branch, so a cut-to-size line can offer "use this
+  // remnant instead of cutting fresh stock?" — defaults to status=Available server-side.
+  const { data: availableRemnants } = useRemnants(
+    { branchId: effectiveBranchId ?? undefined },
+    effectiveBranchId != null,
+  );
   const { data: categories } = useCategories();
   const topLevelCategories = useMemo(
     () => (categories ?? []).filter((c) => c.parentId == null),
@@ -831,10 +843,16 @@ export function PosCheckout() {
         side === "widthM" ? value : (line.widthM ?? 0),
         side === "heightM" ? value : (line.heightM ?? 0),
       );
-      const available = products.find((p) => p.sku === sku)?.stock ?? Infinity;
+      // Cut Optimization: a remnant-sourced line draws from that specific piece, not bulk stock —
+      // its own size (held in sourceQty once selected) is the real ceiling, not branch availability.
+      const available = line.consumeRemnantId != null
+        ? (line.sourceQty ?? 0)
+        : (products.find((p) => p.sku === sku)?.stock ?? Infinity);
       if (nextQty > available) {
         toast.error(
-          `Only ${available} ${line.stockUom} available at this branch — ${nextQty.toFixed(2)} needed.`,
+          line.consumeRemnantId != null
+            ? `That remnant is only ${available} ${line.stockUom} — ${nextQty.toFixed(2)} needed.`
+            : `Only ${available} ${line.stockUom} available at this branch — ${nextQty.toFixed(2)} needed.`,
         );
         return;
       }
@@ -870,6 +888,8 @@ export function PosCheckout() {
               ...l,
               sourceQty: value,
               remnantAction: value === undefined ? undefined : l.remnantAction,
+              // Hand-typing a source size overrides/deselects a previously-picked remnant.
+              consumeRemnantId: undefined,
             }
           : l,
       ),
@@ -878,6 +898,25 @@ export function PosCheckout() {
 
   function setRemnantAction(sku: string, action: "Restock" | "Scrap") {
     setCart((c) => c.map((l) => (l.sku === sku ? { ...l, remnantAction: action } : l)));
+  }
+
+  // Cut Optimization: pick an existing offcut to cut this line from instead of bulk stock — reuses
+  // the sourceQty/remnantAction leftover machinery above by auto-filling sourceQty with the
+  // remnant's own size (the cashier just confirms Restock/Scrap for whatever's still left over).
+  // Passing null clears the selection and reverts to a plain bulk-stock cut.
+  function selectRemnant(sku: string, remnant: RemnantDto | null) {
+    setCart((c) =>
+      c.map((l) =>
+        l.sku === sku
+          ? {
+              ...l,
+              consumeRemnantId: remnant?.id,
+              sourceQty: remnant?.qty,
+              remnantAction: remnant ? l.remnantAction : undefined,
+            }
+          : l,
+      ),
+    );
   }
 
   // BRD §2.3: per-line note the cashier attaches to a specific cart entry — pure client state until
@@ -1750,6 +1789,7 @@ export function PosCheckout() {
               manualUnitPrice: l.manualUnitPrice ?? null,
               sourceQty: l.sourceQty ?? null,
               remnantAction: l.sourceQty ? (l.remnantAction ?? null) : null,
+              consumeRemnantId: l.consumeRemnantId ?? null,
             }
           : {
               productId: l.productId,
@@ -3079,6 +3119,13 @@ export function PosCheckout() {
                       l.sourceQty !== undefined
                         ? Math.max(0, Math.round((l.sourceQty - l.qty) * 1000) / 1000)
                         : 0;
+                    // Cut Optimization: offer any tracked offcuts of this exact product at this
+                    // branch as an alternative to cutting fresh bulk stock — cheapest waste-reduction
+                    // move a cashier can make, so surface it right where the cut is being sized.
+                    const productRemnants = (availableRemnants ?? []).filter(
+                      (r) => r.productId === l.productId,
+                    );
+                    const selectedRemnant = productRemnants.find((r) => r.id === l.consumeRemnantId);
                     return (
                       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
                         {belowMinimum && (
@@ -3086,19 +3133,48 @@ export function PosCheckout() {
                             Billed at minimum {minCutQty} {l.stockUom} (measured {l.qty})
                           </span>
                         )}
-                        <label className="flex items-center gap-1 text-muted-foreground">
-                          Cutting from a larger piece?
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={l.sourceQty ?? ""}
-                            placeholder={`size (${l.stockUom})`}
-                            aria-label={`${l.sku} source size`}
-                            onChange={(e) => setSourceQty(l.sku, e.target.value)}
-                            className="h-6 w-20 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
-                          />
-                        </label>
+                        {productRemnants.length > 0 && !l.consumeRemnantId && (
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="text-muted-foreground">Use an offcut:</span>
+                            {productRemnants.map((r) => (
+                              <button
+                                key={r.id}
+                                onClick={() => selectRemnant(l.sku, r)}
+                                title={r.sourceOrderNo ? `From ${r.sourceOrderNo}` : undefined}
+                                className="rounded-md border border-brand/30 bg-brand/5 px-1.5 py-0.5 font-medium text-brand transition hover:bg-brand/10"
+                              >
+                                {r.qty} {l.stockUom}
+                                {r.discountPct > 0 ? ` (-${r.discountPct}%)` : ""}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {selectedRemnant ? (
+                          <span className="flex items-center gap-1 text-muted-foreground">
+                            Cutting from offcut: <span className="font-medium text-brand">{selectedRemnant.qty} {l.stockUom}</span>
+                            <button
+                              onClick={() => selectRemnant(l.sku, null)}
+                              aria-label={`${l.sku} clear selected remnant`}
+                              className="text-muted-foreground hover:text-critical"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        ) : (
+                          <label className="flex items-center gap-1 text-muted-foreground">
+                            Cutting from a larger piece?
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={l.sourceQty ?? ""}
+                              placeholder={`size (${l.stockUom})`}
+                              aria-label={`${l.sku} source size`}
+                              onChange={(e) => setSourceQty(l.sku, e.target.value)}
+                              className="h-6 w-20 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
+                            />
+                          </label>
+                        )}
                         {remnant > 0 && (
                           <span className="flex items-center gap-1.5">
                             <span className="font-medium text-foreground">

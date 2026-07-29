@@ -60,6 +60,15 @@ export type OrderLineDto = {
   lineWeight: number;
   // BRD §2.3: cashier's free-text note for this specific line.
   notes?: string | null;
+  // Cut-to-size remnant tracking (see OrderLine) — measuredQty is the real measured cut when
+  // MinCutQty raised qty above it; sourceQty/remnantQty/remnantAction describe an optional
+  // remnant-tracked cut. consumedRemnantId (Cut Optimization) is set when this cut was fulfilled from
+  // an existing Remnant instead of bulk stock — stockQty is 0 for those lines.
+  measuredQty?: number | null;
+  sourceQty?: number | null;
+  remnantQty?: number | null;
+  remnantAction?: string | null;
+  consumedRemnantId?: number | null;
 };
 export type OrderPaymentDto = {
   method: string;
@@ -294,6 +303,10 @@ export function useTestPricingRule() {
 // manualUnitPrice (BRD §7 CR-039): an absolute price override for this line — replaces the resolved
 // list price entirely (no discount stacks on top), gated by Role.CanOverrideItemPrice or a
 // PriceOverride approval (see CheckoutRequest.priceOverrideApprovalRequestId), distinct from a discount.
+// sourceQty/remnantAction (cut-to-size remnant tracking): the size of the piece/roll being cut from —
+// omit to deduct exactly the measured cut. consumeRemnantId (Cut Optimization): fulfil this cut from
+// an existing tracked Remnant instead of bulk stock — sourceQty/remnantAction still apply on top for
+// a leftover from cutting that offcut itself.
 export type CartLine = {
   productId: number;
   qty: number;
@@ -305,6 +318,9 @@ export type CartLine = {
   notes?: string | null;
   manualDiscountPct?: number | null;
   manualUnitPrice?: number | null;
+  sourceQty?: number | null;
+  remnantAction?: "Restock" | "Scrap" | null;
+  consumeRemnantId?: number | null;
 };
 export type PaymentInput = { method: string; amount: number };
 export type ManualDiscountInput = { type: "Percentage" | "Fixed"; value: number };

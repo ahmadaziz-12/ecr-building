@@ -77,3 +77,14 @@ public record ReviewStockCountRequest(bool Approved, string? Reason);
 // Final sign-off: Approved posts the variance (PendingApproval -> Completed) exactly like the old
 // Post did; rejecting (Reason required) moves to Rejected — still no stock write.
 public record ApproveStockCountRequest(bool Approved, string? Reason, int? ApproverUserId, string? Notes);
+
+// ————— Remnants Management (Cut Optimization) —————
+// A tracked offcut left over from a cut-to-size sale — kept as its own sellable piece instead of
+// being merged back into the product's generic branch stock. Qty/LengthM/WidthM/HeightM follow the
+// product's own CutToSizeUnit convention (Length: LengthM only; Area: Length×Width; Volume: all three).
+public record RemnantDto(
+    int Id, int ProductId, string Sku, string ProductName, string CutToSizeUnit, string StockUom,
+    int BranchId, string BranchName, decimal Qty, decimal? LengthM, decimal? WidthM, decimal? HeightM,
+    string Status, decimal DiscountPct, string? Notes, DateTime CreatedAt,
+    int? SourceOrderLineId, string? SourceOrderNo);
+public record UpdateRemnantRequest(decimal DiscountPct, string? Notes);
