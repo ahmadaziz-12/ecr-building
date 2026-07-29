@@ -1,0 +1,18 @@
+stages:
+  - pull
+
+building-ecr:
+  stage: pull
+  tags:
+    - new_mytm_dev
+  variables:
+    GIT_STRATEGY: none
+
+  script:
+    - cd /www/wwwroot/ECR/building-ecr
+    - git pull origin main
+    - ./deploy.sh
+    - echo "Building Ecr updated and container deployed successfully"
+
+  only:
+    - main
