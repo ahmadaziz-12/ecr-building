@@ -24,6 +24,7 @@ public static class PermissionCatalog
         new("/operate/cashier-workspace", "Pos", "Cashier Workspace"),
         new("/operate/cashier-shift", "Pos", "Cashier Shifts"),
         new("/operate/approval-center", "Pos", "Approval Center"),
+        new("/operate/customer-display", "Pos", "Customer Display"),
 
         new("/stock/inventory", "Inventory", "Product Catalog"),
         new("/stock/variant-groups", "Inventory", "Variant Groups"),

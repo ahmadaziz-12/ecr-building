@@ -159,9 +159,14 @@ function RootComponent() {
   );
 }
 
+// A tablet on a stand at the till, not a staff workstation — still requires login (same session as
+// everywhere else), but renders full-screen with none of the staff sidebar/search chrome.
+const FULLSCREEN_ROUTES = new Set(["/operate/customer-display"]);
+
 function AuthGate() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isPublic = pathname === "/";
+  const isFullscreen = FULLSCREEN_ROUTES.has(pathname);
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
 
@@ -180,6 +185,8 @@ function AuthGate() {
       </div>
     );
   }
+
+  if (isFullscreen) return <Outlet />;
 
   return (
     <AppLayout>

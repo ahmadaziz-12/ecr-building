@@ -14,6 +14,7 @@ export const PERMISSION_PAGES: PermissionPage[] = [
   { key: "/operate/customers", label: "Customers & Contractors", section: "Operate" },
   { key: "/operate/cashier-workspace", label: "Cashier Workspace", section: "Operate" },
   { key: "/operate/cashier-shift", label: "Cashier Shifts", section: "Operate" },
+  { key: "/operate/customer-display", label: "Customer Display", section: "Operate" },
 
   { key: "/stock/inventory", label: "Product Catalog", section: "Products & Stock" },
   { key: "/admin/categories", label: "Categories & Attributes", section: "Products & Stock" },

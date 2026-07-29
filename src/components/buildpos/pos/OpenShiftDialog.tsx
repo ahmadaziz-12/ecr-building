@@ -7,8 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useOpenShift, useShiftTerminals } from "@/lib/api/pos";
 import { SARIcon } from "@/lib/buildpos/currency";
+import { useAuth } from "@/lib/api/auth";
 
 export function OpenShiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { user } = useAuth();
   // The cashier-shift module's own terminal list, not Network → Terminals: that endpoint needs a
   // Network permission a cashier's role may not carry, and its 403 left this dropdown empty — which
   // is why "Riyadh Main Yard - Till 1" looked unregistered when it was only unreadable. The backend
@@ -22,6 +24,12 @@ export function OpenShiftDialog({ open, onOpenChange }: { open: boolean; onOpenC
   const [terminalId, setTerminalId] = useState<string>("");
   const [openingFloat, setOpeningFloat] = useState("1000");
   const openShift = useOpenShift();
+  // A terminal with an assigned cashier always opens its shift under THAT cashier server-side (see
+  // CashierShiftsController.Open) — surfaced here so a supervisor/manager opening it on someone
+  // else's behalf sees who it's really for, instead of assuming it opens under their own name.
+  const selectedTerminal = list.find((t) => String(t.id) === terminalId);
+  const opensForSomeoneElse =
+    selectedTerminal?.assignedCashierId != null && selectedTerminal.assignedCashierId !== user?.id;
 
   function reset() {
     setTerminalId("");
@@ -72,6 +80,11 @@ export function OpenShiftDialog({ open, onOpenChange }: { open: boolean; onOpenC
           )}
           {!isLoading && !isError && list.length > 0 && list.every((t) => t.openShiftBlockedBy !== null) && (
             <p className="mt-1.5 text-[11px] text-muted-foreground">Every terminal you can use already has an open shift — it must be closed before a new one starts.</p>
+          )}
+          {opensForSomeoneElse && (
+            <p className="mt-1.5 text-[11px] font-medium text-brand">
+              Opens for {selectedTerminal!.assignedCashierName} — this terminal's assigned cashier.
+            </p>
           )}
         </div>
         <div>

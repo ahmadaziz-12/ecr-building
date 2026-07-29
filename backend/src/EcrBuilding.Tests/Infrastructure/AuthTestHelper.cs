@@ -16,6 +16,16 @@ namespace EcrBuilding.Tests.Infrastructure;
 /// </summary>
 public static class AuthTestHelper
 {
+    // Raw token only — used wherever a test needs the "access_token" cookie value itself rather than
+    // an HttpClient carrying it (e.g. a SignalR HubConnection's Headers, which isn't cookie-jar based).
+    public static string MintAccessToken(this CustomWebApplicationFactory factory, User user)
+    {
+        using var scope = factory.Services.CreateScope();
+        var jwtTokenService = scope.ServiceProvider.GetRequiredService<IJwtTokenService>();
+        var claims = UserClaimsFactory.Build(user);
+        return jwtTokenService.CreateAccessToken(user, claims).Token;
+    }
+
     public static HttpClient CreateAuthenticatedClient(this CustomWebApplicationFactory factory, User user)
     {
         var client = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
@@ -23,13 +33,8 @@ public static class AuthTestHelper
             HandleCookies = true,
         });
 
-        using var scope = factory.Services.CreateScope();
-        var jwtTokenService = scope.ServiceProvider.GetRequiredService<IJwtTokenService>();
-
-        var claims = UserClaimsFactory.Build(user);
-
-        var token = jwtTokenService.CreateAccessToken(user, claims);
-        client.DefaultRequestHeaders.Add("Cookie", $"access_token={token.Token}");
+        var token = factory.MintAccessToken(user);
+        client.DefaultRequestHeaders.Add("Cookie", $"access_token={token}");
         return client;
     }
 }

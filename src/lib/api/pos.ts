@@ -115,6 +115,7 @@ export type CashierShiftDto = {
   terminalId: number;
   terminalName: string;
   cashierName: string;
+  cashierUserId: number;
   openedAt: string;
   closedAt: string | null;
   openingFloat: number;
@@ -691,6 +692,8 @@ export type ShiftTerminalDto = {
   branchName: string;
   status: string;
   openShiftBlockedBy: string | null;
+  assignedCashierId: number | null;
+  assignedCashierName: string | null;
 };
 export const useShiftTerminals = (enabled = true) =>
   useQuery({

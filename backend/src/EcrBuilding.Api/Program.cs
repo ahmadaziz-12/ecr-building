@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using EcrBuilding.Api.Hubs;
 using EcrBuilding.Api.Middleware;
 using EcrBuilding.Infrastructure;
 using EcrBuilding.Infrastructure.Persistence;
@@ -28,6 +30,13 @@ builder.Services.AddControllers().AddJsonOptions(o =>
 });
 builder.Services.AddOpenApi();
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// Backs the customer-facing display: relays a cashier's cart to a paired second screen. JSON (not
+// MessagePack) so the same camelCase contract as every REST DTO applies here too.
+builder.Services.AddSignalR().AddJsonProtocol(options =>
+{
+    options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+});
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
 builder.Services.AddAuthentication(options =>
@@ -97,6 +106,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<PosSessionHub>("/hubs/pos-session").RequireCors(CorsPolicy);
 
 app.Run();
 

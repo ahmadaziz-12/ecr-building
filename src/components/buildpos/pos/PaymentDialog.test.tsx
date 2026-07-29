@@ -2,18 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { http, HttpResponse } from "msw";
-import { server } from "@/test/msw/server";
-import { API_BASE } from "@/lib/api/client";
 import type { CustomerDto } from "@/lib/api/pos";
 import { PaymentDialog } from "./PaymentDialog";
 
 function renderDialog(ui: React.ReactElement) {
-  server.use(
-    http.get(`${API_BASE}/api/pos/orders/loyalty-config`, () =>
-      HttpResponse.json({ pointsPerSarEarned: 1, pointsPerSarRedeemed: 100, minRedeemPoints: 500, maxRedeemPctOfTotal: 20 }),
-    ),
-  );
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
 }
