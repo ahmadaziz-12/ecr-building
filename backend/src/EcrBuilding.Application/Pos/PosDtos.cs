@@ -155,7 +155,11 @@ public record VoidLineRequest(int OrderLineId, string Reason, string? ReasonCode
 public record ShiftPaymentBreakdownDto(string Method, decimal Amount, int Count);
 public record CashierShiftReportDto(string ReportType, int ShiftId, string TerminalName, string CashierName, DateTime OpenedAt, DateTime? ClosedAt, DateTime GeneratedAt, decimal OpeningFloat, decimal CashSales, decimal CashIn, decimal CashOut, decimal ExpectedCash, decimal? CountedCash, decimal? Variance, int OrderCount, IReadOnlyList<ShiftPaymentBreakdownDto> PaymentBreakdown);
 
-public record QuotationLineDto(int ProductId, string Sku, string ProductName, decimal Qty, decimal UnitPrice, decimal DiscountPct, decimal VatRate, decimal LineTotal);
+// Uom/LengthM/WidthM/HeightM (BRD §2.3 UOM engine + cut-to-size, ported from OrdersController.Checkout):
+// null/"" Uom means "the product's own stock UOM" (also true of every quotation created before this
+// was added). LengthM/WidthM/HeightM are set only for a cut-to-size line, mirroring OrderLine.
+public record QuotationLineDto(int ProductId, string Sku, string ProductName, decimal Qty, decimal UnitPrice, decimal DiscountPct, decimal VatRate, decimal LineTotal,
+    string Uom = "", decimal? LengthM = null, decimal? WidthM = null, decimal? HeightM = null);
 public record QuotationDto(
     int Id, string QuoteNo, int BranchId, int? CustomerId, string CustomerName, string CreatedByName, string Status,
     DateTime ValidUntil, decimal SubTotal, decimal DiscountTotal, decimal VatTotal, decimal GrandTotal, string? Notes,

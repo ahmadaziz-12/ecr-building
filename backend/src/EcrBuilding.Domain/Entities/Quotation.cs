@@ -41,7 +41,23 @@ public class QuotationLine
     public Quotation? Quotation { get; set; }
     public int ProductId { get; set; }
     public Product? Product { get; set; }
+    // Qty/UnitPrice are in the SELLING UOM (BRD §2.3), mirroring OrderLine exactly — quoting 2 Pallet
+    // of a Bag-stocked product stores Qty=2, Uom="Pallet", UnitPrice=50×bag-price, while StockQty is
+    // the real physical demand in stock UOM that reservation/release/Convert must always use instead
+    // of Qty. Legacy rows predating this stay Uom="" (falls back to the product's stock UOM as before)
+    // with StockQty equal to Qty.
     public decimal Qty { get; set; }
+    public string Uom { get; set; } = string.Empty;
+    public decimal StockQty { get; set; }
+    // Cut-to-size dimensions the user entered, from which Qty (length/area/volume, per the product's
+    // CutToSizeUnit) was computed — same convention as OrderLine. WidthM/HeightM stay null outside
+    // Area/Volume mode.
+    public decimal? LengthM { get; set; }
+    public decimal? WidthM { get; set; }
+    public decimal? HeightM { get; set; }
+    // Cut-to-size minimum-charge audit trail: set only when Product.MinCutQty raised the billed Qty
+    // above the actual measured length/area/volume — null when no minimum applied.
+    public decimal? MeasuredQty { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal DiscountPct { get; set; }
     public decimal VatRate { get; set; }

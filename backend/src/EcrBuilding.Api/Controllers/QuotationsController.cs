@@ -125,7 +125,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit, IStockRe
         // Release the old lines' hold and re-reserve against the new lines — simplest correct way to
         // land on the right Reserved total whether the edit grew, shrank, or just re-priced the cart.
         await using var tx = await db.Database.BeginTransactionAsync(ct);
-        await reservations.ReleaseAsync(quotation.BranchId, quotation.Lines.Select(l => (l.ProductId, l.Qty)), ct);
+        await reservations.ReleaseAsync(quotation.BranchId, quotation.Lines.Select(l => (l.ProductId, l.StockQty)), ct);
         var reserveError = await ReserveOrConflict(quotation.BranchId, linesResult.Lines!, ct);
         if (reserveError is not null) { await tx.RollbackAsync(ct); return reserveError!; }
 
@@ -164,7 +164,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit, IStockRe
         if (quotation.Status == QuotationStatus.Cancelled) return NoContent();
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
-        await reservations.ReleaseAsync(quotation.BranchId, quotation.Lines.Select(l => (l.ProductId, l.Qty)), ct);
+        await reservations.ReleaseAsync(quotation.BranchId, quotation.Lines.Select(l => (l.ProductId, l.StockQty)), ct);
         quotation.Status = QuotationStatus.Cancelled;
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
@@ -216,8 +216,9 @@ public class QuotationsController(AppDbContext db, IAuditService audit, IStockRe
             // at the time) — then deduct exactly like a normal checkout sale, with the same atomic
             // (OnHand - Reserved) >= qty guard. Releasing first (rather than combining into one
             // statement assuming Reserved already covers qty) keeps this correct whether or not this
-            // quotation actually held a reservation for the line.
-            var qty = (double)line.Qty;
+            // quotation actually held a reservation for the line. Always StockQty (the real physical
+            // demand), never Qty (which is in the line's own selling UOM once one was quoted).
+            var qty = (double)line.StockQty;
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $"UPDATE BranchStockLevels SET Reserved = Reserved - {qty} WHERE ProductId = {line.ProductId} AND BranchId = {quotation.BranchId} AND Reserved >= {qty}",
                 ct);
@@ -228,12 +229,14 @@ public class QuotationsController(AppDbContext db, IAuditService audit, IStockRe
             {
                 return BadRequest(new { error = $"Insufficient stock for {line.Product?.Sku}." });
             }
-            // Quotation lines are always priced in stock UOM (the quotation builder has no UOM
-            // selector), so selling qty and stock qty are the same number here.
+            // Carries the quoted UOM/cut-to-size dimensions straight through to the real order line,
+            // so a converted quotation behaves exactly like the equivalent line rung up directly at
+            // POS Checkout (same selling UOM shown on the receipt, same measured-cut audit trail).
             order.Lines.Add(new OrderLine
             {
-                ProductId = line.ProductId, Qty = line.Qty, Uom = line.Product?.StockUom ?? "",
-                StockQty = line.Qty, UnitPrice = line.UnitPrice,
+                ProductId = line.ProductId, Qty = line.Qty, Uom = line.Uom,
+                StockQty = line.StockQty, LengthM = line.LengthM, WidthM = line.WidthM, HeightM = line.HeightM,
+                MeasuredQty = line.MeasuredQty, UnitPrice = line.UnitPrice,
                 DiscountPct = line.DiscountPct, VatRate = line.VatRate, LineTotal = line.LineTotal,
             });
         }
@@ -260,7 +263,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit, IStockRe
         if (releaseStock)
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct);
-            await reservations.ReleaseAsync(quotation.BranchId, quotation.Lines.Select(l => (l.ProductId, l.Qty)), ct);
+            await reservations.ReleaseAsync(quotation.BranchId, quotation.Lines.Select(l => (l.ProductId, l.StockQty)), ct);
             quotation.Status = to;
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
@@ -284,7 +287,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit, IStockRe
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         foreach (var q in stale)
         {
-            await reservations.ReleaseAsync(q.BranchId, q.Lines.Select(l => (l.ProductId, l.Qty)), ct);
+            await reservations.ReleaseAsync(q.BranchId, q.Lines.Select(l => (l.ProductId, l.StockQty)), ct);
             q.Status = QuotationStatus.Expired;
         }
         await db.SaveChangesAsync(ct);
@@ -296,7 +299,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit, IStockRe
     // caller is expected to already be inside a transaction and roll it back when this returns non-null.
     private async Task<ActionResult<QuotationDto>?> ReserveOrConflict(int branchId, IEnumerable<QuotationLine> lines, CancellationToken ct)
     {
-        var failedProductId = await reservations.ReserveAsync(branchId, lines.Select(l => (l.ProductId, l.Qty)), ct);
+        var failedProductId = await reservations.ReserveAsync(branchId, lines.Select(l => (l.ProductId, l.StockQty)), ct);
         if (failedProductId is null) return null;
         var sku = (await db.Products.FindAsync([failedProductId], ct))?.Sku ?? failedProductId.ToString();
         return BadRequest(new { error = $"Insufficient stock for {sku}." });
@@ -350,15 +353,90 @@ public class QuotationsController(AppDbContext db, IAuditService audit, IStockRe
     // OrdersController.Checkout. A manual per-line price override (CR-039) replaces the resolved
     // price entirely, exempt from further discount, exactly like checkout. Returns an error string
     // instead of throwing so both callers can turn it into a 400.
+    //
+    // BRD §2.3 UOM engine + cut-to-size, ported from OrdersController.Checkout: a quotation line can
+    // now be entered in an alternate selling UOM (Pallet/Ton/…) or as cut-to-size dimensions, the same
+    // as POS. Deliberately NOT ported: Remnant/offcut reuse and Serial Number Tracking — a quotation
+    // never actually touches physical stock beyond reserving a quantity, so "cut from this specific
+    // offcut" and "these exact serial numbers" have nothing to attach to until it's converted to a
+    // real order (at which point Convert below creates ordinary OrderLines the cashier can still work
+    // with normally).
     private async Task<(List<QuotationLine>? Lines, string? Error)> BuildLines(
         List<CartLineInput> requestLines, Customer? customer, decimal discountPct, bool isManualDiscount,
         List<PricingRule> quantityRules, List<PricingRule> promoRules, CancellationToken ct)
     {
+        var productIds = requestLines.Select(l => l.ProductId).Distinct().ToList();
+        var productsById = await db.Products.Include(p => p.UomConversions)
+            .Where(p => productIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, ct);
+
         var lines = new List<QuotationLine>();
         foreach (var line in requestLines)
         {
-            var product = await db.Products.FindAsync([line.ProductId], ct);
-            if (product is null) return (null, $"Unknown product {line.ProductId}.");
+            if (!productsById.TryGetValue(line.ProductId, out var product))
+            {
+                return (null, $"Unknown product {line.ProductId}.");
+            }
+
+            decimal enteredQty = line.Qty;
+            var sellUom = string.IsNullOrWhiteSpace(line.Uom) ? product.StockUom : line.Uom!;
+            decimal factor;
+            decimal? lengthM = null, widthM = null, heightM = null, measuredQty = null;
+
+            if (product.IsCutToSize && line.LengthM is not null)
+            {
+                if (line.LengthM <= 0)
+                {
+                    return (null, $"Cut-to-size length for {product.Sku} must be positive (got {line.LengthM}).");
+                }
+                if (product.CutToSizeUnit == "Length")
+                {
+                    enteredQty = UomMath.LengthOf(line.LengthM.Value);
+                    lengthM = line.LengthM;
+                }
+                else if (product.CutToSizeUnit == "Volume")
+                {
+                    if (line.WidthM is null || line.HeightM is null || line.WidthM <= 0 || line.HeightM <= 0)
+                    {
+                        return (null, $"Cut-to-size dimensions for {product.Sku} must be positive (got {line.LengthM} × {line.WidthM} × {line.HeightM}).");
+                    }
+                    enteredQty = UomMath.VolumeOf(line.LengthM.Value, line.WidthM.Value, line.HeightM.Value);
+                    lengthM = line.LengthM; widthM = line.WidthM; heightM = line.HeightM;
+                }
+                else // "Area" — the original/default behavior.
+                {
+                    if (line.WidthM is null || line.WidthM <= 0)
+                    {
+                        return (null, $"Cut-to-size dimensions for {product.Sku} must be positive (got {line.LengthM} × {line.WidthM}).");
+                    }
+                    enteredQty = UomMath.AreaOf(line.LengthM.Value, line.WidthM.Value);
+                    lengthM = line.LengthM; widthM = line.WidthM;
+                }
+                sellUom = product.StockUom;
+                factor = 1m;
+
+                // Same minimum-billable-quantity floor as checkout — only the billed Qty/price move,
+                // never the measured dimensions above.
+                if (product.MinCutQty is decimal minQty && enteredQty < minQty)
+                {
+                    measuredQty = enteredQty;
+                    enteredQty = minQty;
+                }
+            }
+            else
+            {
+                var resolved = UomMath.FactorToStock(sellUom, product.StockUom,
+                    product.UomConversions.Select(c => (c.Uom, c.FactorToStock)));
+                if (resolved is null)
+                {
+                    return (null, $"No conversion factor is configured for {product.Sku} in UOM \"{sellUom}\". Configure it in the product catalog before quoting in this unit.");
+                }
+                factor = resolved.Value;
+            }
+
+            if (enteredQty <= 0) return (null, $"Quantity for {product.Sku} must be positive.");
+            // The real physical demand this quotation reserves, in stock UOM — always what
+            // reservation/release/Convert must use instead of Qty (which is in the selling UOM).
+            var stockQty = UomMath.ToStockQty(measuredQty ?? enteredQty, factor);
 
             // BRD §7 (CR-038): quote at the customer's assigned price list — a Contractor/Wholesale/
             // Project customer's formal quotation must match what checkout would actually charge them,
@@ -379,12 +457,11 @@ public class QuotationsController(AppDbContext db, IAuditService audit, IStockRe
 
             if (line.ManualUnitPrice is <= 0) return (null, $"Manual price override for {product.Sku} must be positive.");
             var manualPriceOverride = line.ManualUnitPrice is not null;
-            var unitPrice = manualPriceOverride ? line.ManualUnitPrice!.Value : listPrice;
+            var unitPrice = manualPriceOverride ? line.ManualUnitPrice!.Value : listPrice * factor;
 
-            // Quotation lines are always priced/quantified in stock UOM (no UOM selector on the
-            // quotation builder), so line.Qty is directly comparable to MinQuantity. Shared with
-            // OrdersController.Checkout via PricingEngine so the two can't silently disagree.
-            var quantityPct = PricingEngine.ResolveQuantityPct(quantityRules, product.Sku, line.Qty);
+            // Quantity rules match on the real physical quantity (stock UOM), same basis
+            // OrdersController.Checkout uses — "10+ units" means 10 physical units, not 10 pallets.
+            var quantityPct = PricingEngine.ResolveQuantityPct(quantityRules, product.Sku, stockQty);
             // BRD §7 (CR-040): Promotional rules auto-apply within their date window, in the same
             // "larger of" group as everything else — never stacked on top.
             var promoPct = PricingEngine.ResolvePromoPct(promoRules, product.Sku);
@@ -394,11 +471,12 @@ public class QuotationsController(AppDbContext db, IAuditService audit, IStockRe
             var effectiveDiscountPct = listPriceApplied && !isManualDiscount ? 0m : discountPct;
             var lineDiscountPct = manualPriceOverride ? 0m : PricingEngine.ResolveLineDiscountPct(effectiveDiscountPct, quantityPct, promoPct, 0m);
 
-            var lineTotal = Math.Round(line.Qty * unitPrice * (1 - lineDiscountPct / 100), 2);
+            var lineTotal = Math.Round(enteredQty * unitPrice * (1 - lineDiscountPct / 100), 2);
             lines.Add(new QuotationLine
             {
-                ProductId = product.Id, Qty = line.Qty, UnitPrice = unitPrice,
-                DiscountPct = lineDiscountPct, VatRate = product.VatRate, LineTotal = lineTotal,
+                ProductId = product.Id, Qty = enteredQty, Uom = sellUom, StockQty = stockQty,
+                LengthM = lengthM, WidthM = widthM, HeightM = heightM, MeasuredQty = measuredQty,
+                UnitPrice = unitPrice, DiscountPct = lineDiscountPct, VatRate = product.VatRate, LineTotal = lineTotal,
             });
         }
         return (lines, null);
@@ -418,6 +496,7 @@ public class QuotationsController(AppDbContext db, IAuditService audit, IStockRe
         q.Id, q.QuoteNo, q.BranchId, q.CustomerId, q.Customer?.NameEn ?? "Walk-in Customer", q.CreatedBy?.Name ?? "",
         q.Status.ToString(), q.ValidUntil, q.SubTotal, q.DiscountTotal, q.VatTotal, q.GrandTotal, q.Notes,
         q.ConvertedOrderId, q.ConvertedOrder?.OrderNo, q.CreatedAt,
-        q.Lines.Select(l => new QuotationLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.UnitPrice, l.DiscountPct, l.VatRate, l.LineTotal)).ToList(),
+        q.Lines.Select(l => new QuotationLineDto(l.ProductId, l.Product?.Sku ?? "", l.Product?.NameEn ?? "", l.Qty, l.UnitPrice, l.DiscountPct, l.VatRate, l.LineTotal,
+            l.Uom, l.LengthM, l.WidthM, l.HeightM)).ToList(),
         q.ProjectCode, q.CustomerReference, q.DiscountPct);
 }

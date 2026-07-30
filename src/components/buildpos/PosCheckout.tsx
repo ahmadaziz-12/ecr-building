@@ -295,6 +295,14 @@ export function PosCheckout() {
   const [notesEditingSku, setNotesEditingSku] = useState<string | null>(null);
   // sku of the cart line whose price-override input is currently expanded — null collapses all.
   const [priceEditingSku, setPriceEditingSku] = useState<string | null>(null);
+  // sku of the cart line whose per-line discount input is currently expanded — null collapses all.
+  // Kept out of the always-visible qty row (same reasoning as notes/price override above) so a
+  // rarely-used field doesn't crowd the row every cashier sees on every line.
+  const [discountEditingSku, setDiscountEditingSku] = useState<string | null>(null);
+  // Whether the coupon/manual-discount/custom-fee controls are expanded — most sales use none of
+  // these, so they're tucked behind a single disclosure instead of three permanently-open form rows
+  // between the cart and the totals. Auto-opens (below) once any of them is actually in use.
+  const [discountsPanelOpen, setDiscountsPanelOpen] = useState(false);
   const [bundleCart, setBundleCart] = useState<BundleCartEntry[]>([]);
   // Phase 3 Bundle Suggestion Engine: bundle ids the cashier has explicitly said "no thanks" to for
   // THIS sale — cleared by resetSale so a fresh ticket can suggest again.
@@ -1466,6 +1474,18 @@ export function PosCheckout() {
   // resolved list price (see products/listPriceFor above).
   const lineUnitPrice = (l: CartLine) => l.manualUnitPrice ?? l.price;
 
+  // BRD §2.3 enhancement: mirrors OrdersController.Checkout's MinCutQty floor exactly — a cut
+  // smaller than the product's configured minimum is BILLED at that minimum. Every money
+  // calculation (line price, subtotal, VAT, total) must use this, not the raw measured l.qty, or
+  // the cart shown here understates what Charge will actually ask for and the payment gets
+  // rejected as "doesn't match order total". Stock deduction and displayed weight intentionally
+  // keep using the real measured l.qty elsewhere — only the billed amount is floored.
+  const billedQty = (l: CartLine): number => {
+    if (!l.isCutToSize) return l.qty;
+    const minCutQty = products.find((p) => p.sku === l.sku)?.minCutQty ?? null;
+    return minCutQty != null && l.qty > 0 && l.qty < minCutQty ? minCutQty : l.qty;
+  };
+
   // Phase 2: the actual charge for a line once Buy-X-Get-Y/pallet splits are accounted for — the
   // naive qty × unitPrice × (1 - discount%) undercounts what checkout will actually charge once a
   // rule frees or re-prices part of the quantity. subtotal (below) intentionally keeps using the
@@ -1489,7 +1509,7 @@ export function PosCheckout() {
         );
       }
     }
-    return lineUnitPrice(l) * l.qty * (1 - lineDiscountPct(l) / 100);
+    return lineUnitPrice(l) * billedQty(l) * (1 - lineDiscountPct(l) / 100);
   };
 
   // BRD §4.3.3: the points balance + SAR equivalent must be visible at checkout, not just inside
@@ -1510,7 +1530,7 @@ export function PosCheckout() {
   );
 
   const subtotal =
-    cart.reduce((s, l) => s + lineUnitPrice(l) * l.qty, 0) +
+    cart.reduce((s, l) => s + lineUnitPrice(l) * billedQty(l), 0) +
     bundleCart.reduce((s, b) => s + b.individualTotal * b.qty, 0);
   // Total kg across the cart — matters for bundle/pallet items (rebar, cement) where the physical
   // load size is what the yard crew and delivery truck actually care about, not just the SAR total.
@@ -1617,6 +1637,13 @@ export function PosCheckout() {
       deliveryCity.trim() &&
       deliveryDate,
     );
+
+  // Whether the coupon/manual-discount/custom-fee disclosure should be treated as "in use" — drives
+  // both the collapsed-state "active" badge and auto-expanding it once any of them actually applies,
+  // so a discount already on the sale is never hidden behind a collapsed panel.
+  const hasActiveCouponDiscountFees =
+    Boolean(appliedCoupon?.valid) || Boolean(discountType && discountValue) || customFees.length > 0;
+  const showDiscountsPanel = discountsPanelOpen || hasActiveCouponDiscountFees;
 
   const allFees = autoDeliveryFee ? [...customFees, autoDeliveryFee] : customFees;
   const feesTotal = allFees.reduce(
@@ -2981,6 +3008,10 @@ export function PosCheckout() {
                           ? "Edit price override"
                           : "Override this item's price"}
                       </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setDiscountEditingSku(l.sku)}>
+                        <Percent className="h-4 w-4" />
+                        {l.manualDiscountPct ? `Edit discount (${l.manualDiscountPct}%)` : "Add a discount"}
+                      </DropdownMenuItem>
                       <DropdownMenuItem onSelect={() => toggleDelivery(l.sku)}>
                         <Truck className="h-4 w-4" />
                         {l.requiresDelivery
@@ -3077,6 +3108,38 @@ export function PosCheckout() {
                   )}
                 </div>
               )}
+              {/* BRD §2.3/§6.2: per-line discount % — expanded via the "More actions" menu, or
+                  whenever a discount is already set so it's never hidden after the menu item is
+                  toggled closed. Kept off the always-visible qty row (see discountEditingSku). */}
+              {(discountEditingSku === l.sku || (l.manualDiscountPct ?? 0) > 0) && (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <div className="relative w-28">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.5"
+                      value={l.manualDiscountPct ?? ""}
+                      placeholder="0"
+                      aria-label={`${l.sku} discount percent`}
+                      onChange={(e) => setLineDiscountPct(l.sku, e.target.value)}
+                      onBlur={() => {
+                        if (!l.manualDiscountPct) setDiscountEditingSku(null);
+                      }}
+                      className="h-7 w-full rounded-md border border-black/10 bg-white px-2 pr-6 text-xs outline-none focus:border-brand"
+                    />
+                    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
+                      %
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">line discount</span>
+                  {maxLineManualPct > 0 && lineDiscountNeedsApproval && (l.manualDiscountPct ?? 0) > 0 && (
+                    <span className="shrink-0 text-[10px] font-medium text-warning">
+                      needs approval
+                    </span>
+                  )}
+                </div>
+              )}
               {l.isSoldByWeight ? (
                 // Weighing Scale integration: qty comes from a live reading off the paired scale
                 // instead of manual entry — "Capture" locks the current reading into the line via
@@ -3161,27 +3224,13 @@ export function PosCheckout() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      {/* BRD §2.3/§6.2: cashier-entered per-line discount %, gated by the same
-                        authorization ceiling as the order-level manual discount. */}
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.5"
-                        value={l.manualDiscountPct ?? ""}
-                        placeholder="0%"
-                        aria-label={`${l.sku} discount percent`}
-                        title="Per-line discount %"
-                        onChange={(e) => setLineDiscountPct(l.sku, e.target.value)}
-                        className="h-7 w-12 rounded-md border border-black/10 bg-white px-1 text-center text-xs outline-none focus:border-brand"
-                      />
                       {l.manualUnitPrice != null ? (
                         <div className="text-right">
                           <p className="font-mono text-[10px] text-muted-foreground line-through">
-                            <CurrencyText value={money(l.price * l.qty)} />
+                            <CurrencyText value={money(l.price * billedQty(l))} />
                           </p>
                           <p className="font-mono text-sm font-semibold text-brand">
-                            <CurrencyText value={money(l.manualUnitPrice * l.qty)} />
+                            <CurrencyText value={money(l.manualUnitPrice * billedQty(l))} />
                           </p>
                         </div>
                       ) : lineChargeTotal(l) !== l.price * l.qty ? (
@@ -3219,22 +3268,38 @@ export function PosCheckout() {
                       (r) => r.productId === l.productId,
                     );
                     const selectedRemnant = productRemnants.find((r) => r.id === l.consumeRemnantId);
+                    // Only pay the bordered-card "look at me" treatment when there's actually extra
+                    // info to show (offcuts on offer, one selected, leftover to decide on, or below
+                    // the min charge) — otherwise this is just the plain one-line prompt every
+                    // cut-to-size line shows, and a cart with many such lines would turn into a wall
+                    // of boxes if every one of them got a card.
+                    const hasExtra =
+                      belowMinimum ||
+                      (productRemnants.length > 0 && !l.consumeRemnantId) ||
+                      Boolean(selectedRemnant) ||
+                      remnant > 0;
                     return (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                      <div
+                        className={
+                          hasExtra
+                            ? "mt-1.5 space-y-1 rounded-lg border border-black/10 bg-canvas/60 px-2 py-1.5 text-xs"
+                            : "mt-1.5 text-xs"
+                        }
+                      >
                         {belowMinimum && (
-                          <span className="font-medium text-warning">
+                          <p className="font-medium text-warning">
                             Billed at minimum {minCutQty} {l.stockUom} (measured {l.qty})
-                          </span>
+                          </p>
                         )}
                         {productRemnants.length > 0 && !l.consumeRemnantId && (
-                          <div className="flex flex-wrap items-center gap-1">
-                            <span className="text-muted-foreground">Use an offcut:</span>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-medium text-foreground">Offcuts available:</span>
                             {productRemnants.map((r) => (
                               <button
                                 key={r.id}
                                 onClick={() => selectRemnant(l.sku, r)}
                                 title={r.sourceOrderNo ? `From ${r.sourceOrderNo}` : undefined}
-                                className="rounded-md border border-brand/30 bg-brand/5 px-1.5 py-0.5 font-medium text-brand transition hover:bg-brand/10"
+                                className="rounded-md border border-brand/30 bg-brand/5 px-2 py-1 font-semibold text-brand transition hover:bg-brand/10"
                               >
                                 {r.qty} {l.stockUom}
                                 {r.discountPct > 0 ? ` (-${r.discountPct}%)` : ""}
@@ -3243,50 +3308,59 @@ export function PosCheckout() {
                           </div>
                         )}
                         {selectedRemnant ? (
-                          <span className="flex items-center gap-1 text-muted-foreground">
-                            Cutting from offcut: <span className="font-medium text-brand">{selectedRemnant.qty} {l.stockUom}</span>
+                          <div className="flex items-center justify-between gap-2 rounded-md bg-brand/10 px-2 py-1">
+                            <span className="text-foreground">
+                              Cutting from offcut:{" "}
+                              <span className="font-semibold text-brand">
+                                {selectedRemnant.qty} {l.stockUom}
+                              </span>
+                            </span>
                             <button
                               onClick={() => selectRemnant(l.sku, null)}
                               aria-label={`${l.sku} clear selected remnant`}
-                              className="text-muted-foreground hover:text-critical"
+                              className="flex items-center gap-1 font-medium text-muted-foreground hover:text-critical"
                             >
-                              <X className="h-3 w-3" />
+                              <X className="h-3.5 w-3.5" /> Clear
                             </button>
-                          </span>
+                          </div>
                         ) : (
-                          <label className="flex items-center gap-1 text-muted-foreground">
-                            Cutting from a larger piece?
+                          <div className="flex items-center gap-1.5 text-muted-foreground">
+                            <label htmlFor={`${l.sku}-source-qty`} className="font-medium text-foreground">
+                              Cutting from a larger piece?
+                            </label>
                             <input
+                              id={`${l.sku}-source-qty`}
                               type="number"
                               min="0"
                               step="0.01"
                               value={l.sourceQty ?? ""}
-                              placeholder={`size (${l.stockUom})`}
+                              placeholder="size"
                               aria-label={`${l.sku} source size`}
                               onChange={(e) => setSourceQty(l.sku, e.target.value)}
-                              className="h-6 w-20 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
+                              className="h-7 w-16 rounded-md border border-black/10 bg-white px-1.5 text-center font-mono outline-none focus:border-brand"
                             />
-                          </label>
+                            <span>{l.stockUom}</span>
+                          </div>
                         )}
                         {remnant > 0 && (
-                          <span className="flex items-center gap-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
                             <span className="font-medium text-foreground">
-                              Remnant: {remnant} {l.stockUom} —
+                              Leftover: {remnant} {l.stockUom} —
                             </span>
                             <button
                               onClick={() => setRemnantAction(l.sku, "Restock")}
-                              className={`rounded-md border px-1.5 py-0.5 font-medium transition ${l.remnantAction === "Restock" ? "border-brand bg-brand/10 text-brand" : "border-black/10 text-muted-foreground hover:bg-black/5"}`}
+                              className={`rounded-md border px-2 py-1 font-medium transition ${l.remnantAction === "Restock" ? "border-brand bg-brand/10 text-brand" : "border-black/10 text-muted-foreground hover:bg-black/5"}`}
                             >
-                              Restock
+                              Restock it
                             </button>
                             <button
                               onClick={() => setRemnantAction(l.sku, "Scrap")}
-                              className={`rounded-md border px-1.5 py-0.5 font-medium transition ${l.remnantAction === "Scrap" ? "border-critical bg-critical/10 text-critical" : "border-black/10 text-muted-foreground hover:bg-black/5"}`}
+                              className={`rounded-md border px-2 py-1 font-medium transition ${l.remnantAction === "Scrap" ? "border-critical bg-critical/10 text-critical" : "border-black/10 text-muted-foreground hover:bg-black/5"}`}
                             >
-                              Scrap
+                              Scrap it
                             </button>
-                            {!l.remnantAction && <span className="text-critical">choose one</span>}
-                          </span>
+                            {!l.remnantAction && <span className="font-medium text-critical">choose one</span>}
+                          </div>
                         )}
                       </div>
                     );
@@ -3334,20 +3408,6 @@ export function PosCheckout() {
                         ))}
                       </select>
                     )}
-                    {/* BRD §2.3/§6.2: cashier-entered per-line discount %, gated by the same
-                        authorization ceiling as the order-level manual discount. */}
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.5"
-                      value={l.manualDiscountPct ?? ""}
-                      placeholder="0%"
-                      aria-label={`${l.sku} discount percent`}
-                      title="Per-line discount %"
-                      onChange={(e) => setLineDiscountPct(l.sku, e.target.value)}
-                      className="h-7 w-12 rounded-md border border-black/10 bg-white px-1 text-center text-xs outline-none focus:border-brand"
-                    />
                   </div>
                   {l.manualUnitPrice != null ? (
                     <div className="text-right">
@@ -3590,8 +3650,29 @@ export function PosCheckout() {
           </div>
         )}
 
-        {/* Coupon / discount / custom fee controls */}
-        <div className="space-y-2 border-t border-black/5 bg-canvas px-4 py-2.5 text-xs">
+        {/* Coupon / discount / custom fee controls — collapsed by default (see discountsPanelOpen)
+            since most sales use none of them; auto-expanded once one actually applies. */}
+        <div className="border-t border-black/5 bg-canvas text-xs">
+          <button
+            type="button"
+            onClick={() => setDiscountsPanelOpen((v) => !v)}
+            className="flex w-full items-center justify-between px-4 py-2.5 text-left font-medium text-muted-foreground hover:text-foreground"
+          >
+            <span className="flex items-center gap-1.5">
+              <Percent className="h-3.5 w-3.5" /> Coupon, discount & fees
+              {hasActiveCouponDiscountFees && !showDiscountsPanel && (
+                <span className="ml-1 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-semibold text-brand">
+                  active
+                </span>
+              )}
+            </span>
+            {showDiscountsPanel ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
+          </button>
+          <div className={`space-y-2 px-4 pb-2.5 ${showDiscountsPanel ? "" : "hidden"}`}>
           {appliedCoupon?.valid ? (
             <div className="flex items-center justify-between rounded-md bg-brand/10 px-2.5 py-1.5">
               <span className="flex items-center gap-1.5 font-medium text-brand">
@@ -3723,6 +3804,7 @@ export function PosCheckout() {
               </span>
             </div>
           ))}
+          </div>
         </div>
 
         <div className="space-y-1.5 border-t border-black/5 bg-canvas px-4 py-3 text-sm">

@@ -464,9 +464,9 @@ export const flows: Record<string, Flow> = {
           },
           {
             name: "minCutQty",
-            label: "Minimum Cut Charge (stock UOM)",
+            label: "Smallest Size You'll Charge For",
             type: "number",
-            hint: "Leave blank for no minimum. A cut smaller than this is still billed as if it were this size — covers handling/setup cost on a tiny cut (e.g. a minimum 0.5 m² glass charge even for a 0.2 m² piece).",
+            hint: 'Cuts smaller than this still get billed at this size. Example: set 0.5 → a customer cutting only 0.2 gets charged for 0.5 anyway (covers your setup cost on a tiny cut). Leave blank to bill the exact size cut, no minimum.',
             hideUnless: { field: "cutToSizeMode", notEquals: "Not cut-to-size" },
           },
           {
@@ -602,9 +602,9 @@ export const flows: Record<string, Flow> = {
           },
           {
             name: "minCutQty",
-            label: "Minimum Cut Charge (stock UOM)",
+            label: "Smallest Size You'll Charge For",
             type: "number",
-            hint: "Leave blank for no minimum. A cut smaller than this is still billed as if it were this size — covers handling/setup cost on a tiny cut (e.g. a minimum 0.5 m² glass charge even for a 0.2 m² piece).",
+            hint: 'Cuts smaller than this still get billed at this size. Example: set 0.5 → a customer cutting only 0.2 gets charged for 0.5 anyway (covers your setup cost on a tiny cut). Leave blank to bill the exact size cut, no minimum.',
             hideUnless: { field: "cutToSizeMode", notEquals: "Not cut-to-size" },
           },
           {

@@ -37,8 +37,40 @@ import {
   resolvePromoPct,
   resolveQuantityPct,
 } from "@/lib/buildpos/pricing";
+import { useAuth } from "@/lib/api/auth";
+import { useBranches } from "@/lib/api/admin";
+import {
+  areaOf,
+  factorToStock as resolveFactorToStock,
+  lengthOf,
+  sellableUoms,
+  toStockQty,
+  unitPriceFor,
+  volumeOf,
+} from "@/lib/buildpos/uom";
 
-type Line = { productId: number; sku: string; name: string; qty: number };
+// BRD §2.3 UOM engine + cut-to-size, ported from PosCheckout/OrdersController.Checkout: uom is the
+// selling UOM the user picked (defaults to the product's own stock UOM); lengthM/widthM/heightM are
+// set only for a cut-to-size product, from which qty (the computed length/area/volume) is derived —
+// mirrors CartLine exactly so the same request shape reaches QuotationsController.BuildLines.
+type Line = {
+  productId: number;
+  sku: string;
+  name: string;
+  qty: number;
+  uom: string;
+  lengthM?: number;
+  widthM?: number;
+  heightM?: number;
+};
+
+// Which dimensions matter — and how they combine into the billed qty — depends on the product's
+// cut-to-size unit. Mirrors PosCheckout's own (unexported) cutToSizeQty exactly.
+function cutToSizeQty(unit: string, lengthM: number, widthM: number, heightM: number): number {
+  if (unit === "Length") return lengthOf(lengthM);
+  if (unit === "Volume") return volumeOf(lengthM, widthM, heightM);
+  return areaOf(lengthM, widthM);
+}
 
 // BRD §7 (CR-038), mirroring QuotationsController.BuildLines/OrdersController.Checkout: which of a
 // product's list prices this customer is charged. Unlike SellingPrice, price is resolved live (not
@@ -73,9 +105,25 @@ export function QuotationFormDialog({
   // Present = edit an existing quotation instead of creating a new one.
   editing?: QuotationDto | null;
 }) {
+  const { user } = useAuth();
+  // BRD-wide convention (same as PosCheckout): a null user.branchId means an HQ role (System Admin/
+  // Store Manager/Supervisor) with no fixed home branch — they pick which branch's stock a quotation
+  // draws from. Everyone else is implicitly scoped to their own branch, same as the incoming prop.
+  const isHqUser = user?.branchId == null;
+  const { data: branches } = useBranches(open && isHqUser);
+  const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
+  // BRD-wide convention (same as PosCheckout): a null user.branchId means an HQ role with no fixed
+  // home branch — they pick which branch's stock a quotation draws from via the selector below.
+  // Editing an existing quotation always keeps its original branch (stock is already reserved there).
+  const effectiveBranchId = editing
+    ? editing.branchId
+    : isHqUser
+      ? (selectedBranchId ?? branches?.[0]?.id ?? branchId ?? null)
+      : (user?.branchId ?? branchId ?? null);
+
   const { data: customers } = useCustomers(open);
-  // branchId-scoped so totalAvailable reflects stock at THIS quotation's branch, not a company-wide sum.
-  const { data: products } = useProducts(open, branchId ?? undefined);
+  // branch-scoped so totalAvailable reflects stock at THIS quotation's branch, not a company-wide sum.
+  const { data: products } = useProducts(open, effectiveBranchId ?? undefined);
   const { data: categories } = useCategories(open);
   const { data: pricingRules } = usePricingRules(open);
   const categoriesById = new Map((categories ?? []).map((c) => [c.id, c]));
@@ -120,7 +168,7 @@ export function QuotationFormDialog({
   const activePricingRules = (pricingRules ?? []).filter(
     (r) =>
       r.status === "Active" &&
-      (r.branchId == null || r.branchId === branchId) &&
+      (r.branchId == null || r.branchId === effectiveBranchId) &&
       (r.validFrom == null || new Date(r.validFrom).getTime() <= Date.now()) &&
       (r.validUntil == null || new Date(r.validUntil).getTime() >= Date.now()),
   );
@@ -138,17 +186,39 @@ export function QuotationFormDialog({
   const quantityRules = activePricingRules.filter(
     (r) => r.type === "Quantity" && r.minQuantity != null,
   );
-  const quantityPctFor = (l: Line) => resolveQuantityPct(quantityRules, l.sku, l.qty);
+  const productFor = (l: Line) => products?.find((p) => p.id === l.productId);
+  // The selling→stock conversion factor for a line's chosen UOM — always 1 for a cut-to-size line
+  // (those price/deduct in stock UOM, same as checkout).
+  const factorFor = (l: Line): number => {
+    const product = productFor(l);
+    if (!product || product.isCutToSize) return 1;
+    return (
+      resolveFactorToStock(l.uom || product.stockUom, product.stockUom, product.uomConversions) ?? 1
+    );
+  };
+  // Mirrors QuotationsController.BuildLines' MinCutQty floor exactly — a cut smaller than the
+  // product's configured minimum is BILLED at that minimum. Every money calculation must use this,
+  // not the raw measured l.qty, or the total shown here would understate what Create/Save actually
+  // saves (same class of bug fixed in PosCheckout).
+  const billedQty = (l: Line): number => {
+    const product = productFor(l);
+    if (!product?.isCutToSize) return l.qty;
+    const minCutQty = product.minCutQty ?? null;
+    return minCutQty != null && l.qty > 0 && l.qty < minCutQty ? minCutQty : l.qty;
+  };
+  // The real physical demand this line reserves, in stock UOM — what a stock-availability check and
+  // a Quantity pricing rule must both use instead of the selling-UOM qty.
+  const stockQtyFor = (l: Line): number => toStockQty(billedQty(l), factorFor(l));
+  const quantityPctFor = (l: Line) => resolveQuantityPct(quantityRules, l.sku, stockQtyFor(l));
   // BRD §7 (CR-040): Promotional rules auto-apply within their date window, no coupon needed — same
   // "larger of" group as everything else, never stacked on top.
   const promoRules = activePricingRules.filter((r) => r.type === "Promotional");
   const promoPctFor = (l: Line) => resolvePromoPct(promoRules, l.sku);
-  const productFor = (l: Line) => products?.find((p) => p.id === l.productId);
   const priceFor = (l: Line) => {
     const product = productFor(l);
-    return product
-      ? resolveUnitPrice(product, customer?.priceListType)
-      : { price: 0, isListPrice: false };
+    if (!product) return { price: 0, isListPrice: false };
+    const resolved = resolveUnitPrice(product, customer?.priceListType);
+    return { price: unitPriceFor(resolved.price, factorFor(l)), isListPrice: resolved.isListPrice };
   };
   // BRD §7 (CR-038): once a real segment list price is actually used for a line, the automatic
   // contractor trade % would double-dip on top of an already-negotiated price — suppressed in that
@@ -158,6 +228,25 @@ export function QuotationFormDialog({
     const effectiveDiscountPct = priceFor(l).isListPrice && !discountPctTouched ? 0 : discountPct;
     return resolveLineDiscountPct(effectiveDiscountPct, quantityPctFor(l), promoPctFor(l), 0);
   };
+  // Net amount actually charged for this line, after its resolved discount — mirrors
+  // QuotationsController.BuildLines' own LineTotal so the totals below never drift from what's
+  // actually saved.
+  const lineTotalFor = (l: Line) => {
+    const { price } = priceFor(l);
+    const gross = billedQty(l) * price;
+    return gross - (gross * lineDiscountPct(l)) / 100;
+  };
+  // Live Subtotal/Discount/VAT/Grand Total — the customer-facing number a quotation exists to show,
+  // and previously only visible after saving (the backend already computes and stores these same
+  // four fields; this just mirrors that math client-side so it's visible before Create/Save).
+  const subtotal = lines.reduce((s, l) => s + priceFor(l).price * billedQty(l), 0);
+  const lineTotalsSum = lines.reduce((s, l) => s + lineTotalFor(l), 0);
+  const discountTotal = subtotal - lineTotalsSum;
+  const vatTotal = lines.reduce(
+    (s, l) => s + (lineTotalFor(l) * (productFor(l)?.vatRate ?? 0)) / 100,
+    0,
+  );
+  const grandTotal = lineTotalsSum + vatTotal;
 
   useEffect(() => {
     if (!open) return;
@@ -169,6 +258,10 @@ export function QuotationFormDialog({
           sku: l.sku,
           name: l.productName,
           qty: l.qty,
+          uom: l.uom,
+          lengthM: l.lengthM ?? undefined,
+          widthM: l.widthM ?? undefined,
+          heightM: l.heightM ?? undefined,
         })),
       );
       setValidUntil(editing.validUntil ? editing.validUntil.slice(0, 10) : "");
@@ -226,15 +319,54 @@ export function QuotationFormDialog({
       toast.error(`${p.sku} has no stock at this branch — can't add it to a quotation.`);
       return;
     }
-    setLines((prev) =>
-      prev.some((l) => l.productId === p.id)
-        ? prev
-        : [...prev, { productId: p.id, sku: p.sku, name: p.nameEn, qty: 1 }],
-    );
+    setLines((prev) => {
+      if (prev.some((l) => l.productId === p.id)) return prev;
+      // Cut-to-size products start at 1m on every dimension the mode needs, same convention as
+      // PosCheckout — the user edits the real measurements on the line.
+      const isCut = p.isCutToSize;
+      return [
+        ...prev,
+        {
+          productId: p.id,
+          sku: p.sku,
+          name: p.nameEn,
+          qty: isCut ? cutToSizeQty(p.cutToSizeUnit, 1, 1, 1) : 1,
+          uom: p.stockUom,
+          lengthM: isCut ? 1 : undefined,
+          widthM: isCut && p.cutToSizeUnit !== "Length" ? 1 : undefined,
+          heightM: isCut && p.cutToSizeUnit === "Volume" ? 1 : undefined,
+        },
+      ];
+    });
     setSearch("");
   }
 
-  // Available stock for a line already on the quotation — used to cap its qty input below.
+  // BRD §2.3 items 5-6: dimension entry for a cut-to-size line — qty becomes the computed
+  // length/area/volume (per the product's cut-to-size unit). Zero/invalid input keeps the last valid
+  // dimensions rather than zeroing the line.
+  function changeDimension(productId: number, side: "lengthM" | "widthM" | "heightM", raw: string) {
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) return;
+    setLines((prev) =>
+      prev.map((l) => {
+        if (l.productId !== productId) return l;
+        const product = productFor(l);
+        if (!product?.isCutToSize) return l;
+        const next = { ...l, [side]: value };
+        const qty = cutToSizeQty(product.cutToSizeUnit, next.lengthM ?? 0, next.widthM ?? 0, next.heightM ?? 0);
+        return qty > 0 ? { ...next, qty } : next;
+      }),
+    );
+  }
+
+  // BRD §2.3 item 4: the selling-UOM dropdown next to the quantity field — switching re-derives
+  // price from the resolved list price × factor (see priceFor/factorFor above), never compounds.
+  function changeUom(productId: number, nextUom: string) {
+    setLines((prev) => prev.map((l) => (l.productId === productId ? { ...l, uom: nextUom } : l)));
+  }
+
+  // Available stock for a line already on the quotation, in stock UOM — compared against
+  // stockQtyFor(l), never the raw qty (which may be in a different selling UOM).
   const availableFor = (productId: number) =>
     products?.find((p) => p.id === productId)?.totalAvailable ?? Infinity;
 
@@ -248,14 +380,26 @@ export function QuotationFormDialog({
     setCustomerReference("");
     setDiscountPct(0);
     setDiscountPctTouched(false);
+    setSelectedBranchId(null);
     lastAutoProjectCode.current = "";
   }
 
+  // Switching branch mid-build invalidates every line already added — stock availability and even
+  // which products exist are branch-specific, so silently carrying lines over would risk quoting
+  // stock that was never checked against the new branch.
+  function changeBranch(id: number) {
+    if (lines.length > 0) {
+      toast.info("Branch changed — items were cleared since stock differs per branch.");
+    }
+    setSelectedBranchId(id);
+    setLines([]);
+  }
+
   const locked = editing != null && editing.status !== "Draft" && editing.status !== "Sent";
-  const hasOverStockLine = lines.some((l) => l.qty > availableFor(l.productId));
+  const hasOverStockLine = lines.some((l) => stockQtyFor(l) > availableFor(l.productId));
 
   async function submit() {
-    if (!branchId || lines.length === 0 || locked) return;
+    if (!effectiveBranchId || lines.length === 0 || locked) return;
     if (!projectCode.trim()) {
       toast.error("Project code is required on every quotation.");
       return;
@@ -268,7 +412,21 @@ export function QuotationFormDialog({
     }
     const request = {
       customerId: customerId === "walk-in" ? null : Number(customerId),
-      lines: lines.map((l) => ({ productId: l.productId, qty: l.qty })),
+      lines: lines.map((l) => {
+        const product = productFor(l);
+        // Cut-to-size sends qty=0 + dimensions — the server derives the real billed qty from these,
+        // same convention as PosCheckout's checkout payload.
+        if (product?.isCutToSize && l.lengthM) {
+          return {
+            productId: l.productId,
+            qty: 0,
+            lengthM: l.lengthM,
+            widthM: product.cutToSizeUnit !== "Length" ? l.widthM : undefined,
+            heightM: product.cutToSizeUnit === "Volume" ? l.heightM : undefined,
+          };
+        }
+        return { productId: l.productId, qty: l.qty, uom: l.uom || undefined };
+      }),
       validUntil: validUntil ? new Date(validUntil).toISOString() : null,
       notes: notes || undefined,
       projectCode: projectCode.trim(),
@@ -283,7 +441,7 @@ export function QuotationFormDialog({
         await updateQuotation.mutateAsync({ id: editing.id, request });
         toast.success("Quotation updated");
       } else {
-        await createQuotation.mutateAsync({ branchId, ...request });
+        await createQuotation.mutateAsync({ branchId: effectiveBranchId, ...request });
         toast.success("Quotation created");
       }
       reset();
@@ -309,6 +467,33 @@ export function QuotationFormDialog({
         {locked && (
           <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
             This quotation is {editing?.status} and can no longer be edited.
+          </div>
+        )}
+
+        {/* HQ roles (System Admin/Store Manager/Supervisor) have no fixed home branch, so they pick
+            which branch's stock a quotation quotes from — same convention as POS Checkout's branch
+            switcher. Everyone else is implicitly scoped to their own branch and never sees this. */}
+        {isHqUser && branches && branches.length > 0 && (
+          <div>
+            <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Branch
+            </label>
+            <Select
+              value={String(effectiveBranchId ?? "")}
+              onValueChange={(v) => changeBranch(Number(v))}
+              disabled={locked || editing != null}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={String(b.id)}>
+                    {b.nameEn}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
 
@@ -429,12 +614,18 @@ export function QuotationFormDialog({
         {lines.length > 0 && (
           <div className="rounded-lg border border-black/5">
             {lines.map((l, i) => {
+              const product = productFor(l);
               const { price, isListPrice } = priceFor(l);
-              const gross = l.qty * price;
+              const billed = billedQty(l);
+              const gross = billed * price;
               const pct = lineDiscountPct(l);
               const discountAmt = (gross * pct) / 100;
               const available = availableFor(l.productId);
-              const overStock = l.qty > available;
+              const overStock = stockQtyFor(l) > available;
+              const isCut = product?.isCutToSize ?? false;
+              const uomOptions = product && !isCut ? sellableUoms(product.stockUom, product.uomConversions) : [];
+              const minCutQty = product?.minCutQty ?? null;
+              const belowMinimum = isCut && minCutQty != null && l.qty > 0 && l.qty < minCutQty;
               return (
                 <div
                   key={l.productId}
@@ -449,26 +640,90 @@ export function QuotationFormDialog({
                         </span>
                       )}
                     </span>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={Number.isFinite(available) ? available : undefined}
-                      className={`h-7 w-16 text-right ${overStock ? "border-critical text-critical" : ""}`}
-                      value={l.qty}
-                      disabled={locked}
-                      onChange={(e) => {
-                        const requested = Number(e.target.value) || 1;
-                        const clamped = Number.isFinite(available)
-                          ? Math.min(requested, available)
-                          : requested;
-                        setLines((prev) =>
-                          prev.map((x) =>
-                            x.productId === l.productId ? { ...x, qty: Math.max(1, clamped) } : x,
-                          ),
-                        );
-                      }}
-                    />
-                    <span className="w-24 text-right text-muted-foreground">
+                    {isCut ? (
+                      // BRD §2.3 items 5-6: dimension entry instead of a plain qty — the computed
+                      // length/area/volume (per the product's cut-to-size unit) becomes the billed
+                      // quantity, priced per stock UOM. Same convention as PosCheckout.
+                      <div className="flex shrink-0 items-center gap-1 text-xs">
+                        <Input
+                          type="number"
+                          min={0.01}
+                          step={0.01}
+                          value={l.lengthM ?? ""}
+                          disabled={locked}
+                          aria-label={`${l.sku} length (m)`}
+                          className="h-7 w-14 px-1 text-center"
+                          onChange={(e) => changeDimension(l.productId, "lengthM", e.target.value)}
+                        />
+                        {product!.cutToSizeUnit !== "Length" && (
+                          <>
+                            <span className="text-muted-foreground">×</span>
+                            <Input
+                              type="number"
+                              min={0.01}
+                              step={0.01}
+                              value={l.widthM ?? ""}
+                              disabled={locked}
+                              aria-label={`${l.sku} width (m)`}
+                              className="h-7 w-14 px-1 text-center"
+                              onChange={(e) => changeDimension(l.productId, "widthM", e.target.value)}
+                            />
+                          </>
+                        )}
+                        {product!.cutToSizeUnit === "Volume" && (
+                          <>
+                            <span className="text-muted-foreground">×</span>
+                            <Input
+                              type="number"
+                              min={0.01}
+                              step={0.01}
+                              value={l.heightM ?? ""}
+                              disabled={locked}
+                              aria-label={`${l.sku} height (m)`}
+                              className="h-7 w-14 px-1 text-center"
+                              onChange={(e) => changeDimension(l.productId, "heightM", e.target.value)}
+                            />
+                          </>
+                        )}
+                        <span className="text-[10px] text-muted-foreground">{product!.stockUom}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Input
+                          type="number"
+                          min={1}
+                          className={`h-7 w-16 text-right ${overStock ? "border-critical text-critical" : ""}`}
+                          value={l.qty}
+                          disabled={locked}
+                          onChange={(e) => {
+                            const requested = Math.max(1, Number(e.target.value) || 1);
+                            setLines((prev) =>
+                              prev.map((x) =>
+                                x.productId === l.productId ? { ...x, qty: requested } : x,
+                              ),
+                            );
+                          }}
+                        />
+                        {/* BRD §2.3 item 4: selling-UOM dropdown — only shown when the product
+                            actually has configured conversions. */}
+                        {uomOptions.length > 1 && (
+                          <select
+                            value={l.uom || product?.stockUom || ""}
+                            disabled={locked}
+                            aria-label={`${l.sku} unit of measure`}
+                            onChange={(e) => changeUom(l.productId, e.target.value)}
+                            className="h-7 shrink-0 rounded-md border border-black/10 bg-white px-1 text-xs font-medium outline-none focus:border-brand"
+                          >
+                            {uomOptions.map((o) => (
+                              <option key={o.uom} value={o.uom}>
+                                {o.uom}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </>
+                    )}
+                    <span className="w-24 shrink-0 text-right text-muted-foreground">
                       {(gross - discountAmt).toFixed(2)}
                       {discountAmt > 0 && (
                         <span className="ml-1 text-[10px] text-warning">
@@ -481,16 +736,21 @@ export function QuotationFormDialog({
                         onClick={() =>
                           setLines((prev) => prev.filter((x) => x.productId !== l.productId))
                         }
-                        className="text-muted-foreground hover:text-critical"
+                        className="shrink-0 text-muted-foreground hover:text-critical"
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
                     )}
                   </div>
+                  {belowMinimum && (
+                    <p className="mt-0.5 text-right text-[10px] font-medium text-warning">
+                      Billed at minimum {minCutQty} {product!.stockUom} (measured {l.qty})
+                    </p>
+                  )}
                   {overStock && (
                     <p className="mt-0.5 text-right text-[10px] text-critical">
-                      Only {available} available at this branch now — reduce the quantity before
-                      saving.
+                      Only {available} {product?.stockUom ?? ""} available at this branch now —
+                      reduce the quantity before saving.
                     </p>
                   )}
                 </div>
@@ -540,6 +800,37 @@ export function QuotationFormDialog({
             disabled={locked}
           />
         </div>
+
+        {lines.length > 0 && (
+          <div className="space-y-1 rounded-lg border border-black/5 bg-canvas px-3 py-2 text-sm">
+            <div className="flex justify-between text-muted-foreground">
+              <span>Subtotal</span>
+              <span>
+                {subtotal.toFixed(2)} <SARIcon />
+              </span>
+            </div>
+            {discountTotal > 0 && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>Discount</span>
+                <span>
+                  -{discountTotal.toFixed(2)} <SARIcon />
+                </span>
+              </div>
+            )}
+            <div className="flex justify-between text-muted-foreground">
+              <span>VAT</span>
+              <span>
+                {vatTotal.toFixed(2)} <SARIcon />
+              </span>
+            </div>
+            <div className="flex items-center justify-between border-t border-black/10 pt-1.5">
+              <span className="font-semibold text-foreground">Grand Total</span>
+              <span className="text-base font-bold text-brand">
+                {grandTotal.toFixed(2)} <SARIcon />
+              </span>
+            </div>
+          </div>
+        )}
 
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>

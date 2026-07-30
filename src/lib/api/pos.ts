@@ -800,6 +800,9 @@ export type CashierShiftReportDto = {
 export const fetchShiftReport = (id: number, type: "X" | "Z") =>
   apiGet<CashierShiftReportDto>(`/api/pos/cashier-shifts/${id}/report?type=${type}`);
 
+// BRD §2.3 UOM engine + cut-to-size (ported from PosCheckout/OrdersController.Checkout): uom is ""
+// for a legacy quotation line or one sold in the product's own stock UOM; lengthM/widthM/heightM are
+// set only for a cut-to-size line (which dimensions, per the product's CutToSizeUnit).
 export type QuotationLineDto = {
   productId: number;
   sku: string;
@@ -809,6 +812,10 @@ export type QuotationLineDto = {
   discountPct: number;
   vatRate: number;
   lineTotal: number;
+  uom: string;
+  lengthM: number | null;
+  widthM: number | null;
+  heightM: number | null;
 };
 export type QuotationDto = {
   id: number;
