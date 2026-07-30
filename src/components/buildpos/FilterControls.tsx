@@ -67,7 +67,7 @@ export function MultiSelectFilter({
           variant="outline"
           size="sm"
           className={cn(
-            "h-8 min-w-[120px] max-w-[220px] justify-between gap-1.5 border-black/10 bg-white text-xs font-medium hover:border-brand/40",
+            "ui-control min-w-[120px] max-w-[220px] justify-between gap-1.5 border-black/10 bg-white text-xs font-medium hover:border-brand/40",
             selected.length > 0 && "border-brand/40 bg-brand/5 text-brand",
             triggerClassName,
           )}
@@ -100,7 +100,7 @@ export function MultiSelectFilter({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={`Search ${label.toLowerCase()}…`}
-              className="h-8 w-full rounded-md border border-black/10 bg-canvas pl-8 pr-2 text-xs outline-none focus:border-brand/40"
+              className="ui-control w-full rounded-md border border-black/10 bg-canvas pl-8 pr-2 text-xs outline-none focus:border-brand/40"
             />
           </div>
         )}
@@ -207,7 +207,7 @@ export function DateRangeFilter({
           variant="outline"
           size="sm"
           className={cn(
-            "h-8 min-w-[130px] justify-between gap-1.5 border-black/10 bg-white text-xs font-medium hover:border-brand/40",
+            "ui-control min-w-[130px] justify-between gap-1.5 border-black/10 bg-white text-xs font-medium hover:border-brand/40",
             value.preset && "border-brand/40 bg-brand/5 text-brand",
             triggerClassName,
           )}

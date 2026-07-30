@@ -27,7 +27,7 @@ export function CardCustomizer({
         <Button
           size="sm"
           variant="outline"
-          className="h-8 gap-1.5 border-black/10 bg-white text-xs font-medium hover:border-brand/40"
+          className="ui-control gap-1.5 border-black/10 bg-white text-xs font-medium hover:border-brand/40"
         >
           <LayoutGrid className="h-3.5 w-3.5" />
           Customise cards
