@@ -733,6 +733,7 @@ public static class DbSeeder
             // changing the config value and restarting.
             user.PasswordHash = hasher.Hash(password);
             user.RoleId = adminRole.Id;
+            user.Status = UserStatus.Active;
             if (!string.IsNullOrWhiteSpace(name)) user.Name = name;
         }
 
