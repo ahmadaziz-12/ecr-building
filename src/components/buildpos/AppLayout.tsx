@@ -551,7 +551,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-black/5 bg-white/90 px-4 backdrop-blur md:px-6">
+        <header className="sticky top-0 z-10 flex h-16 min-w-0 items-center gap-3 border-b border-black/5 bg-white/90 px-4 backdrop-blur md:px-6">
           <button
             type="button"
             onClick={toggleSidebar}
@@ -570,14 +570,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <div className="lg:hidden">
             <BrandLogo />
           </div>
-          <div className="hidden items-center gap-2 lg:flex">
+          <div className="hidden min-w-0 items-center gap-2 lg:flex">
             <active.icon className="h-4 w-4 text-brand" />
-            <span className="text-xs text-muted-foreground">{activeGroup}</span>
+            <span className="truncate text-xs text-muted-foreground">{activeGroup}</span>
             <span className="text-muted-foreground">/</span>
-            <h1 className="font-display text-base font-semibold text-foreground">{active.label}</h1>
+            <h1 className="truncate font-display text-base font-semibold text-foreground">
+              {active.label}
+            </h1>
           </div>
-          <div className="ml-auto flex items-center gap-2">
-            <div className="relative hidden md:block">
+          <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2">
+            <div className="relative hidden min-w-0 flex-1 md:block">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="search"
@@ -591,7 +593,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                     ? "Search products, categories…"
                     : "Search order #, product, category, customer…"
                 }
-                className="h-9 w-64 rounded-lg border border-black/10 bg-canvas pl-8 pr-3 text-sm outline-none focus:border-brand"
+                className="h-9 w-full min-w-0 max-w-64 rounded-lg border border-black/10 bg-canvas pl-8 pr-3 text-sm outline-none focus:border-brand"
               />
               {searchFocused && search.trim() !== "" && (
                 <div
