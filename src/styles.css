@@ -264,6 +264,44 @@
   height: 100%;
 }
 
+/* Explicit column-count contract. A row that knows how many cards it has declares it with
+   `ui-cols-N`; the count then steps down only at the defined breakpoints, so the same cards stay
+   together, in the same order, at every zoom level in between. */
+.ui-cols-1 { --ui-card-cols: 1; --ui-tile-cols: 1; }
+.ui-cols-2 { --ui-card-cols: 2; --ui-tile-cols: 2; }
+.ui-cols-3 { --ui-card-cols: 3; --ui-tile-cols: 3; }
+.ui-cols-4 { --ui-card-cols: 4; --ui-tile-cols: 4; }
+.ui-cols-5 { --ui-card-cols: 5; --ui-tile-cols: 5; }
+.ui-cols-6 { --ui-card-cols: 6; --ui-tile-cols: 6; }
+.ui-cols-7 { --ui-card-cols: 7; --ui-tile-cols: 7; }
+.ui-cols-8 { --ui-card-cols: 8; --ui-tile-cols: 8; }
+
+@media (max-width: 1535px) {
+  .ui-cols-7, .ui-cols-8 { --ui-card-cols: 6; --ui-tile-cols: 6; }
+}
+@media (max-width: 1279px) {
+  .ui-cols-5, .ui-cols-6, .ui-cols-7, .ui-cols-8 { --ui-card-cols: 4; --ui-tile-cols: 4; }
+}
+@media (max-width: 1023px) {
+  .ui-cols-3, .ui-cols-4, .ui-cols-5, .ui-cols-6, .ui-cols-7, .ui-cols-8 {
+    --ui-card-cols: 3;
+    --ui-tile-cols: 3;
+  }
+}
+@media (max-width: 767px) {
+  .ui-cols-2, .ui-cols-3, .ui-cols-4, .ui-cols-5, .ui-cols-6, .ui-cols-7, .ui-cols-8 {
+    --ui-card-cols: 2;
+    --ui-tile-cols: 2;
+  }
+}
+@media (max-width: 479px) {
+  .ui-cols-1, .ui-cols-2, .ui-cols-3, .ui-cols-4,
+  .ui-cols-5, .ui-cols-6, .ui-cols-7, .ui-cols-8 {
+    --ui-card-cols: 1;
+    --ui-tile-cols: 1;
+  }
+}
+
 /* Filter rows: every filter stays visible and shares the row evenly, shrinking rather than
    dropping out of the sequence. Wrapping moves overflow filters to the next row in order. */
 @utility ui-filter-row {
