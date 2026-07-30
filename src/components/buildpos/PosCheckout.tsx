@@ -147,6 +147,7 @@ import { ScaleSetupDialog } from "@/components/buildpos/pos/ScaleSetupDialog";
 import { ReceiptDialog } from "@/components/buildpos/pos/ReceiptDialog";
 import { RequestApprovalDialog } from "@/components/buildpos/pos/RequestApprovalDialog";
 import type { OrderDto } from "@/lib/api/pos";
+import { cols } from "@/lib/buildpos/grid";
 
 type IconType = typeof Package;
 
@@ -2438,7 +2439,7 @@ export function PosCheckout() {
                 No product found. Try SKU, name or barcode.
               </div>
             ) : (
-              <div className="ui-tile-grid">
+              <div className={`ui-tile-grid ${cols(tiles.length)}`}>
                 {tiles.map((t, i) => {
                   if (t.isGroup) {
                     const Icon = productIcon[t.variants[0]?.sku ?? ""] ?? Package;

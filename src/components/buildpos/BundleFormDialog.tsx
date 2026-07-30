@@ -10,6 +10,7 @@ import { useCreateBundle, useUpdateBundle, type BundleDto } from "@/lib/api/bund
 import { formatSAR } from "@/lib/buildpos/format";
 import { CurrencyText } from "@/lib/buildpos/currency";
 import { SARIcon } from "@/lib/buildpos/currency";
+import { cols } from "@/lib/buildpos/grid";
 
 // Mirrors backend CustomerType (Customer.cs) exactly — the eligibility check compares these literal
 // member names, not display labels.
@@ -243,7 +244,7 @@ export function BundleFormDialog({
 
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {/* Bundle type — labels only for now; per-type pricing behavior is a later phase */}
-            <div className="ui-tile-grid">
+            <div className={`ui-tile-grid ${cols(BUNDLE_TYPES.length)}`}>
               {BUNDLE_TYPES.map((t) => {
                 const Icon = t.icon;
                 const active = type === t.value;

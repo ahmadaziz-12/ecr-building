@@ -14,6 +14,7 @@ import business from "@/assets/plans/business.jpg";
 import enterprise from "@/assets/plans/enterprise.jpg";
 import { SARIcon } from "@/lib/buildpos/currency";
 import { CurrencyText } from "@/lib/buildpos/currency";
+import { cols } from "@/lib/buildpos/grid";
 
 type Plan = {
   id: string;
@@ -230,7 +231,7 @@ export function SubscriptionsPage() {
       </div>
 
       {/* Plan cards */}
-      <div className="ui-card-grid">
+      <div className={`ui-card-grid ${cols(plans.length)}`}>
         {plans.map((p) => {
           const Icon = p.icon;
           // Real per-plan pricing from GET /api/admin/plans (matched by name); the static numbers

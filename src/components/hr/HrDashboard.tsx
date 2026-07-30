@@ -6,6 +6,7 @@ import { useAuditStore } from "@/lib/store/audit";
 import { AddEmployeeDialog } from "./AddEmployeeDialog";
 import { CheckInDialog } from "./CheckInDialog";
 import { AlertTriangle, FileText } from "lucide-react";
+import { cols } from "@/lib/buildpos/grid";
 
 export function HrDashboard() {
   const employees = useHrStore((s) => s.employees);
@@ -79,7 +80,7 @@ export function HrDashboard() {
         </SectionCard>
 
         <SectionCard title="Department Distribution" desc={`${departments.length} departments`} className="lg:col-span-2">
-          <div className="ui-tile-grid">
+          <div className={`ui-tile-grid ${cols(departments.length)}`}>
             {departments.map((d) => {
               const count = employees.filter((e) => e.department === d.name).length;
               return (
