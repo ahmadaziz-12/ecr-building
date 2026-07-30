@@ -173,7 +173,7 @@ function ShiftTemplatesTab({ shifts, onAdd }: { shifts: ReturnType<typeof useHrS
   return (
     <div className="space-y-3">
       <SectionCard title="Create Shift Template">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="ui-card-grid">
           <input placeholder="Name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} className="h-9 rounded-lg border border-black/10 bg-white px-3 text-sm" />
           <input placeholder="Code" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} className="h-9 rounded-lg border border-black/10 bg-white px-3 text-sm font-mono" />
           <input type="time" value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} className="h-9 rounded-lg border border-black/10 bg-white px-3 text-sm" />

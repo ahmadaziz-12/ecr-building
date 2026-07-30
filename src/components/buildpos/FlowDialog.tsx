@@ -164,7 +164,7 @@ function LineItemsField({
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="ui-tile-grid">
             {columns.map((c) => (
               <div key={c.key} className={c.type === "branch" ? "col-span-2 sm:col-span-3" : ""}>
                 <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><CurrencyText value={c.label} /></label>

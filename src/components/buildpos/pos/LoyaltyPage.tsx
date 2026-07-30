@@ -289,7 +289,7 @@ export function LoyaltyPage() {
           </Button>
         }
       >
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="ui-tile-grid">
           <div>
             <p className="text-xs text-muted-foreground">Earn rate</p>
             <p className="font-display text-base font-bold text-foreground">{config.pointsPerSarEarned} pt / <SARIcon /> 1</p>

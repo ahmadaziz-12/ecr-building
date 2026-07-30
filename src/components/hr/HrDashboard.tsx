@@ -79,7 +79,7 @@ export function HrDashboard() {
         </SectionCard>
 
         <SectionCard title="Department Distribution" desc={`${departments.length} departments`} className="lg:col-span-2">
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <div className="ui-tile-grid">
             {departments.map((d) => {
               const count = employees.filter((e) => e.department === d.name).length;
               return (

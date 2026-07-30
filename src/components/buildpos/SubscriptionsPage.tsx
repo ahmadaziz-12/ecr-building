@@ -230,7 +230,7 @@ export function SubscriptionsPage() {
       </div>
 
       {/* Plan cards */}
-      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+      <div className="ui-card-grid">
         {plans.map((p) => {
           const Icon = p.icon;
           // Real per-plan pricing from GET /api/admin/plans (matched by name); the static numbers

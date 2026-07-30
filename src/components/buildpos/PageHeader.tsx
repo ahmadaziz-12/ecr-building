@@ -96,7 +96,7 @@ export function KpiGrid({ items, scope }: { items: KpiItem[]; scope?: string }) 
           />
         </div>
       )}
-      <div className="grid grid-cols-2 items-stretch gap-3 md:grid-cols-4">
+      <div className="ui-card-grid">
         {visible.map((k) => {
           const body = (
             <>

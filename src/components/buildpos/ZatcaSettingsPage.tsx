@@ -176,7 +176,7 @@ export function ZatcaSettingsPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="ui-card-grid">
         <KpiCard label="Phase 2 Status" value={enabled ? "Enabled" : "Disabled"} sub={enabled ? "Live" : "Pending onboarding"} tone={enabled ? "success" : "warning"} />
         <KpiCard label="Onboarding" value={onboardingLabel(identity?.onboardingStatus)} sub={identity?.onboardingStatus === "ProductionReady" ? "Complete" : "In progress"} tone={identity?.onboardingStatus === "ProductionReady" ? "success" : "warning"} />
         <KpiCard label="Environment" value={identity?.environment ?? "Simulate"} sub={identity?.environment === "Production" ? "Live" : "Test mode"} tone={identity?.environment === "Production" ? "success" : "info"} />
