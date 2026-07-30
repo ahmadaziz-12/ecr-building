@@ -2,7 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   useBranches, useSetBranchStatus, useUpdateBranch, useTerminals, useAssignCashier, useForceSyncTerminal, mapTerminals,
-  useDevices, useOpenDrawer, mapDevices, useRules, useTestRule, useUpdateRule, useUsers, useUpdateUser, useResetPin,
+  useDevices, useOpenDrawer, mapDevices, useRules, useTestRule, useUpdateRule, useUsers, useUpdateUser, useResetPin, useResetPassword,
   useMaintenance, useAssignMaintenance, useUpdateMaintenanceStatus, useCreateMaintenance, useCompliance, useUpdateCompliance, useSignOffCompliance,
   useSettings, useUpsertSetting,
 } from "./admin";
