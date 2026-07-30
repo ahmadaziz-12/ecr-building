@@ -45,7 +45,7 @@ export function ZonesPage() {
     <div className="space-y-4">
       <PageHeader group="Delivery" title="Delivery Zones" desc="Named areas mapped to distance and default delivery fee." />
       <SectionCard title="Add zone" desc="Zone name + city + distance + fee. Used in delivery scheduling.">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="ui-card-grid">
           <input placeholder="Name (e.g. Al Malqa)" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} className="h-9 rounded-lg border border-black/10 bg-white px-3 text-sm" />
           <input placeholder="City" value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} className="h-9 rounded-lg border border-black/10 bg-white px-3 text-sm" />
           <input type="number" placeholder="Distance (km)" value={f.distanceKm} onChange={(e) => setF({ ...f, distanceKm: Number(e.target.value) })} className="h-9 rounded-lg border border-black/10 bg-white px-3 text-sm" />

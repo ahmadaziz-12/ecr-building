@@ -552,7 +552,7 @@ export function FilterBar({
 
 export function KpiGrid({ items = kpis }: { items?: typeof kpis }) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="ui-card-grid">
       {items.map((k) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
@@ -589,7 +589,7 @@ export function KpiGrid({ items = kpis }: { items?: typeof kpis }) {
 export function QuickActions() {
   return (
     <SectionCard title="Quick Actions" desc="Cashier and manager shortcuts.">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+      <div className="ui-tile-grid">
         {quickActions.map((a) => {
           const Icon = iconMap[a.icon] ?? Plus;
           return (
@@ -777,7 +777,7 @@ export function TopCategories() {
         ) : undefined
       }
     >
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="ui-card-grid">
         {topCategories.map((c) => {
           const Icon = iconMap[c.icon] ?? Boxes;
           const tone = toneForStatus(c.health);
@@ -901,7 +901,7 @@ export function InventoryHealth({
         </div>
       }
     >
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+      <div className="ui-tile-grid">
         {summary.map((s) => (
           <div key={s.label} className="rounded-lg border border-black/5 bg-canvas p-2.5">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{s.label}</p>
@@ -1186,7 +1186,7 @@ export function ReturnsRefunds() {
       title="Returns & Refunds"
       desc="Standard, damaged, and surplus returns with VAT reversal."
     >
-      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+      <div className="mb-4 ui-tile-grid">
         {returnsSummary.map((s) => (
           <div key={s.label} className="rounded-lg border border-black/5 bg-canvas p-2.5">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{s.label}</p>
@@ -1429,7 +1429,7 @@ export function CommandKpis() {
   };
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="ui-card-grid">
       {tiles.map((t, i) => {
         const Icon = t.icon;
         const pct = Math.min(100, 25 + i * 9);
@@ -1556,7 +1556,7 @@ export function DispatchBoard() {
         </div>
       }
     >
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="ui-card-grid">
         {lanes.map((lane) => {
           const cards = deliveries.filter(
             (d) => String(d.status).toLowerCase() === lane.key.toLowerCase(),
@@ -1628,7 +1628,7 @@ export function StockYardHealth() {
       desc="Yard capacity across bays. Red bins need urgent replenishment."
       action={<Pill tone="info">8 bays live</Pill>}
     >
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="ui-card-grid">
         {stockYard.map((b, i) => {
           const pct = Math.round((b.filled / b.capacity) * 100);
           return (
@@ -1769,7 +1769,7 @@ export function OverviewKpis({ items = overviewKpis }: { items?: typeof overview
     // overflows — the cards then wrapped to different heights and the row read as ragged.
     // `items-stretch` + `h-full` keeps every card in a row the same height regardless of how many
     // lines its caption takes.
-    <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+    <div className="ui-card-grid">
       {items.map((k, i) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
@@ -1821,7 +1821,7 @@ export function HourlySummary({
       desc="Hourly gross vs net across the trading day."
       action={<Pill tone="success">Live · auto-refresh 60s</Pill>}
     >
-      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="mb-3 ui-tile-grid">
         {[
           { l: "Gross sales", v: formatSAR(gross) },
           { l: "Net sales", v: formatSAR(net) },
@@ -1910,7 +1910,7 @@ export function DispatchPipelinePreview({
         </Button>
       }
     >
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="ui-tile-grid">
         {stages.map((stage, i) => (
           <div
             key={stage.key}
@@ -1990,7 +1990,7 @@ export function CashierWorkspaceSummary({
       title="Cashier Workspace Summary"
       desc="Terminals, shifts and cash reconciliation at a glance."
     >
-      <div className="grid grid-cols-2 items-stretch gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="ui-tile-grid">
         {rows.map((t, i) => (
           <div
             key={t.l}
@@ -2115,7 +2115,7 @@ export function TopCategoriesCompact({
 
 export function SalesPerfKpis({ items = salesPerfKpis }: { items?: typeof salesPerfKpis }) {
   return (
-    <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+    <div className="ui-card-grid">
       {items.map((k, i) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
@@ -2210,7 +2210,7 @@ export function RecentOrdersTable({
 
 export function InventoryKpiGrid({ items = inventoryKpis }: { items?: typeof inventoryKpis }) {
   return (
-    <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+    <div className="ui-card-grid">
       {items.map((k, i) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
@@ -2262,7 +2262,7 @@ export function DeliveryPipelineBoard({
       title="Delivery & Dispatch Board"
       desc="Driver, vehicle, weight and area on every card."
     >
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="ui-card-grid">
         {lanes.map((lane) => {
           const cards = allCards.filter((d) => d.status === lane.key);
           return (
@@ -2343,7 +2343,7 @@ export function DeliveryPipelineBoard({
 
 export function CashierKpiGrid({ items = cashierKpis }: { items?: typeof cashierKpis }) {
   return (
-    <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+    <div className="ui-card-grid">
       {items.map((k, i) => {
         const Icon = iconMap[k.icon] ?? Package;
         return (
@@ -2465,7 +2465,7 @@ export function PaymentBreakdownTiles({
 }) {
   return (
     <SectionCard title="Payment Summary" desc="Today's collections by method (Card replaces Mada).">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="ui-tile-grid">
         {items.length === 0 && (
           <p className="col-span-full py-6 text-center text-sm text-muted-foreground">
             No payments recorded yet.
@@ -2509,7 +2509,7 @@ export function ReturnBreakdownTiles({
       desc="Standard, damaged, surplus, exchanges, VAT reversal and restocking."
     >
       {/* 6 tiles in a 7-column grid left a permanent ragged gap on the right. */}
-      <div className="grid grid-cols-2 items-stretch gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="ui-tile-grid">
         {items.map((r) => (
           <div key={r.label} className="h-full rounded-lg border border-black/5 bg-canvas p-2.5">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{r.label}</p>

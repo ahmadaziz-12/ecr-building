@@ -2438,7 +2438,7 @@ export function PosCheckout() {
                 No product found. Try SKU, name or barcode.
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
+              <div className="ui-tile-grid">
                 {tiles.map((t, i) => {
                   if (t.isGroup) {
                     const Icon = productIcon[t.variants[0]?.sku ?? ""] ?? Package;

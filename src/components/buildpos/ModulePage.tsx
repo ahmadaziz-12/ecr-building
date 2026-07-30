@@ -657,7 +657,7 @@ export function ModulePage({
         </div>
       )}
       {kpis.length > 0 && (
-        <div className="grid grid-cols-2 items-stretch gap-3 md:grid-cols-4">
+        <div className="ui-card-grid">
           {visibleKpis.map((k) => {
             const interactive = typeof k.filter === "function";
             const isActive = activeKpi === k.label;
@@ -758,7 +758,7 @@ export function ModulePage({
             )
           }
         >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="ui-card-grid">
             {pageRows.map(({ row, id }, i) => {
               const statusText = statusCol !== undefined ? String(row[statusCol] ?? "") : "";
               const actions = rowActionsFor(id, row, statusText);

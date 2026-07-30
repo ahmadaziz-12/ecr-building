@@ -822,7 +822,7 @@ function ReportCatalog({ onOpen }: { onOpen: (key: ReportKey) => void }) {
           <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
             {g}
           </p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="ui-card-grid">
             {matches
               .filter((r) => r.group === g)
               .map((r) => {

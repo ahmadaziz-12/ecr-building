@@ -69,7 +69,7 @@ export function PurchaseOrderDetailDialog({
               </DialogTitle>
             </DialogHeader>
 
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="ui-card-grid">
               <InfoField label="Supplier" value={po.supplierName} />
               <InfoField label="Expected Date" value={fmtDate(po.expectedDate)} />
               <InfoField label="Currency" value={po.currency} />

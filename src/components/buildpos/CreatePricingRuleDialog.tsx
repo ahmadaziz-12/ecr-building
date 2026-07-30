@@ -485,7 +485,7 @@ export function CreatePricingRuleDialog({
 
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {/* Type picker — 7 automatic types front and center, "manual" set apart */}
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="ui-card-grid">
               {(
                 [
                   "Trade Tier",

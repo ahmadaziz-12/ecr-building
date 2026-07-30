@@ -243,7 +243,7 @@ export function BundleFormDialog({
 
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {/* Bundle type — labels only for now; per-type pricing behavior is a later phase */}
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div className="ui-tile-grid">
               {BUNDLE_TYPES.map((t) => {
                 const Icon = t.icon;
                 const active = type === t.value;
