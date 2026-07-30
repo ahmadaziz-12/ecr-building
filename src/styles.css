@@ -185,17 +185,57 @@
     border-color: var(--color-border);
   }
 
-  /* Every Tailwind text-* / spacing / sizing utility is rem-based, so bumping the root size here
+  /* Every Tailwind text-* / spacing / sizing utility is rem-based, so scaling the root size here
      scales body copy, labels, buttons and inputs together (proportionally, no clipping) instead
-     of overriding each text-xs/text-sm usage individually across the app. */
+     of overriding each text-xs/text-sm usage individually across the app. The clamp keeps type
+     legible at browser zoom and on small laptops without exceeding the design's 18px base. */
   html {
-    font-size: 18px;
+    font-size: clamp(14px, 0.42vw + 12.4px, 18px);
   }
 
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    overflow-x: hidden;
   }
+}
+
+/* ---------------- Shared layout + control sizing primitives ----------------
+   Card/tile rows use auto-fit tracks so every card keeps its place in the sequence and simply
+   resizes with the available width, instead of columns appearing/disappearing per breakpoint. */
+
+@utility ui-card-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ui-card-min)), 1fr));
+  align-items: stretch;
+}
+
+@utility ui-tile-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ui-tile-min)), 1fr));
+  align-items: stretch;
+}
+
+/* Filter rows: every filter stays visible and shares the row evenly, shrinking rather than
+   dropping out of the sequence. */
+@utility ui-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@utility ui-filter-item {
+  flex: 1 1 8.5rem;
+  min-width: 0;
+  max-width: 14rem;
+}
+
+@utility ui-control {
+  height: var(--ui-control-h);
+  min-height: var(--ui-control-h);
 }
 
 /* ---------------- BuildPOS motion + construction textures ---------------- */
