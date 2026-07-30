@@ -749,7 +749,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
               )}
             </div>
             {hasAccess("/operate/cashier-shift") && (
-              <span className="hidden items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success-foreground md:inline-flex">
+              <span className="hidden items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-success-foreground xl:inline-flex">
                 <Circle className="h-2 w-2 fill-current" />{" "}
                 {openShift
                   ? `Open since ${new Date(openShift.openedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`
@@ -757,13 +757,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
               </span>
             )}
             <span
-              className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium md:inline-flex ${online ? "border-teal/30 bg-teal/10 text-foreground" : "border-critical/30 bg-critical/10 text-critical"}`}
+              className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium whitespace-nowrap xl:inline-flex ${online ? "border-teal/30 bg-teal/10 text-foreground" : "border-critical/30 bg-critical/10 text-critical"}`}
             >
               <Wifi className={`h-3 w-3 ${online ? "text-teal" : "text-critical"}`} />{" "}
               {online ? "Online" : "Offline"}
             </span>
             {hasAccess("/admin/zatca-settings") && (
-              <span className="hidden items-center gap-1.5 rounded-full border border-brand/20 bg-brand/10 px-2.5 py-0.5 text-xs font-medium text-brand md:inline-flex">
+              <span className="hidden items-center gap-1.5 rounded-full border border-brand/20 bg-brand/10 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-brand xl:inline-flex">
                 <Shield className="h-3 w-3" /> ZATCA{" "}
                 {zatcaIdentity?.onboardingStatus === "ProductionReady"
                   ? "Connected"
@@ -775,7 +775,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <LanguageSwitcher />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="relative grid h-9 w-9 place-items-center rounded-lg border border-black/10 bg-white text-foreground hover:bg-canvas">
+                <button className="relative grid h-9 w-9 flex-none place-items-center rounded-lg border border-black/10 bg-white text-foreground hover:bg-canvas">
                   <Bell className="h-4 w-4" />
                   {notifications && notifications.length > 0 && (
                     <span
