@@ -443,12 +443,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
                     <li key={m.to}>
                       <Link
                         to={m.to}
-                        className={`flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13px] transition ${
+                        className={`flex h-9 items-center gap-3 rounded-lg px-3 text-[13px] transition ${
                           isActive ? "bg-white text-brand shadow-sm" : "text-white hover:bg-white/5"
                         }`}
                       >
                         <Icon className="h-4 w-4 flex-none" />
-                        <span className="font-bold uppercase tracking-wide">{m.label}</span>
+                        <span className="min-w-0 truncate font-bold uppercase tracking-wide">
+                          {m.label}
+                        </span>
                       </Link>
                     </li>
                   );
@@ -461,10 +463,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <button
                 type="button"
                 onClick={() => setOpen(isOpen ? {} : { [g.name]: true })}
-                className="flex w-full items-center justify-between px-3 py-1.5 text-[13px] font-bold uppercase tracking-wide text-white hover:text-white"
+                title={g.name}
+                className="flex h-9 w-full items-center justify-between gap-2 px-3 text-start text-[13px] font-bold uppercase tracking-wide text-white hover:text-white"
               >
-                {g.name}
-                <ChevronDown className={`h-3.5 w-3.5 transition ${isOpen ? "" : "-rotate-90"}`} />
+                <span className="min-w-0 truncate">{g.name}</span>
+                <ChevronDown
+                  className={`h-3.5 w-3.5 flex-none transition ${isOpen ? "" : "-rotate-90"}`}
+                />
               </button>
               {isOpen && (
                 <ul className="mt-0.5 space-y-0.5 pl-1.5">
@@ -475,14 +480,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       <li key={m.to}>
                         <Link
                           to={m.to}
-                          className={`flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-[11.5px] transition ${
+                          title={m.label}
+                          className={`flex h-8 items-center gap-2.5 rounded-lg px-3 text-[11.5px] transition ${
                             isActive
                               ? "bg-white font-semibold text-brand shadow-sm"
                               : "text-white/70 hover:bg-white/5 hover:text-white"
                           }`}
                         >
                           <Icon className="h-3.5 w-3.5 flex-none" />
-                          <span className="font-medium">{m.label}</span>
+                          <span className="min-w-0 truncate font-medium">{m.label}</span>
                         </Link>
                       </li>
                     );

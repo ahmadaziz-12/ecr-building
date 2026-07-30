@@ -12,6 +12,7 @@ import { sellableUoms, unitPriceFor, factorToStock } from "@/lib/buildpos/uom";
 import { fileToCompressedDataUrl } from "@/lib/buildpos/image";
 import { SearchableSelect } from "@/components/buildpos/SearchableSelect";
 import { CurrencyText } from "@/lib/buildpos/currency";
+import { cols } from "@/lib/buildpos/grid";
 
 type LineItemRow = Record<string, string>;
 
@@ -164,7 +165,7 @@ function LineItemsField({
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
-          <div className="ui-tile-grid">
+          <div className={`ui-tile-grid ${cols(columns.length)}`}>
             {columns.map((c) => (
               <div key={c.key} className={c.type === "branch" ? "col-span-2 sm:col-span-3" : ""}>
                 <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><CurrencyText value={c.label} /></label>

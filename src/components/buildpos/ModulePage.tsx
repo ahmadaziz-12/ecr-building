@@ -70,6 +70,7 @@ import { BulkActionSheet } from "@/components/buildpos/BulkActionSheet";
 import { NamePromptDialog } from "@/components/buildpos/NamePromptDialog";
 import { CardCustomizer } from "@/components/buildpos/CardCustomizer";
 import { applyCardPreference, useCardPreferences } from "@/lib/buildpos/card-preferences";
+import { cols } from "@/lib/buildpos/grid";
 
 function tone(status: string): Severity {
   const k = status.toLowerCase();
@@ -658,7 +659,7 @@ export function ModulePage({
         </div>
       )}
       {kpis.length > 0 && (
-        <div className="ui-card-grid">
+        <div className={`ui-card-grid ${cols(visibleKpis.length)}`}>
           {visibleKpis.map((k) => {
             const interactive = typeof k.filter === "function";
             const isActive = activeKpi === k.label;
@@ -759,7 +760,7 @@ export function ModulePage({
             )
           }
         >
-          <div className="ui-card-grid">
+          <div className="ui-card-grid ui-cols-4">
             {pageRows.map(({ row, id }, i) => {
               const statusText = statusCol !== undefined ? String(row[statusCol] ?? "") : "";
               const actions = rowActionsFor(id, row, statusText);

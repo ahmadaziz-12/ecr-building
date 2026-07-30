@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { CardCustomizer } from "@/components/buildpos/CardCustomizer";
 import { applyCardPreference, useCardPreferences } from "@/lib/buildpos/card-preferences";
 import { CurrencyText } from "@/lib/buildpos/currency";
+import { cols } from "@/lib/buildpos/grid";
 
 export function PageHeader({
   group,
@@ -96,7 +97,7 @@ export function KpiGrid({ items, scope }: { items: KpiItem[]; scope?: string }) 
           />
         </div>
       )}
-      <div className="ui-card-grid">
+      <div className={`ui-card-grid ${cols(visible.length)}`}>
         {visible.map((k) => {
           const body = (
             <>
