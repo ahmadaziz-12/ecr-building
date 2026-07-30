@@ -855,28 +855,28 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-black/5 bg-white px-4 py-2 text-[11px] text-muted-foreground md:px-6">
-          <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
-            <Building2 className="h-3 w-3 text-brand" /> {statusBar.business}
+        <div className="flex h-8 min-w-0 flex-nowrap items-center gap-x-3 overflow-hidden border-b border-black/5 bg-white px-4 text-[11px] leading-none text-muted-foreground md:px-6">
+          <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap font-semibold text-foreground">
+            <Building2 className="h-3 w-3 shrink-0 text-brand" /> {statusBar.business}
           </span>
-          <span className="text-black/20">·</span>
-          <span>
+          <span className="shrink-0 text-black/20">·</span>
+          <span className="min-w-0 truncate whitespace-nowrap">
             <span className="text-foreground/70">Branch:</span> {user?.branchName ?? "All Branches"}
           </span>
-          <span className="text-black/20">·</span>
-          <span>
+          <span className="shrink-0 text-black/20">·</span>
+          <span className="min-w-0 truncate whitespace-nowrap">
             <span className="text-foreground/70">Terminal:</span>{" "}
             <span className="font-mono text-foreground">
               {currentTerminal?.code ?? (user?.branchId === null ? "All Terminals" : "Unassigned")}
             </span>
           </span>
-          <span className="text-black/20">·</span>
-          <span>
+          <span className="shrink-0 text-black/20">·</span>
+          <span className="min-w-0 truncate whitespace-nowrap">
             <span className="text-foreground/70">User:</span> {user?.name ?? "—"} ·{" "}
             <span className="text-foreground/60">{user?.role ?? "—"}</span>
           </span>
-          <span className="text-black/20">·</span>
-          <span>
+          <span className="shrink-0 text-black/20">·</span>
+          <span className="hidden shrink-0 whitespace-nowrap lg:inline">
             <span className="text-foreground/70">Date:</span>{" "}
             {new Date().toLocaleDateString("en-GB", {
               day: "2-digit",
@@ -884,8 +884,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
               year: "numeric",
             })}
           </span>
-          <span className="ml-auto flex items-center gap-1 text-foreground/60">
-            <Globe className="h-3 w-3" /> <SARIcon /> · auto-refresh 60s
+          <span className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap text-foreground/60">
+            <Globe className="h-3 w-3 shrink-0" /> <SARIcon /> · auto-refresh 60s
           </span>
         </div>
 
