@@ -565,8 +565,8 @@ export function ModulePage({
 
       {/* Filters — Search reads first and widest (the filter someone reaches for first), the
           rest of the fields sit smaller alongside it, and Date Range always trails last. */}
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 bg-white p-2 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
-        <Filter className="ml-1 h-4 w-4 text-muted-foreground" />
+      <div className="ui-filter-row rounded-xl border border-black/5 bg-white p-2 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
+        <Filter className="ml-1 h-4 w-4 flex-none text-muted-foreground" />
         {[...m.filters]
           .sort((a, b) => (a === "Search" ? -1 : b === "Search" ? 1 : 0))
           .map((f) => {
@@ -580,7 +580,7 @@ export function ModulePage({
                     setPage(1);
                   }}
                   placeholder="Search…"
-                  className="h-9 w-72 rounded-md border border-black/10 bg-canvas px-3 text-sm font-medium outline-none focus:border-brand/40"
+                  className="ui-control ui-filter-item max-w-[18rem] flex-[2_1_12rem] rounded-md border border-black/10 bg-canvas px-3 text-sm font-medium outline-none focus:border-brand/40"
                 />
               );
             }
@@ -604,7 +604,7 @@ export function ModulePage({
                   setColumnFilters((s) => ({ ...s, [f]: next }));
                   setPage(1);
                 }}
-                triggerClassName="w-auto"
+                triggerClassName="ui-filter-item w-full min-w-0 max-w-none"
               />
             );
           })}
@@ -618,6 +618,7 @@ export function ModulePage({
                 setDateRangeFilters((s) => ({ ...s, [f]: v }));
                 setPage(1);
               }}
+              triggerClassName="ui-filter-item w-full min-w-0"
             />
           ),
         )}
@@ -625,7 +626,7 @@ export function ModulePage({
           <select
             value=""
             onChange={(e) => e.target.value && handleLoadView(e.target.value)}
-            className="h-8 rounded-md border border-black/10 bg-canvas px-2 text-xs font-medium text-foreground hover:border-brand/40 focus:border-brand/40 focus:outline-none"
+            className="ui-control ui-filter-item rounded-md border border-black/10 bg-canvas px-2 text-xs font-medium text-foreground hover:border-brand/40 focus:border-brand/40 focus:outline-none"
           >
             <option value="">Saved views…</option>
             {savedViews.map((v) => (
@@ -639,7 +640,7 @@ export function ModulePage({
           size="sm"
           variant="ghost"
           onClick={clearFilters}
-          className="ml-auto h-8 gap-1 text-muted-foreground hover:text-foreground"
+          className="ui-control ml-auto flex-none gap-1 text-muted-foreground hover:text-foreground"
         >
           <X className="h-3.5 w-3.5" /> Clear
         </Button>
