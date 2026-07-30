@@ -476,7 +476,7 @@ export function FilterBar({
             />
           </div>
         ))}
-        <div className="ui-filter-item flex flex-col gap-1">
+        <div className="ui-filter-item-fixed flex flex-col gap-1">
           <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
             Date Range
           </label>
