@@ -471,7 +471,7 @@ export function FilterBar({
               options={liveOptions(g)}
               selected={values[g.label] ?? []}
               onChange={(next) => setValue(g.label, next)}
-              triggerClassName="w-full max-w-none min-w-0"
+              triggerClassName="w-full min-w-0 max-w-none"
             />
           </div>
         ))}

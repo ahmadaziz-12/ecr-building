@@ -604,7 +604,7 @@ export function ModulePage({
                   setColumnFilters((s) => ({ ...s, [f]: next }));
                   setPage(1);
                 }}
-                triggerClassName="ui-filter-item w-full min-w-0 max-w-none"
+                triggerClassName="ui-filter-item w-full min-w-0 max-w-[14rem]"
               />
             );
           })}
