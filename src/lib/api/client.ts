@@ -1,4 +1,18 @@
-export const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:5080";
+// The .NET API only listens on http://localhost:5080 on a developer machine. When the app is served
+// from any other origin (the Lovable preview, a published site, a LAN terminal), that URL points at
+// the VIEWER's own machine, so every request dies with "Failed to fetch". In that case default to
+// same-origin ("" → /api/... relative), which works behind the usual reverse proxy; set VITE_API_URL
+// to override with an explicit API origin.
+function resolveApiBase(): string {
+  const configured = import.meta.env.VITE_API_URL as string | undefined;
+  if (configured) return configured.replace(/\/$/, "");
+  if (typeof window === "undefined") return "";
+  const host = window.location.hostname;
+  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+  return isLocal ? "http://localhost:5080" : "";
+}
+
+export const API_BASE = resolveApiBase();
 
 export class ApiError extends Error {
   status: number;

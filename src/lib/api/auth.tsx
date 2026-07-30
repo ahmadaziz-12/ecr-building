@@ -100,7 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return await apiPost<CurrentUser>("/api/auth/login", { email, password });
       } catch (err) {
         if (err instanceof ApiError) throw err;
-        throw new ApiError(0, "Unable to reach the server.");
+        throw new ApiError(0, `Unable to reach the API server${API_BASE ? ` at ${API_BASE}` : ""}. Make sure the backend is running and reachable from this device.`);
       }
     },
     onSuccess: (user) => {
@@ -114,7 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return await apiPost<CurrentUser>("/api/auth/pin-login", { email, pin });
       } catch (err) {
         if (err instanceof ApiError) throw err;
-        throw new ApiError(0, "Unable to reach the server.");
+        throw new ApiError(0, `Unable to reach the API server${API_BASE ? ` at ${API_BASE}` : ""}. Make sure the backend is running and reachable from this device.`);
       }
     },
     onSuccess: (user) => {
