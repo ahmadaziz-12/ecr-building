@@ -147,7 +147,6 @@ import { ScaleSetupDialog } from "@/components/buildpos/pos/ScaleSetupDialog";
 import { ReceiptDialog } from "@/components/buildpos/pos/ReceiptDialog";
 import { RequestApprovalDialog } from "@/components/buildpos/pos/RequestApprovalDialog";
 import type { OrderDto } from "@/lib/api/pos";
-import { cols } from "@/lib/buildpos/grid";
 
 type IconType = typeof Package;
 
