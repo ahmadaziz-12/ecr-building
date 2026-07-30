@@ -90,6 +90,13 @@
   --ui-control-h: 2rem;
   --ui-card-min: 12rem;
   --ui-tile-min: 8.5rem;
+  /* Grid contract: how many equal columns a card/tile row uses. Overridden per breakpoint
+     below so the count changes only at defined breakpoints — never mid-zoom. */
+  --ui-card-cols: 4;
+  --ui-tile-cols: 6;
+  --ui-gap: 0.75rem;
+  --ui-filter-basis: 9rem;
+  --ui-filter-max: 14rem;
   --brand: oklch(0.53 0.245 293);
   --brand-foreground: oklch(0.99 0.005 293);
   --brand-glow: oklch(0.72 0.17 296);
