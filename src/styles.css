@@ -190,43 +190,82 @@
 @layer base {
   * {
     border-color: var(--color-border);
+    box-sizing: border-box;
   }
 
-  /* Every Tailwind text-* / spacing / sizing utility is rem-based, so scaling the root size here
-     scales body copy, labels, buttons and inputs together (proportionally, no clipping) instead
-     of overriding each text-xs/text-sm usage individually across the app. The clamp keeps type
-     legible at browser zoom and on small laptops without exceeding the design's 18px base. */
+  /* Root type scale drives every rem-based Tailwind size (text, padding, height, gap), so the
+     whole UI scales as one system. Deliberately viewport-STEPPED, not vw-fluid: a vw-based root
+     size makes browser zoom compound (zoom shrinks the CSS viewport, which shrinks the root font,
+     which shrinks everything again) and that is what makes components jump between zoom levels.
+     Fixed px per breakpoint means zoom scales the page uniformly and nothing reflows unexpectedly. */
   html {
-    font-size: clamp(14px, 0.42vw + 12.4px, 18px);
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  @media (max-width: 1439px) {
+    html { font-size: 15px; }
+  }
+  @media (max-width: 1023px) {
+    html { font-size: 14px; }
   }
 
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     overflow-x: hidden;
+    min-width: 320px;
+    line-height: 1.45;
+  }
+
+  /* Nothing may spill outside its parent section. */
+  img, svg, video, canvas {
+    max-width: 100%;
   }
 }
 
 /* ---------------- Shared layout + control sizing primitives ----------------
-   Card/tile rows use auto-fit tracks so every card keeps its place in the sequence and simply
-   resizes with the available width, instead of columns appearing/disappearing per breakpoint. */
+   Card/tile rows use an explicit, equal-width column count (1fr tracks) that only changes at
+   defined breakpoints. Equal tracks guarantee identical card widths, stretch keeps every card in
+   a row the same height, and the DOM order is always the visual order. */
 
 @utility ui-card-grid {
   display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ui-card-min)), 1fr));
+  gap: var(--ui-gap);
+  grid-template-columns: repeat(var(--ui-card-cols), minmax(0, 1fr));
   align-items: stretch;
 }
 
 @utility ui-tile-grid {
   display: grid;
   gap: 0.5rem;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ui-tile-min)), 1fr));
+  grid-template-columns: repeat(var(--ui-tile-cols), minmax(0, 1fr));
   align-items: stretch;
 }
 
+/* Breakpoint contract for the card/tile column counts. */
+@media (max-width: 1279px) {
+  :root { --ui-card-cols: 3; --ui-tile-cols: 5; }
+}
+@media (max-width: 1023px) {
+  :root { --ui-card-cols: 2; --ui-tile-cols: 4; }
+}
+@media (max-width: 767px) {
+  :root { --ui-card-cols: 2; --ui-tile-cols: 3; }
+}
+@media (max-width: 479px) {
+  :root { --ui-card-cols: 1; --ui-tile-cols: 2; }
+}
+
+/* Every direct child of a card/tile row must be able to shrink inside its track. */
+.ui-card-grid > *,
+.ui-tile-grid > * {
+  min-width: 0;
+  height: 100%;
+}
+
 /* Filter rows: every filter stays visible and shares the row evenly, shrinking rather than
-   dropping out of the sequence. */
+   dropping out of the sequence. Wrapping moves overflow filters to the next row in order. */
 @utility ui-filter-row {
   display: flex;
   flex-wrap: wrap;
@@ -235,14 +274,80 @@
 }
 
 @utility ui-filter-item {
-  flex: 1 1 8.5rem;
+  flex: 1 1 var(--ui-filter-basis);
   min-width: 0;
-  max-width: 14rem;
+  max-width: var(--ui-filter-max);
 }
 
 @utility ui-control {
   height: var(--ui-control-h);
   min-height: var(--ui-control-h);
+  max-height: var(--ui-control-h);
+  line-height: 1.1;
+}
+
+/* Icon-only controls stay perfectly square and centred at any zoom. */
+@utility ui-control-icon {
+  height: var(--ui-control-h);
+  width: var(--ui-control-h);
+  min-height: var(--ui-control-h);
+  min-width: var(--ui-control-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex: none;
+}
+
+/* Buttons: never let a label wrap into an uneven two-line control. */
+button, [role="button"] {
+  min-width: 0;
+}
+
+/* Tables: horizontal overflow is contained to the table's own scroller, never the page. */
+@utility ui-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+@utility ui-table {
+  width: 100%;
+  min-width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.ui-table th,
+.ui-table td {
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Forms: identical field metrics regardless of which primitive rendered them. */
+@utility ui-form-grid {
+  display: grid;
+  gap: 0.75rem 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 639px) {
+  .ui-form-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Modals: always inside the viewport, scrolling happens in the body only. */
+@utility ui-modal {
+  width: min(100vw - 2rem, 42rem);
+  max-height: min(88vh, 60rem);
+  display: flex;
+  flex-direction: column;
+}
+@utility ui-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* ---------------- BuildPOS motion + construction textures ---------------- */
