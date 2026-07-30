@@ -3,13 +3,13 @@
 // the VIEWER's own machine, so every request dies with "Failed to fetch". In that case default to
 // same-origin ("" → /api/... relative), which works behind the usual reverse proxy; set VITE_API_URL
 // to override with an explicit API origin.
+// Default is now same-origin everywhere: the app ships preview/demo auth routes under /api/auth/*,
+// so it is usable without the .NET API running. Point at the real API with
+// VITE_API_URL=http://localhost:5080 (local dev) or your deployed API origin.
 function resolveApiBase(): string {
   const configured = import.meta.env.VITE_API_URL as string | undefined;
   if (configured) return configured.replace(/\/$/, "");
-  if (typeof window === "undefined") return "";
-  const host = window.location.hostname;
-  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "[::1]";
-  return isLocal ? "http://localhost:5080" : "";
+  return "";
 }
 
 export const API_BASE = resolveApiBase();
