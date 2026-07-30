@@ -86,6 +86,10 @@
 
 :root {
   --radius: 0.625rem;
+  /* Shared control sizing so buttons, filters, inputs and selects line up on every screen. */
+  --ui-control-h: 2rem;
+  --ui-card-min: 13.5rem;
+  --ui-tile-min: 8.5rem;
   --brand: oklch(0.53 0.245 293);
   --brand-foreground: oklch(0.99 0.005 293);
   --brand-glow: oklch(0.72 0.17 296);
