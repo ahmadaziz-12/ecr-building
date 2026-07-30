@@ -459,9 +459,9 @@ export function FilterBar({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-end gap-2">
+      <div className="ui-filter-row items-end">
         {shown.map((g) => (
-          <div key={g.label} className="flex flex-col gap-1">
+          <div key={g.label} className="ui-filter-item flex flex-col gap-1">
             <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               {g.label}
             </label>
@@ -471,18 +471,23 @@ export function FilterBar({
               options={liveOptions(g)}
               selected={values[g.label] ?? []}
               onChange={(next) => setValue(g.label, next)}
+              triggerClassName="w-full max-w-none min-w-0"
             />
           </div>
         ))}
-        <div className="flex flex-col gap-1">
+        <div className="ui-filter-item flex flex-col gap-1">
           <label className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
             Date Range
           </label>
-          <DateRangeFilter value={dateRange} onChange={setDateRange} />
+          <DateRangeFilter
+            value={dateRange}
+            onChange={setDateRange}
+            triggerClassName="w-full min-w-0"
+          />
         </div>
         <Popover open={moreOpen} onOpenChange={setMoreOpen}>
           <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" className="h-8 gap-1 border-dashed text-xs">
+            <Button variant="outline" size="sm" className="ui-control gap-1 border-dashed text-xs">
               <Plus className="h-3.5 w-3.5" /> More Filters
               <ChevronDown className="h-3.5 w-3.5" />
             </Button>
