@@ -317,6 +317,13 @@
   max-width: var(--ui-filter-max);
 }
 
+@utility ui-filter-item-fixed {
+  flex: 0 0 var(--ui-filter-basis);
+  width: var(--ui-filter-basis);
+  min-width: var(--ui-filter-basis);
+  max-width: var(--ui-filter-basis);
+}
+
 @utility ui-control {
   height: var(--ui-control-h);
   min-height: var(--ui-control-h);
