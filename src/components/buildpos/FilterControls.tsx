@@ -67,7 +67,7 @@ export function MultiSelectFilter({
           variant="outline"
           size="sm"
           className={cn(
-            "ui-control min-w-[120px] max-w-[220px] justify-between gap-1.5 border-black/10 bg-white text-xs font-medium hover:border-brand/40",
+            "ui-control min-w-[7.5rem] max-w-[13.75rem] justify-between gap-1.5 border-black/10 bg-white text-xs font-medium hover:border-brand/40",
             selected.length > 0 && "border-brand/40 bg-brand/5 text-brand",
             triggerClassName,
           )}
@@ -207,7 +207,7 @@ export function DateRangeFilter({
           variant="outline"
           size="sm"
           className={cn(
-            "ui-control min-w-[130px] justify-between gap-1.5 border-black/10 bg-white text-xs font-medium hover:border-brand/40",
+            "ui-control min-w-[7.5rem] max-w-[13.75rem] justify-between gap-1.5 border-black/10 bg-white text-xs font-medium hover:border-brand/40",
             value.preset && "border-brand/40 bg-brand/5 text-brand",
             triggerClassName,
           )}

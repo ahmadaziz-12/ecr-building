@@ -483,7 +483,7 @@ export function FilterBar({
           <DateRangeFilter
             value={dateRange}
             onChange={setDateRange}
-            triggerClassName="w-full min-w-0"
+            triggerClassName="w-full min-w-0 max-w-none"
           />
         </div>
         <Popover open={moreOpen} onOpenChange={setMoreOpen}>
