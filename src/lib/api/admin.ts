@@ -405,6 +405,14 @@ export function useResetPin() {
     mutationFn: (id: number) => apiPost<{ pin: string }>(`/api/admin/users/${id}/reset-pin`),
   });
 }
+// Admin-only password rotation — lets a System Admin change the seeded admin password (or anyone
+// else's) from the UI instead of editing server config. Omit newPassword to have one generated.
+export function useResetPassword() {
+  return useMutation({
+    mutationFn: ({ id, newPassword }: { id: number; newPassword?: string }) =>
+      apiPost<{ password: string; generated: boolean }>(`/api/admin/users/${id}/reset-password`, { newPassword: newPassword ?? null }),
+  });
+}
 export type RuleTestResult = { passed: boolean; messages: string[] };
 export function useTestRule() {
   return useMutation({

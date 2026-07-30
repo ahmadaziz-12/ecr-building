@@ -1969,7 +1969,7 @@ export const catalog: ModuleCatalog[] = [
       ],
     ],
     statusCol: 8,
-    actions: ["Add User", "Reset PIN", "Disable", "Assign Branch"],
+    actions: ["Add User", "Reset PIN", "Reset Password", "Disable", "Assign Branch"],
     primaryAction: "Add User",
   },
   {

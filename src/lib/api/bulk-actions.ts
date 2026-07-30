@@ -2,7 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   useBranches, useSetBranchStatus, useUpdateBranch, useTerminals, useAssignCashier, useForceSyncTerminal, mapTerminals,
-  useDevices, useOpenDrawer, mapDevices, useRules, useTestRule, useUpdateRule, useUsers, useUpdateUser, useResetPin,
+  useDevices, useOpenDrawer, mapDevices, useRules, useTestRule, useUpdateRule, useUsers, useUpdateUser, useResetPin, useResetPassword,
   useMaintenance, useAssignMaintenance, useUpdateMaintenanceStatus, useCreateMaintenance, useCompliance, useUpdateCompliance, useSignOffCompliance,
   useSettings, useUpsertSetting,
 } from "./admin";
@@ -98,6 +98,7 @@ export function useBulkActions(
 
   const updateUser = useUpdateUser();
   const resetPin = useResetPin();
+  const resetPassword = useResetPassword();
 
   const { data: maintenance } = useMaintenance(pathname === "/admin/maintenance");
   const assignMaintenance = useAssignMaintenance();
@@ -409,6 +410,17 @@ export function useBulkActions(
             const u = list.find((x) => x.id === id);
             const { pin } = await resetPin.mutateAsync(id);
             toast.success(`New PIN for ${u?.name}: ${pin}`, { duration: 20000 });
+          },
+        },
+        "Reset Password": {
+          title: "Reset Password", mode: "single", confirmLabel: "Reset Password",
+          description: "Generates a new strong password for the selected account (including the System Admin). It is shown once — copy it before closing.",
+          rows: list.map(rowFor), emptyMessage: "No users found.",
+          run: async (id) => {
+            const u = list.find((x) => x.id === id);
+            const { password } = await resetPassword.mutateAsync({ id });
+            await navigator.clipboard?.writeText(password).catch(() => undefined);
+            toast.success(`New password for ${u?.name}: ${password} (copied to clipboard)`, { duration: 60000 });
           },
         },
       };

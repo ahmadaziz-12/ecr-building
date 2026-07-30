@@ -4,6 +4,10 @@ public record UserDto(int Id, string Name, string Email, int RoleId, string Role
 public record CreateUserRequest(string Name, string Email, string Password, int RoleId, int? BranchId);
 public record UpdateUserRequest(string Name, int RoleId, int? BranchId, string Status);
 public record ResetPinResponse(string Pin);
+// Admin-initiated password rotation: either the admin supplies a new password, or the server
+// generates a strong one and hands it back once so it can be relayed to the user.
+public record ResetPasswordRequest(string? NewPassword);
+public record ResetPasswordResponse(string Password, bool Generated);
 
 // Module is a page route key (e.g. "/stock/warehouses") — see PermissionCatalog.cs. Each action is
 // independently grantable; a role can have CanView+CanExport without CanEdit.

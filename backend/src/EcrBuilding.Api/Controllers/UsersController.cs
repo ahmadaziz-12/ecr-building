@@ -87,6 +87,43 @@ public class UsersController(AppDbContext db, IPasswordHasher hasher, IAuditServ
     }
 
     // Powers the "Custom Permissions — {user}" dialog: the user's effective grid (role default with
+    // Admin-only password rotation. Lets a System Admin change any account's password (including the
+    // seeded admin) from the UI instead of editing appsettings/config on the server. The password is
+    // returned exactly once so it can be handed to the account owner.
+    [HttpPost("{id:int}/reset-password")]
+    [RequireModule("/admin/users", PermissionAction.Edit)]
+    public async Task<ActionResult<ResetPasswordResponse>> ResetPassword(int id, ResetPasswordRequest? request, CancellationToken ct)
+    {
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id, ct);
+        if (user is null) return NotFound();
+
+        var supplied = request?.NewPassword;
+        var generated = string.IsNullOrWhiteSpace(supplied);
+        if (!generated && supplied!.Trim().Length < 8)
+        {
+            return BadRequest(new { error = "Password must be at least 8 characters." });
+        }
+
+        var password = generated ? GeneratePassword() : supplied!.Trim();
+        user.PasswordHash = hasher.Hash(password);
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync("admin", "USER_PASSWORD_RESET", id.ToString(), cancellationToken: ct);
+        return Ok(new ResetPasswordResponse(password, generated));
+    }
+
+    private static string GeneratePassword()
+    {
+        // Ambiguous characters (O/0, l/1) omitted so the value survives being read aloud or retyped.
+        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+        var buffer = new char[14];
+        for (var i = 0; i < buffer.Length; i++)
+        {
+            buffer[i] = chars[RandomNumberGenerator.GetInt32(chars.Length)];
+        }
+        return new string(buffer) + "!" + RandomNumberGenerator.GetInt32(10, 100);
+    }
+
+    // Powers the "Custom Permissions — {user}" dialog: the user's effective grid (role default with
     // any existing override merged in) for every page, flagging which pages already carry an
     // explicit override so the UI can visually distinguish them from inherited role defaults.
     [HttpGet("{id:int}/permission-overrides")]
