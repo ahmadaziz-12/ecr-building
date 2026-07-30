@@ -760,7 +760,7 @@ export function ModulePage({
             )
           }
         >
-          <div className={`ui-card-grid ${cols(pageRows.length)}`}>
+          <div className="ui-card-grid ui-cols-4">
             {pageRows.map(({ row, id }, i) => {
               const statusText = statusCol !== undefined ? String(row[statusCol] ?? "") : "";
               const actions = rowActionsFor(id, row, statusText);
