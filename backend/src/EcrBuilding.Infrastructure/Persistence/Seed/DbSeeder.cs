@@ -699,9 +699,51 @@ public static class DbSeeder
     private static Dictionary<string, AccessLevel> AllSections(AccessLevel level) =>
         PermissionCatalog.Pages.Select(p => p.Section).Distinct().ToDictionary(s => s, _ => level);
 
+    /// <summary>
+    /// Idempotently creates — or, if it already exists, re-hashes the password of — a real System
+    /// Admin login from configuration (SeedAdmin:Email / SeedAdmin:Password). Unlike SeedUsersAsync
+    /// this runs on EVERY startup, including against a database that was seeded long ago, which is
+    /// the only way an existing deployment can gain a new admin account. No-ops when either value is
+    /// missing, so environments that don't configure one are unaffected.
+    /// </summary>
+    public static async Task EnsureAdminAccountAsync(
+        AppDbContext db, IPasswordHasher hasher, string? email, string? password, string? name = null)
+    {
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password)) return;
+
+        email = email.Trim().ToLowerInvariant();
+        var adminRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "System Admin");
+        if (adminRole is null) return;
+
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email);
+        if (user is null)
+        {
+            db.Users.Add(new User
+            {
+                Name = string.IsNullOrWhiteSpace(name) ? email.Split('@')[0] : name,
+                Email = email,
+                RoleId = adminRole.Id,
+                BranchId = null,
+                PasswordHash = hasher.Hash(password),
+            });
+        }
+        else
+        {
+            // Keeps the configured password authoritative — an operator can recover access by
+            // changing the config value and restarting.
+            user.PasswordHash = hasher.Hash(password);
+            user.RoleId = adminRole.Id;
+            user.Status = UserStatus.Active;
+            if (!string.IsNullOrWhiteSpace(name)) user.Name = name;
+        }
+
+        await db.SaveChangesAsync();
+    }
+
     private static async Task SeedUsersAsync(AppDbContext db, IPasswordHasher hasher)
     {
         var riyadh = await db.Branches.FirstAsync(b => b.Code == "BR-RUH-01");
+
         var jeddah = await db.Branches.FirstAsync(b => b.Code == "BR-JED-01");
         var roles = await db.Roles.ToDictionaryAsync(r => r.Name);
 
