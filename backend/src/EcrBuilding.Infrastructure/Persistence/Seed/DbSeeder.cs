@@ -702,6 +702,7 @@ public static class DbSeeder
     private static async Task SeedUsersAsync(AppDbContext db, IPasswordHasher hasher)
     {
         var riyadh = await db.Branches.FirstAsync(b => b.Code == "BR-RUH-01");
+
         var jeddah = await db.Branches.FirstAsync(b => b.Code == "BR-JED-01");
         var roles = await db.Roles.ToDictionaryAsync(r => r.Name);
 
