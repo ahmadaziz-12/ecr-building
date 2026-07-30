@@ -10,6 +10,11 @@ using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Real (non-demo) admin credentials live here, NOT in appsettings.json — the file is gitignored so a
+// working password never lands in the repo. Environment variables (SeedAdmin__Email /
+// SeedAdmin__Password) override it, which is what production should use.
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: false);
+
 const string CorsPolicy = "Frontend";
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 
@@ -92,6 +97,15 @@ if (!app.Environment.IsEnvironment("Testing"))
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var hasher = scope.ServiceProvider.GetRequiredService<EcrBuilding.Application.Abstractions.IPasswordHasher>();
     await DbSeeder.SeedAsync(db, hasher);
+
+    // Creates (or resets the password of) the configured real admin login on every startup, so a
+    // deployment against an already-seeded database still gets a usable account.
+    await DbSeeder.EnsureAdminAccountAsync(
+        db,
+        hasher,
+        app.Configuration["SeedAdmin:Email"],
+        app.Configuration["SeedAdmin:Password"],
+        app.Configuration["SeedAdmin:Name"]);
 }
 
 if (app.Environment.IsDevelopment())
