@@ -34,8 +34,10 @@ export function PrinterSetupDialog({ terminalId }: { terminalId: number | undefi
   const testPrint = useTestPrint();
   const updateMapping = useUpdateDeviceQzMapping();
 
-  const terminalDevices = (devices ?? []).filter((d) => d.terminalId === terminalId);
-  const printers = terminalDevices.filter((d) => d.type === "ReceiptPrinter");
+  // On the POS a terminal is always in scope; from Admin → Settings there is none, so show every
+  // paired receipt printer instead of an empty list.
+  const scoped = terminalId == null ? (devices ?? []) : (devices ?? []).filter((d) => d.terminalId === terminalId);
+  const printers = scoped.filter((d) => d.type === "ReceiptPrinter");
   const canMap = hasAccess("/network/devices", "Edit");
 
   async function tryConnect() {
@@ -168,7 +170,7 @@ export function PrinterSetupDialog({ terminalId }: { terminalId: number | undefi
 
             {printers.length === 0 && (
               <div className="rounded-lg border border-dashed border-black/10 p-4 text-center text-sm text-muted-foreground">
-                No receipt printer paired to this terminal yet — pair one from Network → Devices.
+                No receipt printer paired yet — pair one from Network → Devices.
               </div>
             )}
             {printers.map((d) => (
