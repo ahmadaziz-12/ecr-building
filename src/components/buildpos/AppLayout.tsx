@@ -359,16 +359,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const visibleNav = nav
     .map((g) => ({ ...g, items: g.items.filter((i) => hasAccess(i.to)) }))
     .filter((g) => g.items.length > 0);
-  const allItems: Item[] = visibleNav.flatMap((g) => g.items);
-
-  const active = allItems.find((m) => m.to === pathname) ?? allItems[0];
   // Exact match first; the prefix fallback keeps a group open on detail routes (e.g.
   // /operate/orders/42) that have no nav entry of their own.
   const activeGroupName =
     visibleNav.find((g) => g.items.some((i) => i.to === pathname))?.name ??
     visibleNav.find((g) => g.items.some((i) => pathname.startsWith(`${i.to}/`)))?.name ??
     "";
-  const activeGroup = activeGroupName || "Dashboard";
 
   // Groups start collapsed; only the one owning the current page is expanded, and navigating to a
   // page in another group collapses the rest. Dashboard is standalone (no group) so landing there
@@ -581,14 +577,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <div className="lg:hidden">
             <BrandLogo />
           </div>
-          <div className="hidden min-w-0 items-center gap-2 lg:flex">
-            <active.icon className="h-4 w-4 text-brand" />
-            <span className="truncate text-xs text-muted-foreground">{activeGroup}</span>
-            <span className="text-muted-foreground">/</span>
-            <h1 className="truncate font-display text-base font-semibold text-foreground">
-              {active.label}
-            </h1>
-          </div>
           <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2">
             <div className="relative hidden min-w-0 flex-1 md:block">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -760,7 +748,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
               )}
             </div>
             {hasAccess("/operate/cashier-shift") && (
-              <span className="hidden items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-success-foreground xl:inline-flex">
+              <span className="hidden h-9 items-center gap-1.5 rounded-lg border border-success/30 bg-success/10 px-3 text-xs font-medium whitespace-nowrap text-success-foreground xl:inline-flex">
                 <Circle className="h-2 w-2 fill-current" />{" "}
                 {openShift
                   ? `Open since ${new Date(openShift.openedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`
@@ -768,13 +756,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
               </span>
             )}
             <span
-              className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium whitespace-nowrap xl:inline-flex ${online ? "border-teal/30 bg-teal/10 text-foreground" : "border-critical/30 bg-critical/10 text-critical"}`}
+              className={`hidden h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium whitespace-nowrap xl:inline-flex ${online ? "border-teal/30 bg-teal/10 text-foreground" : "border-critical/30 bg-critical/10 text-critical"}`}
             >
               <Wifi className={`h-3 w-3 ${online ? "text-teal" : "text-critical"}`} />{" "}
               {online ? "Online" : "Offline"}
             </span>
             {hasAccess("/admin/zatca-settings") && (
-              <span className="hidden items-center gap-1.5 rounded-full border border-brand/20 bg-brand/10 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-brand xl:inline-flex">
+              <span className="hidden h-9 items-center gap-1.5 rounded-lg border border-brand/20 bg-brand/10 px-3 text-xs font-medium whitespace-nowrap text-brand xl:inline-flex">
                 <Shield className="h-3 w-3" /> ZATCA{" "}
                 {zatcaIdentity?.onboardingStatus === "ProductionReady"
                   ? "Connected"
@@ -828,7 +816,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="grid h-9 w-9 place-items-center rounded-full bg-brand text-brand-foreground text-xs font-semibold hover:bg-brand/90">
+                <button className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-brand text-brand-foreground text-xs font-semibold hover:bg-brand/90">
                   {(user?.name ?? "?").charAt(0)}
                 </button>
               </DropdownMenuTrigger>
