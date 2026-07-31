@@ -349,7 +349,7 @@ export const useStockTakeStore = create<S>()(
 
         const approvals = useApprovalStore.getState();
         const maker = sess.makerId;
-        if (maker === actorId && false) return { ok: false };
+        void actorId;
         const approvalId = approvals.submitApproval({
           module: "Stock Taking",
           requestType: "Approve Stock Take Variance",
