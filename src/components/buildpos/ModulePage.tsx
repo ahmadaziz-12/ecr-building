@@ -1,6 +1,7 @@
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Download, Filter, MoreHorizontal, Plus, RefreshCw, X } from "lucide-react";
+import { PrinterSetupDialog } from "@/components/buildpos/pos/PrinterSetupDialog";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -523,6 +524,9 @@ export function ModulePage({
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{m.desc}</p>
         </div>
         <div className="flex gap-2">
+          {(pathname === "/admin/settings" || pathname === "/admin/pos-settings") && (
+            <PrinterSetupDialog terminalId={undefined} />
+          )}
           {pathname !== "/stock/transfers" && (
             <Button
               variant="ghost"
