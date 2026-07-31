@@ -20,6 +20,7 @@ import {
   Wallet,
   FileText,
   Percent,
+  Calculator,
   RotateCcw,
   Receipt,
   Truck,
