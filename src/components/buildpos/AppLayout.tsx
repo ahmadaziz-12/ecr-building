@@ -157,6 +157,7 @@ const nav: Group[] = [
       { to: "/finance/expenses", label: "Expenses", icon: Wallet },
       { to: "/finance/general-ledger", label: "General Ledger", icon: BookOpen },
       { to: "/finance/pricing", label: "Pricing, Discounts & Coupons", icon: Percent },
+      { to: "/finance/custom-pricing", label: "Custom Material Pricing", icon: Calculator },
       { to: "/finance/returns", label: "Returns & Refunds", icon: RotateCcw },
       { to: "/finance/loyalty", label: "Loyalty Program", icon: Gift },
       { to: "/finance/tax-zatca", label: "Invoices & Tax Compliance", icon: Receipt },
