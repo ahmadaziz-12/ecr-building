@@ -3011,6 +3011,10 @@ export function PosCheckout() {
                           ? "Edit price override"
                           : "Override this item's price"}
                       </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setPricingLineSku(l.sku)}>
+                        <Tag className="h-4 w-4" />
+                        Customise price…
+                      </DropdownMenuItem>
                       <DropdownMenuItem onSelect={() => setDiscountEditingSku(l.sku)}>
                         <Percent className="h-4 w-4" />
                         {l.manualDiscountPct ? `Edit discount (${l.manualDiscountPct}%)` : "Add a discount"}
