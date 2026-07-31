@@ -359,8 +359,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const visibleNav = nav
     .map((g) => ({ ...g, items: g.items.filter((i) => hasAccess(i.to)) }))
     .filter((g) => g.items.length > 0);
-  const allItems: Item[] = visibleNav.flatMap((g) => g.items);
-
   // Exact match first; the prefix fallback keeps a group open on detail routes (e.g.
   // /operate/orders/42) that have no nav entry of their own.
   const activeGroupName =
