@@ -59,6 +59,8 @@ import {
   BookOpen,
   ClipboardCheck,
   Copy,
+  BadgeCheck,
+  GitCompare,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
@@ -105,6 +107,7 @@ const nav: Group[] = [
     name: "Operate",
     items: [
       { to: "/operate/pos-checkout", label: "POS Checkout", icon: ScanBarcode },
+      { to: "/operate/customer-view", label: "Customer View", icon: Users },
       { to: "/operate/orders", label: "Orders & Quotations", icon: ShoppingBag },
       { to: "/operate/customers", label: "Customers & Contractors", icon: Users },
       { to: "/operate/cashier-workspace", label: "Cashier Workspace", icon: UserSquare2 },
@@ -119,6 +122,7 @@ const nav: Group[] = [
     name: "Products & Stock",
     items: [
       { to: "/stock/inventory", label: "Product Catalog", icon: Package },
+      { to: "/stock/brands", label: "Brands", icon: BadgeCheck },
       { to: "/stock/variant-groups", label: "Variant Groups", icon: Copy },
       { to: "/admin/categories", label: "Categories & Attributes", icon: Layers },
       { to: "/stock/bundles", label: "Bundles & Systems", icon: Blocks },
@@ -141,6 +145,8 @@ const nav: Group[] = [
     name: "Procurement",
     items: [
       { to: "/suppliers/suppliers", label: "Suppliers", icon: Truck },
+      { to: "/suppliers/vendor-workspace", label: "Vendor Workspace", icon: Store },
+      { to: "/suppliers/offer-comparison", label: "Supplier Offers", icon: GitCompare },
       { to: "/finance/purchase-orders", label: "Purchase Orders", icon: FileText },
       { to: "/suppliers/rts", label: "Supplier Returns", icon: Undo2 },
     ],
@@ -193,6 +199,7 @@ const nav: Group[] = [
     name: "Insights",
     items: [
       { to: "/insights/reports", label: "Reports", icon: FileBarChart },
+      { to: "/insights/brand-supplier", label: "Brand & Supplier Reports", icon: BadgeCheck },
       { to: "/insights/bi", label: "Analytics", icon: BarChart3 },
       { to: "/insights/kpi", label: "KPI Evaluation", icon: Target },
     ],
