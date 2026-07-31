@@ -326,6 +326,16 @@ export function ModulePage({
   );
   const baseRows = live?.rows ?? m?.rows ?? [];
   const ids = live?.ids;
+  // The status tab strip is gone from every screen — the same choice now lives in the filter bar.
+  // Any column a module used to tab by gets a MultiSelect filter, even if it wasn't listed in
+  // m.filters, so nothing that was selectable before became unreachable.
+  const tabFilterLabels = useMemo(() => {
+    if (!m?.tabs) return [] as string[];
+    const tabCols = m.tabFilterCols ?? (statusCol !== undefined ? [statusCol] : []);
+    return tabCols
+      .map((i) => columns[i])
+      .filter((label): label is string => Boolean(label) && !m.filters.includes(label));
+  }, [m, statusCol, columns]);
 
   const indexed = useMemo(() => baseRows.map((row, i) => ({ row, id: ids?.[i] })), [baseRows, ids]);
 
