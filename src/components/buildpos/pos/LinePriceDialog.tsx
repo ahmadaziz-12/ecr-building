@@ -21,11 +21,17 @@ export type LinePriceTarget = {
   uom: string;
   qty: number;
   price: number;
+  // Weight per STOCK uom (kg) plus the selling-uom conversion factor — together they give the kg
+  // in one selling unit, which is what the "Price per kg" mode multiplies by. isSoldByWeight lines
+  // already bill in kg, so one selling unit is exactly 1 kg.
+  weight?: number;
+  factorToStock?: number;
+  isSoldByWeight?: boolean;
   manualUnitPrice?: number;
   manualDiscountPct?: number;
 };
 
-type Mode = "price" | "pct" | "amount";
+type Mode = "price" | "kg" | "pct" | "amount";
 
 const money = (n: number) =>
   n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ر.س";
@@ -64,6 +70,12 @@ export function LinePriceDialog({
   if (!line) return null;
 
   const list = line.price;
+  // kg contained in one selling unit of this line.
+  const unitWeightKg = line.isSoldByWeight
+    ? 1
+    : (line.weight ?? 0) * (line.factorToStock || 1);
+  const canPricePerKg = unitWeightKg > 0;
+  const listPerKg = canPricePerKg ? list / unitWeightKg : 0;
   const num = Number(value);
   const entered = value.trim() === "" || Number.isNaN(num) ? null : Math.max(0, num);
 
@@ -72,6 +84,7 @@ export function LinePriceDialog({
   let unitPrice = list;
   if (entered != null) {
     if (mode === "price") unitPrice = entered;
+    else if (mode === "kg") unitPrice = entered * unitWeightKg;
     else if (mode === "pct") unitPrice = list * (1 - Math.min(entered, 100) / 100);
     else unitPrice = Math.max(0, list - entered);
   }
@@ -79,7 +92,8 @@ export function LinePriceDialog({
   const isDiscount = unitPrice < list - 0.0001;
   const isMarkup = unitPrice > list + 0.0001;
 
-  const needsOverrideApproval = isMarkup || (isDiscount && !canOverrideItemPrice && mode === "price");
+  const needsOverrideApproval =
+    isMarkup || (isDiscount && !canOverrideItemPrice && (mode === "price" || mode === "kg"));
   const overCeiling =
     isDiscount && discountCeilingPercent !== null && discountPct > discountCeilingPercent;
 
@@ -103,6 +117,9 @@ export function LinePriceDialog({
 
   const modes: { id: Mode; label: string; suffix: string }[] = [
     { id: "price", label: "New unit price", suffix: "ر.س" },
+    ...(canPricePerKg
+      ? [{ id: "kg" as Mode, label: "Price per kg", suffix: "ر.س/kg" }]
+      : []),
     { id: "pct", label: "Discount %", suffix: "%" },
     { id: "amount", label: "Discount amount", suffix: "ر.س" },
   ];
@@ -117,9 +134,13 @@ export function LinePriceDialog({
         <div className="space-y-4">
           <p className="font-mono text-[11px] text-muted-foreground">
             {line.sku} · {line.qty} {line.uom} · list {money(list)}
+            {canPricePerKg &&
+              ` · ${unitWeightKg.toLocaleString("en-US", { maximumFractionDigits: 3 })} kg/${line.uom} · list ${listPerKg.toFixed(2)} ر.س/kg`}
           </p>
 
-          <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
+          <div
+            className={`grid gap-1 rounded-lg bg-muted p-1 ${canPricePerKg ? "grid-cols-4" : "grid-cols-3"}`}
+          >
             {modes.map((m) => (
               <button
                 key={m.id}
@@ -128,7 +149,7 @@ export function LinePriceDialog({
                   setMode(m.id);
                   setValue("");
                 }}
-                className={`rounded-md px-2 py-1.5 text-xs font-medium transition ${
+                className={`rounded-md px-1.5 py-1.5 text-[11px] font-medium transition ${
                   mode === m.id
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
@@ -147,13 +168,35 @@ export function LinePriceDialog({
               autoFocus
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              placeholder={mode === "price" ? String(list) : "0"}
-              aria-label={`${line.sku} ${mode === "price" ? "new unit price" : mode === "pct" ? "discount percent" : "discount amount"}`}
+              placeholder={
+                mode === "price" ? String(list) : mode === "kg" ? listPerKg.toFixed(2) : "0"
+              }
+              aria-label={`${line.sku} ${mode === "price" ? "new unit price" : mode === "kg" ? "price per kilogram" : mode === "pct" ? "discount percent" : "discount amount"}`}
             />
-            <span className="w-10 shrink-0 text-xs text-muted-foreground">
+            <span className="w-14 shrink-0 text-xs text-muted-foreground">
               {modes.find((m) => m.id === mode)!.suffix}
             </span>
           </div>
+
+          {mode === "kg" && (
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { label: "List /kg", v: listPerKg },
+                { label: "-5%", v: listPerKg * 0.95 },
+                { label: "-10%", v: listPerKg * 0.9 },
+                { label: "Round down", v: Math.floor(listPerKg) },
+              ].map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => setValue(String(Number(p.v.toFixed(2))))}
+                  className="rounded-md border border-black/10 px-2 py-1 text-xs hover:border-brand hover:text-brand"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {mode === "pct" && (
             <div className="flex flex-wrap gap-1.5">
@@ -193,6 +236,14 @@ export function LinePriceDialog({
               <span className="text-muted-foreground">New unit price</span>
               <span className="font-semibold text-foreground">{money(unitPrice)}</span>
             </div>
+            {canPricePerKg && (
+              <div className="mt-1 flex justify-between">
+                <span className="text-muted-foreground">Per kg</span>
+                <span className="text-foreground">
+                  {(unitPrice / unitWeightKg).toFixed(2)} ر.س/kg
+                </span>
+              </div>
+            )}
             <div className="mt-1 flex justify-between">
               <span className="text-muted-foreground">
                 {isMarkup ? "Uplift vs list" : "Discount vs list"}
