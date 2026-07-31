@@ -5,6 +5,8 @@ import { Pill, SectionCard } from "@/components/buildpos/sections";
 import { useDeliveryStore, STAGE_TONE, type Stage } from "@/lib/delivery/store";
 import { useHrStore, driverAvailable } from "@/lib/hr/store";
 import { useAuditStore } from "@/lib/store/audit";
+import { Link } from "@tanstack/react-router";
+import { useFleetStore, deriveMovement, MOVEMENT_TYPES, VEHICLE_TYPES } from "@/lib/delivery/fleet-store";
 import { CreateDeliveryDialog } from "./CreateDeliveryDialog";
 
 export function DeliveryDashboard() {
@@ -13,6 +15,10 @@ export function DeliveryDashboard() {
   const vehicles = useDeliveryStore((s) => s.vehicles);
   const events = useAuditStore((s) => s.events).filter((e) => e.module === "delivery").slice(0, 8);
   const [open, setOpen] = useState(false);
+  const fleet = useFleetStore((s) => s.vehicles);
+  const movements = useFleetStore((s) => s.movements);
+  const [movementFilter, setMovementFilter] = useState("");
+  const [vehicleTypeFilter, setVehicleTypeFilter] = useState("");
 
   const kpis = useMemo(() => {
     const byStage = (s: Stage) => orders.filter((o) => o.stage === s);
@@ -63,6 +69,62 @@ export function DeliveryDashboard() {
         ]}
         scope="delivery-dashboard"
       />
+
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 bg-white p-2">
+        <select value={movementFilter} onChange={(e) => setMovementFilter(e.target.value)} className="h-9 rounded-lg border border-black/10 bg-white px-3 text-sm">
+          <option value="">All Movements</option>
+          {MOVEMENT_TYPES.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <select value={vehicleTypeFilter} onChange={(e) => setVehicleTypeFilter(e.target.value)} className="h-9 rounded-lg border border-black/10 bg-white px-3 text-sm">
+          <option value="">All Vehicle Types</option>
+          {VEHICLE_TYPES.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <Link to="/delivery/vehicles" className="ml-auto rounded-lg bg-brand px-3 py-2 text-xs font-medium text-brand-foreground hover:bg-brand/90">Add Vehicle</Link>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <SectionCard title="Movements by type" desc="Customer, project and internal movements">
+          <div className="divide-y divide-black/5 text-sm">
+            {MOVEMENT_TYPES.filter((m) => !movementFilter || m === movementFilter).map((m) => {
+              const count = orders.filter((o) => deriveMovement(o).movementType === m).length + movements.filter((x) => x.movementType === m).length;
+              return (
+                <div key={m} className="flex items-center justify-between py-1.5">
+                  <span>{m}</span>
+                  <span className="font-mono text-xs text-muted-foreground">{count}</span>
+                </div>
+              );
+            })}
+          </div>
+        </SectionCard>
+        <SectionCard title="Fleet snapshot" desc={`${fleet.length} vehicles`} action={<Link to="/delivery/vehicles" className="text-xs text-brand hover:underline">Manage fleet</Link>}>
+          <div className="divide-y divide-black/5 text-sm">
+            {fleet.filter((v) => !vehicleTypeFilter || v.type === vehicleTypeFilter).map((v) => (
+              <div key={v.id} className="flex flex-wrap items-center gap-2 py-1.5">
+                <span className="font-mono text-xs text-brand">{v.id}</span>
+                <span>{v.type}</span>
+                <span className="text-xs text-muted-foreground">{v.stockLocation || v.branch}</span>
+                <Pill tone={v.status === "Available" ? "success" : v.status === "Inactive" || v.status === "On Hold" ? "critical" : "info"}>{v.status}</Pill>
+                <span className="ml-auto font-mono text-xs">{v.maxWeightTons} t</span>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      </div>
+
+      <SectionCard title="Internal stock movements in transit" desc="Warehouse and branch replenishment — no customer charge" action={<Link to="/delivery/movements" className="text-xs text-brand hover:underline">Open movements</Link>}>
+        <div className="divide-y divide-black/5 text-sm">
+          {movements.length === 0 && <p className="py-3 text-sm text-muted-foreground">No internal movements.</p>}
+          {movements.map((m) => (
+            <div key={m.id} className="flex flex-wrap items-center gap-2 py-1.5">
+              <span className="font-mono text-xs text-brand">{m.id}</span>
+              <span className="text-xs">{m.source} → {m.destination}</span>
+              <span className="text-xs text-muted-foreground">{m.vehicleId ?? "No vehicle"} · {m.driver ?? "No driver"}</span>
+              <Pill tone={m.stage === "Received" || m.stage === "Closed" ? "success" : "info"}>{m.stage}</Pill>
+              <span className="ml-auto font-mono text-xs">{m.weightTons} t</span>
+            </div>
+          ))}
+        </div>
+      </SectionCard>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <SectionCard title="Deliveries Due Today" desc={`${dueToday.length} scheduled`} className="lg:col-span-2">
