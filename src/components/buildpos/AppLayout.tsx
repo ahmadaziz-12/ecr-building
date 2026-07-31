@@ -59,6 +59,8 @@ import {
   BookOpen,
   ClipboardCheck,
   Copy,
+  BadgeCheck,
+  GitCompare,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
