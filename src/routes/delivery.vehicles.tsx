@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { VehiclesPage } from "@/components/delivery/VehiclesPage";
+import { FleetVehiclesPage } from "@/components/delivery/FleetVehiclesPage";
 
 export const Route = createFileRoute("/delivery/vehicles")({
-  head: () => ({ meta: [{ title: "Vehicle Assignments — BuildPOS" }, { name: "description", content: "Fleet vehicles, capacity and current dispatch." }] }),
-  component: VehiclesPage,
+  head: () => ({ meta: [{ title: "Vehicles — BuildPOS" }, { name: "description", content: "Fleet vehicles, capacity, permitted movement types and document validity." }] }),
+  component: FleetVehiclesPage,
 });
