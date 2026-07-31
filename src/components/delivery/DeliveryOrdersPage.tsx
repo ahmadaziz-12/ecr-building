@@ -6,6 +6,7 @@ import { Pill, SectionCard } from "@/components/buildpos/sections";
 import { MultiSelectFilter } from "@/components/buildpos/FilterControls";
 import { STAGES, STAGE_TONE, useDeliveryStore, canSplit, type DeliveryOrder } from "@/lib/delivery/store";
 import { useAuth } from "@/lib/api/auth";
+import { deriveMovement, MOVEMENT_TYPES } from "@/lib/delivery/fleet-store";
 import { CreateDeliveryDialog } from "./CreateDeliveryDialog";
 import { StageActionDialog } from "./StageActionDialog";
 import { SplitDeliveryDialog } from "./SplitDeliveryDialog";
@@ -79,6 +80,8 @@ export function DeliveryOrdersPage() {
   const orders = useDeliveryStore((s) => s.orders);
   const [q, setQ] = useState("");
   const [stage, setStage] = useState<string[]>([]);
+  const [movement, setMovement] = useState<string[]>([]);
+  const [priority, setPriority] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [active, setActive] = useState<DeliveryOrder | null>(null);
   const [splitting, setSplitting] = useState<DeliveryOrder | null>(null);
@@ -87,13 +90,15 @@ export function DeliveryOrdersPage() {
   const rows = useMemo(() => {
     return orders.filter((o) => {
       if (stage.length && !stage.includes(o.stage)) return false;
+      if (movement.length && !movement.includes(deriveMovement(o).movementType)) return false;
+      if (priority.length && !priority.includes(o.priority)) return false;
       if (q) {
         const t = q.toLowerCase();
         return o.id.toLowerCase().includes(t) || o.customer.toLowerCase().includes(t) || o.orderId.toLowerCase().includes(t) || o.area.toLowerCase().includes(t);
       }
       return true;
     });
-  }, [orders, stage, q]);
+  }, [orders, stage, movement, priority, q]);
 
   return (
     <div className="space-y-4">
@@ -112,6 +117,8 @@ export function DeliveryOrdersPage() {
           selected={stage}
           onChange={setStage}
         />
+        <MultiSelectFilter label="Movement Type" allLabel="All Movements" options={[...MOVEMENT_TYPES]} selected={movement} onChange={setMovement} />
+        <MultiSelectFilter label="Priority" allLabel="All Priorities" options={["Urgent", "High", "Standard", "Low"]} selected={priority} onChange={setPriority} />
         <span className="ml-auto text-xs text-muted-foreground">{rows.length} of {orders.length}</span>
       </div>
 
@@ -123,15 +130,18 @@ export function DeliveryOrdersPage() {
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-2 py-2 text-left">DO #</th>
-                <th className="px-2 py-2 text-left">Order</th>
+                <th className="px-2 py-2 text-left">Movement Type</th>
+                <th className="px-2 py-2 text-left">Source</th>
+                <th className="px-2 py-2 text-left">Destination</th>
+                <th className="px-2 py-2 text-left">Reference</th>
                 <th className="px-2 py-2 text-left">Customer</th>
-                <th className="px-2 py-2 text-left">Area</th>
                 <th className="px-2 py-2 text-left">Promised</th>
                 <th className="px-2 py-2 text-left">Driver</th>
                 <th className="px-2 py-2 text-left">Vehicle</th>
                 <th className="px-2 py-2 text-right">Weight</th>
                 <th className="px-2 py-2 text-right">Amount</th>
                 <th className="px-2 py-2 text-left">Stage</th>
+                <th className="px-2 py-2 text-left">Priority</th>
                 <th className="px-2 py-2" />
               </tr>
             </thead>
@@ -142,15 +152,18 @@ export function DeliveryOrdersPage() {
                     {o.id}
                     {o.sourceDeliveryNo && <span className="mt-0.5 block font-sans text-[10px] font-normal text-muted-foreground">↳ redelivery of {o.sourceDeliveryNo}</span>}
                   </td>
-                  <td className="px-2 py-2 font-mono text-xs">{o.orderId}</td>
+                  <td className="px-2 py-2 text-xs">{deriveMovement(o).movementType}</td>
+                  <td className="px-2 py-2 text-xs text-muted-foreground">{deriveMovement(o).source}</td>
+                  <td className="px-2 py-2 text-xs text-muted-foreground">{deriveMovement(o).destination}</td>
+                  <td className="px-2 py-2 font-mono text-xs">{o.poRef || o.orderId}</td>
                   <td className="px-2 py-2">{o.customer}</td>
-                  <td className="px-2 py-2 text-muted-foreground">{o.area}</td>
                   <td className="px-2 py-2 text-muted-foreground">{o.promisedDate} · {o.promisedTime}</td>
                   <td className="px-2 py-2">{o.driverName ?? "—"}</td>
                   <td className="px-2 py-2 font-mono text-xs">{o.vehicleId ?? "—"}</td>
                   <td className="px-2 py-2 text-right font-mono">{o.weightTons.toFixed(1)}t</td>
                   <td className="px-2 py-2 text-right font-mono">{o.amount.toFixed(0)}</td>
                   <td className="px-2 py-2"><Pill tone={STAGE_TONE[o.stage]}>{o.stage}</Pill></td>
+                  <td className="px-2 py-2 text-xs">{o.priority}</td>
                   <td className="px-2 py-2">
                     <div className="flex justify-end gap-1">
                       <button onClick={() => setDetail(o)} className="rounded-md border border-black/10 bg-white px-2 py-1 text-[11px] font-medium text-foreground hover:border-brand/40 hover:text-brand">
@@ -169,7 +182,7 @@ export function DeliveryOrdersPage() {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={11} className="px-2 py-8 text-center text-sm text-muted-foreground">No delivery orders match those filters.</td></tr>
+                <tr><td colSpan={14} className="px-2 py-8 text-center text-sm text-muted-foreground">No delivery orders match those filters.</td></tr>
               )}
             </tbody>
           </table>

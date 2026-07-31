@@ -500,3 +500,26 @@ export const useFleetStore = create<FleetState>()(
     { name: "buildpos-delivery-fleet-v1" },
   ),
 );
+
+/* ---------------- delivery-order movement derivation ---------------- */
+
+export type MovementView = { movementType: MovementType; source: string; destination: string };
+
+export function deriveMovement(o: {
+  branch: string;
+  customer: string;
+  customerType?: string;
+  project?: string;
+  stage?: string;
+  address?: { type?: string; city?: string; district?: string };
+  area?: string;
+}): MovementView {
+  const dest = [o.address?.district, o.address?.city].filter(Boolean).join(", ") || o.area || o.customer;
+  if (o.stage === "Returned to Branch" || o.stage === "Failed") {
+    return { movementType: "Failed Delivery Return", source: dest, destination: o.branch };
+  }
+  if (o.project || o.address?.type === "Project Site" || o.customerType === "Contractor" || o.customerType === "B2B") {
+    return { movementType: "Branch to Project Site", source: o.branch, destination: o.project ? `${o.project} — ${dest}` : dest };
+  }
+  return { movementType: "Branch to Customer", source: o.branch, destination: dest };
+}
