@@ -361,14 +361,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
     .filter((g) => g.items.length > 0);
   const allItems: Item[] = visibleNav.flatMap((g) => g.items);
 
-  const active = allItems.find((m) => m.to === pathname) ?? allItems[0];
   // Exact match first; the prefix fallback keeps a group open on detail routes (e.g.
   // /operate/orders/42) that have no nav entry of their own.
   const activeGroupName =
     visibleNav.find((g) => g.items.some((i) => i.to === pathname))?.name ??
     visibleNav.find((g) => g.items.some((i) => pathname.startsWith(`${i.to}/`)))?.name ??
     "";
-  const activeGroup = activeGroupName || "Dashboard";
 
   // Groups start collapsed; only the one owning the current page is expanded, and navigating to a
   // page in another group collapses the rest. Dashboard is standalone (no group) so landing there
