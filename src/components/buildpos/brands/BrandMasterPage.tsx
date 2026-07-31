@@ -92,7 +92,7 @@ export function BrandMasterPage() {
         </div>
       </header>
 
-      <div className={`grid gap-3 ${cols(4)}`}>
+      <div className={`ui-card-grid ${cols(4)}`}>
         {[
           ["Active Brands", String(store.brands.filter((b) => b.status === "Active").length)],
           ["Supplier Mappings", String(store.mappings.length)],

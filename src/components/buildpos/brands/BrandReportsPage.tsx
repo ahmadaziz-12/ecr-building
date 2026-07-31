@@ -39,7 +39,7 @@ export function BrandReportsPage() {
         <p className="mt-0.5 text-xs text-muted-foreground">Brand performance, customer preference and supplier procurement analytics.</p>
       </header>
 
-      <div className={`grid gap-3 ${cols(4)}`}>
+      <div className={`ui-card-grid ${cols(4)}`}>
         {BRAND_SALES.map((b) => (
           <div key={b.brand} className="rounded-2xl border border-black/5 bg-white p-4">
             <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{b.brand}</p>

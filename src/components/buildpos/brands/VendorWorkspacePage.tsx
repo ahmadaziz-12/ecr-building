@@ -89,7 +89,7 @@ export function VendorWorkspacePage() {
         <TabsList className="flex-wrap">{TABS.map((t) => <TabsTrigger key={t} value={t}>{t}</TabsTrigger>)}</TabsList>
 
         <TabsContent value="Vendor Dashboard" className="mt-4">
-          <div className={`grid gap-3 ${cols(4)}`}>
+          <div className={`ui-card-grid ${cols(4)}`}>
             {kpis.map(([l, v]) => (
               <div key={l} className="rounded-2xl border border-black/5 bg-white p-4">
                 <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{l}</p>
@@ -248,7 +248,7 @@ export function VendorWorkspacePage() {
 
         <TabsContent value="Documents" className="mt-4">
           <SectionCard title="Documents & certificates">
-            <div className={`grid gap-3 ${cols(3)}`}>
+            <div className={`ui-card-grid ${cols(3)}`}>
               {["Commercial Registration", "VAT Certificate", "Quality Certificates", "Delivery Notes", "Invoices", "Credit Notes"].map((d) => (
                 <div key={d} className="rounded-xl border border-black/5 bg-white p-4">
                   <p className="font-medium">{d}</p>

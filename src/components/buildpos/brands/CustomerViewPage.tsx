@@ -162,7 +162,7 @@ export function CustomerViewPage() {
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Steel 12MM, cement, rebar grade 60…" />
           </div>
-          <div className={`grid gap-2 ${cols(5)}`}>
+          <div className={`ui-card-grid ${cols(5)}`}>
             {[["Brands found", searchSummary.brands], ["Matching products", searchSummary.products],
               ["At this branch", searchSummary.here], ["Other branch only", searchSummary.elsewhere],
               ["Out of stock", searchSummary.out]].map(([l, v]) => (
@@ -212,7 +212,7 @@ export function CustomerViewPage() {
       </SectionCard>
 
       {view === "Cards" && (
-        <div className={`grid gap-3 ${cols(4)}`}>
+        <div className={`ui-card-grid ${cols(4)}`}>
           {matching.map((s) => {
             const st = stockStatus(s, branch);
             const qty = qtyBySku[s.sku] ?? 1;
