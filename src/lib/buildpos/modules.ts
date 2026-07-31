@@ -111,7 +111,7 @@ export const catalog: ModuleCatalog[] = [
   {
     path: "/stock/stocks",
     group: "Stock",
-    title: "Warehouse Stock",
+    title: "Inventory & Stock",
     desc: "Warehouse-held bulk stock — on-hand, reserved, quarantine and low-stock alerts, independent of what's sellable on a branch's shop floor (see Branch Stock).",
     kpis: [
       { label: "Available", value: "12,850", sub: "SKUs in stock", tone: "success" },
