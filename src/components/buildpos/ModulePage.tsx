@@ -1,6 +1,7 @@
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Download, Filter, MoreHorizontal, Plus, RefreshCw, X } from "lucide-react";
+import { PrinterSetupDialog } from "@/components/buildpos/pos/PrinterSetupDialog";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
