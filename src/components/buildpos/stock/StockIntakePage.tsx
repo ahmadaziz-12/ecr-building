@@ -68,7 +68,7 @@ export function StockIntakePage() {
     const list: { branch: string; sku: string; stock: typeof EMPTY_STOCK }[] = [];
     for (const b of BRANCHES) {
       for (const p of PRODUCTS) {
-        const s = balances[`${b}::${p.sku}`];
+        const s = balances[`${b}|${p.sku}`];
         if (s) list.push({ branch: b, sku: p.sku, stock: s });
       }
     }
@@ -124,7 +124,7 @@ export function StockIntakePage() {
         </div>
       </header>
 
-      <div className={cols(4)}>
+      <div className={`ui-card-grid ${cols(4)}`}>
         <Kpi label="Available Stock" value={totals.available.toLocaleString()} sub="Sellable units" tone="success" />
         <Kpi label="Reserved" value={totals.reserved.toLocaleString()} sub="Orders & delivery" tone="info" />
         <Kpi label="Quarantine" value={totals.quarantine.toLocaleString()} sub="Damage / recall" tone="warning" />
@@ -184,7 +184,7 @@ export function StockIntakePage() {
 
         <TabsContent value="Add Stock" className="mt-4">
           <SectionCard title="Add Stock" desc="Start a goods receipt from any authorised source. Every intake generates a GRN, stock movements and an audit trail.">
-            <div className={cols(3)}>
+            <div className={`ui-tile-grid ${cols(3)}`}>
               {(["Purchase Order Receipt", "Stock Transfer Receipt", "Customer Return Restock", "Quarantine Release", "Manual Stock Addition", "Opening Stock"] as const).map((s) => (
                 <button
                   key={s}
@@ -308,7 +308,7 @@ export function StockIntakePage() {
                 <TableHeader><TableRow><TableHead className="whitespace-nowrap">SKU / Product</TableHead>{BRANCHES.map((b) => <TableHead key={b} className="whitespace-nowrap">{b}</TableHead>)}<TableHead>Total</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {PRODUCTS.filter((p) => !q.trim() || `${p.sku} ${p.name}`.toLowerCase().includes(q.trim().toLowerCase())).map((p) => {
-                    const per = BRANCHES.map((b) => (balances[`${b}::${p.sku}`] ?? EMPTY_STOCK).available);
+                    const per = BRANCHES.map((b) => (balances[`${b}|${p.sku}`] ?? EMPTY_STOCK).available);
                     return (
                       <TableRow key={p.sku}>
                         <TableCell className="whitespace-nowrap"><span className="font-mono text-xs">{p.sku}</span> · {p.name}</TableCell>
