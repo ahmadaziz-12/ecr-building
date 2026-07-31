@@ -523,6 +523,9 @@ export function ModulePage({
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{m.desc}</p>
         </div>
         <div className="flex gap-2">
+          {(pathname === "/admin/settings" || pathname === "/admin/pos-settings") && (
+            <PrinterSetupDialog terminalId={undefined} />
+          )}
           {pathname !== "/stock/transfers" && (
             <Button
               variant="ghost"
