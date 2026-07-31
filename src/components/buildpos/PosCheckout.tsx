@@ -295,6 +295,9 @@ export function PosCheckout() {
   const [notesEditingSku, setNotesEditingSku] = useState<string | null>(null);
   // sku of the cart line whose price-override input is currently expanded — null collapses all.
   const [priceEditingSku, setPriceEditingSku] = useState<string | null>(null);
+  // sku of the cart line whose full "Customise price" dialog is open — runtime pricing panel that
+  // can express the change as a new unit price, a % or an amount off (see LinePriceDialog).
+  const [pricingLineSku, setPricingLineSku] = useState<string | null>(null);
   // sku of the cart line whose per-line discount input is currently expanded — null collapses all.
   // Kept out of the always-visible qty row (same reasoning as notes/price override above) so a
   // rarely-used field doesn't crowd the row every cashier sees on every line.
