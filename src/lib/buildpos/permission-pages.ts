@@ -43,7 +43,9 @@ export const PERMISSION_PAGES: PermissionPage[] = [
   { key: "/delivery/orders", label: "Delivery Orders", section: "Delivery" },
   { key: "/delivery/drivers", label: "Driver Assignments", section: "Delivery" },
   { key: "/delivery/vehicles", label: "Vehicle Assignments", section: "Delivery" },
-  { key: "/delivery/zones", label: "Delivery Zones", section: "Delivery" },
+  { key: "/delivery/routes", label: "Delivery Coverage & Routes", section: "Delivery" },
+  { key: "/delivery/charges", label: "Delivery Charges", section: "Delivery" },
+  { key: "/delivery/movements", label: "Internal Stock Movements", section: "Delivery" },
   { key: "/delivery/logs", label: "Delivery Activity Logs", section: "Delivery" },
 
   { key: "/hrms/dashboard", label: "HR Dashboard", section: "HRMS" },

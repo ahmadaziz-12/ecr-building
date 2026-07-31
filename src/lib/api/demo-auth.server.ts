@@ -34,7 +34,7 @@ const EXTRA_PAGES = [
   "/stock/stock-count", "/stock/variant-groups", "/stock/adjustments", "/suppliers/suppliers", "/suppliers/rts",
   "/finance/purchase-orders", "/finance/returns", "/finance/expenses", "/finance/pricing", "/finance/loyalty",
   "/finance/general-ledger", "/finance/tax-zatca", "/delivery/dashboard", "/delivery/pipeline", "/delivery/orders",
-  "/delivery/drivers", "/delivery/vehicles", "/delivery/zones", "/delivery/logs", "/hrms/dashboard",
+  "/delivery/drivers", "/delivery/vehicles", "/delivery/routes", "/delivery/charges", "/delivery/movements", "/delivery/logs", "/hrms/dashboard",
   "/hrms/employees", "/hrms/attendance", "/hrms/leave", "/hrms/documents", "/hrms/departments", "/hrms/logs",
   "/network/branches", "/network/terminals", "/network/devices", "/insights/kpi", "/insights/sales",
   "/insights/reports", "/insights/bi", "/admin/overview", "/admin/users", "/admin/roles", "/admin/categories",
