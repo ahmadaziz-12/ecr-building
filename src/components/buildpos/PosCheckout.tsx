@@ -139,6 +139,7 @@ import { useRemnants, type RemnantDto } from "@/lib/api/inventory";
 import { useAuth } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { BundleOverrideDialog } from "@/components/buildpos/pos/BundleOverrideDialog";
+import { LinePriceDialog } from "@/components/buildpos/pos/LinePriceDialog";
 import { CheckoutRedeemDialog } from "@/components/buildpos/pos/CheckoutRedeemDialog";
 import { OpenShiftDialog } from "@/components/buildpos/pos/OpenShiftDialog";
 import { PaymentDialog } from "@/components/buildpos/pos/PaymentDialog";
