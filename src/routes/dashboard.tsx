@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import {
   FilterBar,
-  DashboardHeader,
   OverviewKpis,
   HourlySummary,
   TopCategoriesCompact,
@@ -1149,7 +1148,6 @@ function OverviewPage() {
 
   return (
     <div className="space-y-5">
-      <DashboardHeader subtitle="Monitor today's sales, transactions, stock risks, deliveries, and active shifts across your building-material branches." />
 
       {/* Global filter bar — scrolls away with the page. Pinned under the header it held a large
           band of the viewport open on every tab, and it isn't something you adjust while reading rows. */}

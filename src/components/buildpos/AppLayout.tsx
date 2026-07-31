@@ -51,7 +51,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Menu,
-  Globe,
   QrCode,
   Fingerprint,
   Warehouse,
@@ -75,9 +74,8 @@ import { DeliverySync } from "@/lib/api/delivery-sync";
 import { useNotifications } from "@/lib/api/notifications";
 import { useProducts } from "@/lib/api/catalog";
 import { useCustomers, useCashierShifts, useOrders, useQuotations } from "@/lib/api/pos";
-import { useTerminals } from "@/lib/api/admin";
+
 import { useZatcaIdentity } from "@/lib/api/zatca";
-import { SARIcon } from "@/lib/buildpos/currency";
 import { globalSearch, hasGlobalSearchResults } from "@/lib/buildpos/global-search";
 import {
   DropdownMenu,
@@ -131,7 +129,7 @@ const nav: Group[] = [
     name: "Stock",
     items: [
       { to: "/stock/warehouses", label: "Warehouse Directory", icon: Warehouse },
-      { to: "/stock/stocks", label: "Warehouse Stock", icon: Boxes },
+      { to: "/stock/stocks", label: "Inventory & Stock", icon: Boxes },
       { to: "/stock/branch-stock", label: "Branch Stock", icon: Store },
       { to: "/stock/stock-count", label: "Stock Taking", icon: ClipboardCheck },
       { to: "/stock/movements", label: "Stock Movements", icon: History },
@@ -244,7 +242,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const { data: searchOrders } = useOrders(canSearchOrders && searching && !onDashboard);
   const { data: searchQuotations } = useQuotations(canSearchOrders && searching && !onDashboard);
   const { data: notifications } = useNotifications();
-  const { data: terminals } = useTerminals(hasAccess("/network/terminals"));
   const { data: cashierShifts } = useCashierShifts(hasAccess("/operate/cashier-shift"));
   const { data: zatcaIdentity } = useZatcaIdentity(
     user?.branchId ?? null,
@@ -282,7 +279,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const openShift = cashierShifts?.find((s) => s.cashierName === user?.name && s.status === "Open");
   const criticalCount = notifications?.filter((n) => n.severity === "Critical").length ?? 0;
-  const currentTerminal = terminals?.find((t) => t.branchId === user?.branchId) ?? null;
 
   // Navigating with the term in the URL matters: ModulePage seeds its own search/column filters from
   // `?sku=` / `?category=`, so the destination opens already narrowed. Landing on an unfiltered list
@@ -854,40 +850,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <SetPinDialog open={pinDialogOpen} onOpenChange={setPinDialogOpen} />
           </div>
         </header>
-
-        <div className="flex h-8 min-w-0 flex-nowrap items-center gap-x-3 overflow-hidden border-b border-black/5 bg-white px-4 text-[11px] leading-none text-muted-foreground md:px-6">
-          <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap font-semibold text-foreground">
-            <Building2 className="h-3 w-3 shrink-0 text-brand" /> {statusBar.business}
-          </span>
-          <span className="shrink-0 text-black/20">·</span>
-          <span className="min-w-0 truncate whitespace-nowrap">
-            <span className="text-foreground/70">Branch:</span> {user?.branchName ?? "All Branches"}
-          </span>
-          <span className="shrink-0 text-black/20">·</span>
-          <span className="min-w-0 truncate whitespace-nowrap">
-            <span className="text-foreground/70">Terminal:</span>{" "}
-            <span className="font-mono text-foreground">
-              {currentTerminal?.code ?? (user?.branchId === null ? "All Terminals" : "Unassigned")}
-            </span>
-          </span>
-          <span className="shrink-0 text-black/20">·</span>
-          <span className="min-w-0 truncate whitespace-nowrap">
-            <span className="text-foreground/70">User:</span> {user?.name ?? "—"} ·{" "}
-            <span className="text-foreground/60">{user?.role ?? "—"}</span>
-          </span>
-          <span className="shrink-0 text-black/20">·</span>
-          <span className="hidden shrink-0 whitespace-nowrap lg:inline">
-            <span className="text-foreground/70">Date:</span>{" "}
-            {new Date().toLocaleDateString("en-GB", {
-              day: "2-digit",
-              month: "long",
-              year: "numeric",
-            })}
-          </span>
-          <span className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap text-foreground/60">
-            <Globe className="h-3 w-3 shrink-0" /> <SARIcon /> · auto-refresh 60s
-          </span>
-        </div>
 
         {/* min-w-0 lets a wide child (a report table) shrink to the column and scroll inside its own
             overflow-x-auto box; without it the flex item sizes to its content and the whole page
