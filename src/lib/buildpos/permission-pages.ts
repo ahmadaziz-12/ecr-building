@@ -34,6 +34,7 @@ export const PERMISSION_PAGES: PermissionPage[] = [
   { key: "/finance/expenses", label: "Expenses", section: "Finance & Customers" },
   { key: "/finance/general-ledger", label: "General Ledger", section: "Finance & Customers" },
   { key: "/finance/pricing", label: "Pricing, Discounts & Coupons", section: "Finance & Customers" },
+  { key: "/finance/custom-pricing", label: "Custom Material Pricing", section: "Finance & Customers" },
   { key: "/finance/returns", label: "Returns & Refunds", section: "Finance & Customers" },
   { key: "/finance/loyalty", label: "Loyalty Program", section: "Finance & Customers" },
   { key: "/finance/tax-zatca", label: "Invoices & Tax Compliance", section: "Finance & Customers" },
