@@ -86,7 +86,7 @@ export type ProductVariantGroupDto = {
 export const useCategories = (enabled = true) =>
   useQuery({
     queryKey: ["catalog", "categories"],
-    queryFn: () => apiGet<CategoryDto[]>("/api/catalog/categories"),
+    queryFn: () => withSeedFallback(apiGet<CategoryDto[]>("/api/catalog/categories"), SEED_CATEGORY_DTOS as CategoryDto[]),
     enabled,
   });
 // A category name alone is ambiguous once subcategories exist — e.g. "Pipes" could be a child of
@@ -151,7 +151,10 @@ export const useProducts = (enabled = true, branchId?: number, refetchIntervalMs
   useQuery({
     queryKey: ["catalog", "products", branchId ?? "global"],
     queryFn: () =>
-      apiGet<ProductDto[]>(`/api/catalog/products${branchId ? `?branchId=${branchId}` : ""}`),
+      withSeedFallback(
+        apiGet<ProductDto[]>(`/api/catalog/products${branchId ? `?branchId=${branchId}` : ""}`),
+        SEED_PRODUCT_DTOS,
+      ),
     enabled,
     refetchInterval: refetchIntervalMs,
   });
