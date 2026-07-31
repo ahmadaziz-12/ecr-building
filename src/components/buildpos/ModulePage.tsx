@@ -326,6 +326,16 @@ export function ModulePage({
   );
   const baseRows = live?.rows ?? m?.rows ?? [];
   const ids = live?.ids;
+  // The status tab strip is gone from every screen — the same choice now lives in the filter bar.
+  // Any column a module used to tab by gets a MultiSelect filter, even if it wasn't listed in
+  // m.filters, so nothing that was selectable before became unreachable.
+  const tabFilterLabels = useMemo(() => {
+    if (!m?.tabs) return [] as string[];
+    const tabCols = m.tabFilterCols ?? (statusCol !== undefined ? [statusCol] : []);
+    return tabCols
+      .map((i) => columns[i])
+      .filter((label): label is string => Boolean(label) && !m.filters.includes(label));
+  }, [m, statusCol, columns]);
 
   const indexed = useMemo(() => baseRows.map((row, i) => ({ row, id: ids?.[i] })), [baseRows, ids]);
 
@@ -513,14 +523,16 @@ export function ModulePage({
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{m.desc}</p>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleRefresh}
-            className="h-9 gap-1.5 text-muted-foreground hover:text-foreground"
-          >
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </Button>
+          {pathname !== "/stock/transfers" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleRefresh}
+              className="h-9 gap-1.5 text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw className="h-4 w-4" /> Refresh
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -541,34 +553,11 @@ export function ModulePage({
         </div>
       </div>
 
-      {/* Tabs */}
-      {m.tabs && (
-        <div className="flex flex-wrap gap-1 border-b border-black/5">
-          {m.tabs.map((t, i) => (
-            <button
-              key={t}
-              onClick={() => {
-                setActiveTab(i);
-                setPage(1);
-              }}
-              className={`relative px-3 py-2 text-sm font-medium transition ${
-                i === activeTab ? "text-brand" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t}
-              {i === activeTab && (
-                <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand" />
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* Filters — Search reads first and widest (the filter someone reaches for first), the
           rest of the fields sit smaller alongside it, and Date Range always trails last. */}
       <div className="ui-filter-row rounded-xl border border-black/5 bg-white p-2 shadow-[0_1px_2px_rgba(15,10,50,0.04)]">
         <Filter className="ml-1 h-4 w-4 flex-none text-muted-foreground" />
-        {[...m.filters]
+        {[...m.filters, ...tabFilterLabels]
           .sort((a, b) => (a === "Search" ? -1 : b === "Search" ? 1 : 0))
           .map((f) => {
             if (f === "Search") {

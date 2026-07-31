@@ -14,6 +14,12 @@ import drill from "@/assets/products/drill.jpg";
 import hammer from "@/assets/products/hammer.jpg";
 import glass from "@/assets/products/glass.jpg";
 import sealant from "@/assets/products/sealant.jpg";
+import sandFine from "@/assets/products/sand-fine.jpg";
+import mdfBoard from "@/assets/products/mdf-board.jpg";
+import rockwool from "@/assets/products/rockwool.jpg";
+import anchorBolt from "@/assets/products/anchor-bolt.jpg";
+import waterproofMembrane from "@/assets/products/waterproof-membrane.jpg";
+import pavingBlock from "@/assets/products/paving-block.jpg";
 
 export const productImage: Record<string, string> = {
   "CEM-OPC-50KG": cement,
@@ -32,6 +38,24 @@ export const productImage: Record<string, string> = {
   "TOOL-HMR-500": hammer,
   "GLASS-6MM-CLR": glass,
   "SEAL-SILC-300": sealant,
+  // §4-17 seeded building-materials catalog
+  "ABC-OPC-50KG": cement,
+  "DPC-OPC-50KG": cementWhite,
+  "NJC-SRC-50KG": cement,
+  "GRS-RAPID-25KG": cementWhite,
+  "AFS-RBR-12MM-G60": steelRebar,
+  "GRF-RBR-12MM-G60": steelRebar16,
+  "NSW-RBR-12MM-G60": steelRebar,
+  "EMT-RBR-12MM-G40": steelRebar16,
+  "AGG-SAND-FINE": sandFine,
+  "TIM-MDF-18MM": mdfBoard,
+  "CABLE-2.5MM": cable,
+  "INS-RW-50MM": rockwool,
+  "GLASS-CLR-8MM": glass,
+  "HRD-ANCH-10MM": anchorBolt,
+  "TOOL-DRILL-500W": drill,
+  "WPF-LIQ-20L": waterproofMembrane,
+  "LAND-PAVE-GRY": pavingBlock,
 };
 
 export const categoryImage: Record<string, string> = {
@@ -42,4 +66,24 @@ export const categoryImage: Record<string, string> = {
   Plumbing: pvcPipe,
   Electrical: cable,
   Tools: drill,
+  // Category-level placeholders (§3): shown when a product has no own photo yet — a product is
+  // NEVER hidden just because its image is missing.
+  "Cement & Binders": cement,
+  "Aggregates & Sand": sandFine,
+  "Steel & Reinforcement": steelRebar,
+  "Tiles & Stone": tilesGrey,
+  "Timber & Boards": mdfBoard,
+  "Paint & Coatings": paintWhite,
+  "Pipes & Plumbing": pvcPipe,
+  Insulation: rockwool,
+  "Glass & Windows": glass,
+  "Hardware & Fasteners": anchorBolt,
+  "Power & Hand Tools": drill,
+  Waterproofing: waterproofMembrane,
+  Landscaping: pavingBlock,
 };
+
+/** §3: resolve a product image, falling back to a category-based construction placeholder. */
+export function resolveProductImage(sku: string, category?: string | null, imageUrl?: string | null) {
+  return imageUrl || productImage[sku] || (category ? categoryImage[category] : undefined) || cement;
+}

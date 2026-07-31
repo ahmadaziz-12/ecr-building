@@ -1,6 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPut } from "./client";
 import type { LiveTable } from "./admin";
+import { SEED_CATEGORY_DTOS, SEED_PRODUCT_DTOS } from "@/lib/buildpos/seed-products";
+
+// The .NET catalog API isn't reachable in preview/demo (and is empty on a fresh install), which
+// left every product surface blank. Fall back to the seeded building-materials catalog whenever
+// the request fails or comes back with no rows; a real backend with data always wins.
+async function withSeedFallback<T>(request: Promise<T[]>, seed: T[]): Promise<T[]> {
+  try {
+    const rows = await request;
+    return rows && rows.length > 0 ? rows : seed;
+  } catch {
+    return seed;
+  }
+}
 
 export type CategoryDto = {
   id: number;
@@ -86,7 +99,7 @@ export type ProductVariantGroupDto = {
 export const useCategories = (enabled = true) =>
   useQuery({
     queryKey: ["catalog", "categories"],
-    queryFn: () => apiGet<CategoryDto[]>("/api/catalog/categories"),
+    queryFn: () => withSeedFallback(apiGet<CategoryDto[]>("/api/catalog/categories"), SEED_CATEGORY_DTOS as CategoryDto[]),
     enabled,
   });
 // A category name alone is ambiguous once subcategories exist — e.g. "Pipes" could be a child of
@@ -151,7 +164,10 @@ export const useProducts = (enabled = true, branchId?: number, refetchIntervalMs
   useQuery({
     queryKey: ["catalog", "products", branchId ?? "global"],
     queryFn: () =>
-      apiGet<ProductDto[]>(`/api/catalog/products${branchId ? `?branchId=${branchId}` : ""}`),
+      withSeedFallback(
+        apiGet<ProductDto[]>(`/api/catalog/products${branchId ? `?branchId=${branchId}` : ""}`),
+        SEED_PRODUCT_DTOS,
+      ),
     enabled,
     refetchInterval: refetchIntervalMs,
   });
