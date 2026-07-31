@@ -3956,6 +3956,17 @@ export function PosCheckout() {
           if (overrideBundle) addBundle(overrideBundle, { email, pin });
         }}
       />
+      <LinePriceDialog
+        line={cart.find((l) => l.sku === pricingLineSku) ?? null}
+        canOverrideItemPrice={canOverrideItemPrice}
+        discountCeilingPercent={discountCeiling}
+        onClose={() => setPricingLineSku(null)}
+        onApply={(sku, manualUnitPrice, manualDiscountPct) =>
+          setCart((c) =>
+            c.map((l) => (l.sku === sku ? { ...l, manualUnitPrice, manualDiscountPct } : l)),
+          )
+        }
+      />
       <RequestApprovalDialog
         open={approvalDialogOpen}
         onOpenChange={setApprovalDialogOpen}
