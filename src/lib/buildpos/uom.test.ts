@@ -1,7 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
-  areaOf, factorToStock, formatCutToSizeMode, formatUomConversions, lengthOf, parseCutToSizeMode,
-  parseUomConversions, sellableUoms, toStockQty, unitPriceFor, volumeOf,
+  areaOf,
+  factorToStock,
+  formatCutToSizeMode,
+  formatUomConversions,
+  lengthOf,
+  parseCutToSizeMode,
+  parseUomConversions,
+  sellableUoms,
+  toStockQty,
+  unitPriceFor,
+  volumeOf,
+  applyUomRule,
+  explainUomRule,
+  toMetres,
+  calcSheet,
+  calcTileCoverage,
+  calcLinear,
 } from "./uom";
 
 // Module 5 (docs/BRD-GAP-IMPLEMENTATION-PLAN.md) — client-side mirror of the backend's UomMath.cs.
@@ -46,11 +61,20 @@ describe("UOM conversion math", () => {
 
 describe("cut-to-size mode select", () => {
   it("maps each option to the flag + unit the backend expects", () => {
-    expect(parseCutToSizeMode("Not cut-to-size")).toEqual({ isCutToSize: false, cutToSizeUnit: "Area" });
+    expect(parseCutToSizeMode("Not cut-to-size")).toEqual({
+      isCutToSize: false,
+      cutToSizeUnit: "Area",
+    });
     expect(parseCutToSizeMode(undefined)).toEqual({ isCutToSize: false, cutToSizeUnit: "Area" });
-    expect(parseCutToSizeMode("Length (linear m)")).toEqual({ isCutToSize: true, cutToSizeUnit: "Length" });
+    expect(parseCutToSizeMode("Length (linear m)")).toEqual({
+      isCutToSize: true,
+      cutToSizeUnit: "Length",
+    });
     expect(parseCutToSizeMode("Area (m²)")).toEqual({ isCutToSize: true, cutToSizeUnit: "Area" });
-    expect(parseCutToSizeMode("Volume (m³)")).toEqual({ isCutToSize: true, cutToSizeUnit: "Volume" });
+    expect(parseCutToSizeMode("Volume (m³)")).toEqual({
+      isCutToSize: true,
+      cutToSizeUnit: "Volume",
+    });
   });
 
   it("round-trips through formatCutToSizeMode for the edit-form prefill", () => {
@@ -82,7 +106,67 @@ describe("admin conversions field parsing", () => {
   });
 
   it("round-trips through formatUomConversions for the edit-form prefill", () => {
-    const conversions = [{ uom: "Pallet", factorToStock: 50 }, { uom: "Ton", factorToStock: 20 }];
+    const conversions = [
+      { uom: "Pallet", factorToStock: 50 },
+      { uom: "Ton", factorToStock: 20 },
+    ];
     expect(parseUomConversions(formatUomConversions(conversions))).toEqual(conversions);
+  });
+});
+
+describe("§3.1 rounding rules, minimums and increments", () => {
+  it("applies each rounding method", () => {
+    expect(applyUomRule(2.4, { rounding: "No Rounding" })).toBe(2.4);
+    expect(applyUomRule(2.1, { rounding: "Round Up" })).toBe(3);
+    expect(applyUomRule(2.9, { rounding: "Round Down" })).toBe(2);
+    expect(applyUomRule(2.5, { rounding: "Round to Nearest" })).toBe(3);
+    expect(applyUomRule(0.2, { rounding: "Full Box Only" })).toBe(1);
+    expect(applyUomRule(17.57, { rounding: "Full Pallet Only" })).toBe(18);
+  });
+
+  it("honours selling increments and minimum quantities", () => {
+    expect(applyUomRule(7, { increment: 5 })).toBe(10);
+    expect(applyUomRule(1, { minQty: 4 })).toBe(4);
+    expect(applyUomRule(0, { minQty: 4 })).toBe(0);
+    expect(explainUomRule(1, 4, { minQty: 4 })).toContain("Minimum");
+    expect(explainUomRule(4, 4, { minQty: 4 })).toBeNull();
+  });
+});
+
+describe("§8 dimension engine", () => {
+  it("converts measurement units to metres", () => {
+    expect(toMetres(2500, "mm")).toBe(2.5);
+    expect(toMetres(120, "cm")).toBe(1.2);
+    expect(toMetres(3, "m")).toBe(3);
+  });
+
+  it("prices sheet/panel products with wastage (§8.2 worked example)", () => {
+    const r = calcSheet({
+      length: 2500,
+      width: 1200,
+      unit: "mm",
+      panels: 4,
+      wastagePct: 8,
+      pricePerSqm: 95,
+    });
+    expect(r.areaPerPanel).toBe(3);
+    expect(r.totalArea).toBe(12);
+    expect(r.chargeableArea).toBe(12.96);
+    expect(r.materialAmount).toBe(1231.2);
+  });
+
+  it("converts tile coverage into full boxes (§8.3 worked example)", () => {
+    const r = calcTileCoverage(23, 1.44, 10);
+    expect(r.chargeableArea).toBe(25.3);
+    expect(r.calculatedBoxes).toBe(17.57);
+    expect(r.boxes).toBe(18);
+    expect(r.coverageSupplied).toBe(25.92);
+  });
+
+  it("totals linear cut lengths instead of counting pieces (§8.4)", () => {
+    const r = calcLinear([{ length: 35 }, { length: 42 }, { length: 18 }], "m");
+    expect(r.totalLength).toBe(95);
+    expect(r.rolls).toBeNull();
+    expect(calcLinear([{ length: 35 }, { length: 42 }, { length: 18 }], "m", 0, 100).rolls).toBe(1);
   });
 });

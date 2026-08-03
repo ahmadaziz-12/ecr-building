@@ -19,6 +19,7 @@ export const PERMISSION_PAGES: PermissionPage[] = [
   { key: "/stock/inventory", label: "Product Catalog", section: "Products & Stock" },
   { key: "/admin/categories", label: "Categories & Attributes", section: "Products & Stock" },
   { key: "/stock/warehouses", label: "Warehouses", section: "Products & Stock" },
+  { key: "/stock/locations", label: "Stock Locations", section: "Products & Stock" },
   { key: "/stock/stocks", label: "Warehouse Stock", section: "Products & Stock" },
   { key: "/stock/branch-stock", label: "Branch Stock", section: "Products & Stock" },
   { key: "/stock/stock-count", label: "Stock Taking", section: "Products & Stock" },

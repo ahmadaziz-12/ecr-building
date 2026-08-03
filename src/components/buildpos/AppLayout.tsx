@@ -8,6 +8,7 @@ import {
   Circle,
   Shield,
   ChevronDown,
+  MapPin,
   ScanBarcode,
   ShoppingBag,
   Users,
@@ -71,6 +72,7 @@ import { useFilters, categoryToFilter } from "@/lib/buildpos/filter-context";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useAuth } from "@/lib/api/auth";
 import { SetPinDialog } from "@/components/buildpos/SetPinDialog";
+import { ProfileMenu } from "@/components/buildpos/ProfileMenu";
 import { DeliverySync } from "@/lib/api/delivery-sync";
 // HRM module temporarily disabled — see the commented-out "HRMS" nav group below.
 // import { HrSync } from "@/lib/api/hr-sync";
@@ -134,6 +136,7 @@ const nav: Group[] = [
     name: "Stock",
     items: [
       { to: "/stock/warehouses", label: "Warehouse Directory", icon: Warehouse },
+      { to: "/stock/locations", label: "Stock Locations", icon: MapPin },
       { to: "/stock/stocks", label: "Inventory & Stock", icon: Boxes },
       { to: "/stock/branch-stock", label: "Branch Stock", icon: Store },
       { to: "/stock/stock-count", label: "Stock Taking", icon: ClipboardCheck },
@@ -230,7 +233,7 @@ const nav: Group[] = [
 export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
-  const { user, hasAccess, logout } = useAuth();
+  const { user, hasAccess } = useAuth();
   const { setValue: setDashboardFilter, setActiveTab: setDashboardTab } = useFilters();
   const onDashboard = pathname === "/dashboard";
 
@@ -409,11 +412,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
   // Navigating away closes the mobile drawer — otherwise it stays over the page you just opened.
   useEffect(() => setMobileNavOpen(false), [pathname]);
 
-  async function handleLogout() {
-    await logout();
-    navigate({ to: "/" });
-  }
-
   // Rendered by both the desktop rail and the mobile drawer below, so navigation is identical in
   // either presentation.
   const sidebarInner = (
@@ -512,14 +510,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <p className="truncate font-medium text-white">{user?.name ?? statusBar.user}</p>
               <p className="truncate text-white/50">{user?.role ?? statusBar.role}</p>
             </div>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="grid h-7 w-7 place-items-center rounded-md text-white/50 hover:bg-white/5 hover:text-white"
-              title="Sign out"
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
           </div>
         </div>
       </div>
@@ -626,7 +616,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       {searchResults.orders.map((o) => (
                         <button
                           key={o.id}
-                          onClick={() => goToSearchResult("/operate/orders", { orderNo: o.orderNo })}
+                          onClick={() =>
+                            goToSearchResult("/operate/orders", { orderNo: o.orderNo })
+                          }
                           className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
                         >
                           <span className="truncate font-mono text-xs">{o.orderNo}</span>
@@ -655,7 +647,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       {searchResults.quotations.map((q) => (
                         <button
                           key={q.id}
-                          onClick={() => goToSearchResult("/operate/orders", { quoteNo: q.quoteNo })}
+                          onClick={() =>
+                            goToSearchResult("/operate/orders", { quoteNo: q.quoteNo })
+                          }
                           className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
                         >
                           <span className="truncate font-mono text-xs">{q.quoteNo}</span>
@@ -818,36 +812,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-brand text-brand-foreground text-xs font-semibold hover:bg-brand/90">
-                  {(user?.name ?? "?").charAt(0)}
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>
-                  <p className="truncate text-sm font-semibold text-foreground">
-                    {user?.name ?? "—"}
-                  </p>
-                  <p className="truncate text-xs font-normal text-muted-foreground">
-                    {user?.email ?? ""}
-                  </p>
-                  <p className="truncate text-xs font-normal text-muted-foreground">
-                    {user?.role ?? ""}
-                  </p>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {/* BRD §10.2: self-service PIN for register sign-in / idle unlock / authorizations. */}
-                <DropdownMenuItem onClick={() => setPinDialogOpen(true)}>Set PIN…</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={handleLogout}
-                  className="text-critical focus:text-critical"
-                >
-                  Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <ProfileMenu onSetPin={() => setPinDialogOpen(true)} />
             <SetPinDialog open={pinDialogOpen} onOpenChange={setPinDialogOpen} />
           </div>
         </header>
