@@ -158,7 +158,7 @@ export function StockLocationsPage() {
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-black/5 bg-white">
-        <table className="w-full min-w-[1100px] text-sm">
+        <table className="w-full min-w-[1500px] text-sm">
           <thead className="bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
             <tr>
               {[
@@ -183,8 +183,8 @@ export function StockLocationsPage() {
               <tr key={l.id} className="border-t border-black/5 align-top">
                 <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">{l.id}</td>
                 <td className="whitespace-nowrap px-3 py-2 font-semibold">{l.code}</td>
-                <td className="px-3 py-2">
-                  <div className="flex items-center gap-1.5">
+                <td className="min-w-[220px] px-3 py-2">
+                  <div className="flex items-center gap-1.5 whitespace-nowrap">
                     <MapPin className="h-3.5 w-3.5 text-brand" />
                     {l.name}
                     {l.defaultSellable && (
