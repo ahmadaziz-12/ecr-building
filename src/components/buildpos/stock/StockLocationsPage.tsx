@@ -12,25 +12,50 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { useAuth } from "@/lib/api/auth";
 import { SEED_CATEGORIES } from "@/lib/buildpos/seed-products";
 import {
-  LOCATION_TYPES, locationPath, useLocationStore,
-  type LocationDraft, type LocationType, type StockLocation,
+  LOCATION_TYPES,
+  locationPath,
+  useLocationStore,
+  type LocationDraft,
+  type LocationType,
+  type StockLocation,
 } from "@/lib/stock/location-store";
 
 const BRANCHES = ["Central", "Riyadh Main Branch", "Jeddah Branch", "Dammam Branch"];
 
 function emptyDraft(): LocationDraft {
   return {
-    code: "", name: "", type: "Branch Stockroom", branch: "Riyadh Main Branch", address: "",
-    zone: "", aisle: "", rack: "", bin: "", floor: "Ground Floor", allowedCategories: [],
-    sellable: true, quarantine: false, supplierReturnHold: false, active: true,
+    code: "",
+    name: "",
+    type: "Branch Stockroom",
+    branch: "Riyadh Main Branch",
+    address: "",
+    zone: "",
+    aisle: "",
+    rack: "",
+    bin: "",
+    floor: "Ground Floor",
+    allowedCategories: [],
+    sellable: true,
+    quarantine: false,
+    supplierReturnHold: false,
+    active: true,
   };
 }
 
@@ -50,7 +75,9 @@ export function StockLocationsPage() {
       if (typeFilter !== "All types" && l.type !== typeFilter) return false;
       if (!q) return true;
       return [l.id, l.code, l.name, l.branch, l.zone, l.aisle, l.rack, l.bin]
-        .join(" ").toLowerCase().includes(q);
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
     });
   }, [locations, query, typeFilter]);
 
@@ -84,8 +111,17 @@ export function StockLocationsPage() {
   const kpis = [
     { label: "Stock locations", value: locations.length, sub: "All types" },
     { label: "Active", value: locations.filter((l) => l.active).length, tone: "success" as const },
-    { label: "Sellable", value: locations.filter((l) => l.sellable && l.active).length, sub: "POS deducts from these" },
-    { label: "Restricted", value: locations.filter((l) => l.quarantine || l.supplierReturnHold).length, tone: "warning" as const, sub: "Quarantine / return hold" },
+    {
+      label: "Sellable",
+      value: locations.filter((l) => l.sellable && l.active).length,
+      sub: "POS deducts from these",
+    },
+    {
+      label: "Restricted",
+      value: locations.filter((l) => l.quarantine || l.supplierReturnHold).length,
+      tone: "warning" as const,
+      sub: "Quarantine / return hold",
+    },
   ];
 
   return (
@@ -107,10 +143,16 @@ export function StockLocationsPage() {
           className="h-9 w-full max-w-xs"
         />
         <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="h-9 w-56"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="h-9 w-56">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="All types">All types</SelectItem>
-            {LOCATION_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+            {LOCATION_TYPES.map((t) => (
+              <SelectItem key={t} value={t}>
+                {t}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -119,8 +161,20 @@ export function StockLocationsPage() {
         <table className="w-full min-w-[1100px] text-sm">
           <thead className="bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
             <tr>
-              {["Location ID", "Code", "Name", "Type", "Branch", "Zone · Aisle · Rack · Bin · Floor", "Stock eligibility", "Status", ""].map((h) => (
-                <th key={h} className="whitespace-nowrap px-3 py-2 text-start font-semibold">{h}</th>
+              {[
+                "Location ID",
+                "Code",
+                "Name",
+                "Type",
+                "Branch",
+                "Zone · Aisle · Rack · Bin · Floor",
+                "Stock eligibility",
+                "Status",
+                "",
+              ].map((h) => (
+                <th key={h} className="whitespace-nowrap px-3 py-2 text-start font-semibold">
+                  {h}
+                </th>
               ))}
             </tr>
           </thead>
@@ -133,10 +187,17 @@ export function StockLocationsPage() {
                   <div className="flex items-center gap-1.5">
                     <MapPin className="h-3.5 w-3.5 text-brand" />
                     {l.name}
-                    {l.defaultSellable && <Star className="h-3.5 w-3.5 fill-warning text-warning" aria-label="Default sellable location" />}
+                    {l.defaultSellable && (
+                      <Star
+                        className="h-3.5 w-3.5 fill-warning text-warning"
+                        aria-label="Default sellable location"
+                      />
+                    )}
                   </div>
                   {l.allowedCategories.length > 0 && (
-                    <p className="mt-0.5 text-xs text-muted-foreground">{l.allowedCategories.join(", ")}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {l.allowedCategories.join(", ")}
+                    </p>
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2">{l.type}</td>
@@ -150,12 +211,24 @@ export function StockLocationsPage() {
                   </div>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2">
-                  <Badge variant={l.active ? "default" : "outline"}>{l.active ? "Active" : "Inactive"}</Badge>
+                  <Badge variant={l.active ? "default" : "outline"}>
+                    {l.active ? "Active" : "Inactive"}
+                  </Badge>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-end">
-                  <Button variant="ghost" size="sm" className="h-8" onClick={() => openEdit(l)}>Edit</Button>
+                  <Button variant="ghost" size="sm" className="h-8" onClick={() => openEdit(l)}>
+                    Edit
+                  </Button>
                   {l.sellable && l.active && !l.defaultSellable && (
-                    <Button variant="ghost" size="sm" className="h-8" onClick={() => { setDefaultSellable(l.id, who); toast.success(`${l.code} is now the default sellable location`); }}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8"
+                      onClick={() => {
+                        setDefaultSellable(l.id, who);
+                        toast.success(`${l.code} is now the default sellable location`);
+                      }}
+                    >
                       Set default
                     </Button>
                   )}
@@ -163,15 +236,30 @@ export function StockLocationsPage() {
                     variant="ghost"
                     size="sm"
                     className="h-8 gap-1"
-                    onClick={() => { setActive(l.id, !l.active, who); toast.success(`${l.code} ${l.active ? "deactivated" : "activated"}`); }}
+                    onClick={() => {
+                      setActive(l.id, !l.active, who);
+                      toast.success(`${l.code} ${l.active ? "deactivated" : "activated"}`);
+                    }}
                   >
-                    {l.active ? <><Ban className="h-3.5 w-3.5" /> Deactivate</> : <><CheckCircle2 className="h-3.5 w-3.5" /> Activate</>}
+                    {l.active ? (
+                      <>
+                        <Ban className="h-3.5 w-3.5" /> Deactivate
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Activate
+                      </>
+                    )}
                   </Button>
                 </td>
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={9} className="px-3 py-10 text-center text-sm text-muted-foreground">No stock locations match this search.</td></tr>
+              <tr>
+                <td colSpan={9} className="px-3 py-10 text-center text-sm text-muted-foreground">
+                  No stock locations match this search.
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
@@ -182,36 +270,93 @@ export function StockLocationsPage() {
           <DialogHeader>
             <DialogTitle>{editing ? `Edit ${editing.code}` : "New stock location"}</DialogTitle>
             <DialogDescription>
-              Location hierarchy and stock eligibility. Quarantine and supplier-return-hold stock stays out of available balances.
+              Location hierarchy and stock eligibility. Quarantine and supplier-return-hold stock
+              stays out of available balances.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Location Code *">
-              <Input value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value })} placeholder="RYD-YARD" disabled={!!editing} />
+              <Input
+                value={draft.code}
+                onChange={(e) => setDraft({ ...draft, code: e.target.value })}
+                placeholder="RYD-YARD"
+                disabled={!!editing}
+              />
             </Field>
             <Field label="Location Name *">
-              <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Riyadh Outdoor Yard" />
+              <Input
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder="Riyadh Outdoor Yard"
+              />
             </Field>
             <Field label="Location Type">
-              <Select value={draft.type} onValueChange={(v) => setDraft({ ...draft, type: v as LocationType })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{LOCATION_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+              <Select
+                value={draft.type}
+                onValueChange={(v) => setDraft({ ...draft, type: v as LocationType })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LOCATION_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </Field>
             <Field label="Branch">
               <Select value={draft.branch} onValueChange={(v) => setDraft({ ...draft, branch: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{BRANCHES.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BRANCHES.map((b) => (
+                    <SelectItem key={b} value={b}>
+                      {b}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </Field>
             <Field label="Address" className="sm:col-span-2">
-              <Input value={draft.address ?? ""} onChange={(e) => setDraft({ ...draft, address: e.target.value })} />
+              <Input
+                value={draft.address ?? ""}
+                onChange={(e) => setDraft({ ...draft, address: e.target.value })}
+              />
             </Field>
-            <Field label="Zone"><Input value={draft.zone} onChange={(e) => setDraft({ ...draft, zone: e.target.value })} /></Field>
-            <Field label="Aisle"><Input value={draft.aisle} onChange={(e) => setDraft({ ...draft, aisle: e.target.value })} /></Field>
-            <Field label="Rack"><Input value={draft.rack} onChange={(e) => setDraft({ ...draft, rack: e.target.value })} /></Field>
-            <Field label="Bin"><Input value={draft.bin} onChange={(e) => setDraft({ ...draft, bin: e.target.value })} /></Field>
-            <Field label="Floor reference"><Input value={draft.floor} onChange={(e) => setDraft({ ...draft, floor: e.target.value })} /></Field>
+            <Field label="Zone">
+              <Input
+                value={draft.zone}
+                onChange={(e) => setDraft({ ...draft, zone: e.target.value })}
+              />
+            </Field>
+            <Field label="Aisle">
+              <Input
+                value={draft.aisle}
+                onChange={(e) => setDraft({ ...draft, aisle: e.target.value })}
+              />
+            </Field>
+            <Field label="Rack">
+              <Input
+                value={draft.rack}
+                onChange={(e) => setDraft({ ...draft, rack: e.target.value })}
+              />
+            </Field>
+            <Field label="Bin">
+              <Input
+                value={draft.bin}
+                onChange={(e) => setDraft({ ...draft, bin: e.target.value })}
+              />
+            </Field>
+            <Field label="Floor reference">
+              <Input
+                value={draft.floor}
+                onChange={(e) => setDraft({ ...draft, floor: e.target.value })}
+              />
+            </Field>
             <Field label="Allowed categories" className="sm:col-span-2">
               <div className="flex flex-wrap gap-1.5 rounded-lg border border-black/5 p-2">
                 {SEED_CATEGORIES.map((c) => {
@@ -220,12 +365,14 @@ export function StockLocationsPage() {
                     <button
                       key={c}
                       type="button"
-                      onClick={() => setDraft({
-                        ...draft,
-                        allowedCategories: on
-                          ? draft.allowedCategories.filter((x) => x !== c)
-                          : [...draft.allowedCategories, c],
-                      })}
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          allowedCategories: on
+                            ? draft.allowedCategories.filter((x) => x !== c)
+                            : [...draft.allowedCategories, c],
+                        })
+                      }
                       className={`rounded-full px-2.5 py-1 text-xs transition ${on ? "bg-brand text-brand-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70"}`}
                     >
                       {c}
@@ -233,15 +380,35 @@ export function StockLocationsPage() {
                   );
                 })}
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">Leave empty to allow every category.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Leave empty to allow every category.
+              </p>
             </Field>
-            <Toggle label="Sellable stock allowed" checked={draft.sellable} onChange={(v) => setDraft({ ...draft, sellable: v })} />
-            <Toggle label="Quarantine stock allowed" checked={draft.quarantine} onChange={(v) => setDraft({ ...draft, quarantine: v })} />
-            <Toggle label="Supplier return hold allowed" checked={draft.supplierReturnHold} onChange={(v) => setDraft({ ...draft, supplierReturnHold: v })} />
-            <Toggle label="Active" checked={draft.active} onChange={(v) => setDraft({ ...draft, active: v })} />
+            <Toggle
+              label="Sellable stock allowed"
+              checked={draft.sellable}
+              onChange={(v) => setDraft({ ...draft, sellable: v })}
+            />
+            <Toggle
+              label="Quarantine stock allowed"
+              checked={draft.quarantine}
+              onChange={(v) => setDraft({ ...draft, quarantine: v })}
+            />
+            <Toggle
+              label="Supplier return hold allowed"
+              checked={draft.supplierReturnHold}
+              onChange={(v) => setDraft({ ...draft, supplierReturnHold: v })}
+            />
+            <Toggle
+              label="Active"
+              checked={draft.active}
+              onChange={(v) => setDraft({ ...draft, active: v })}
+            />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
             <Button onClick={save} className="bg-brand text-brand-foreground hover:bg-brand/90">
               {editing ? "Save changes" : "Create location"}
             </Button>
@@ -252,7 +419,15 @@ export function StockLocationsPage() {
   );
 }
 
-function Field({ label, children, className = "" }: { label: string; children: React.ReactNode; className?: string }) {
+function Field({
+  label,
+  children,
+  className = "",
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <div className={className}>
       <Label className="mb-1 block text-xs font-medium text-muted-foreground">{label}</Label>
@@ -261,7 +436,15 @@ function Field({ label, children, className = "" }: { label: string; children: R
   );
 }
 
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+function Toggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
     <div className="flex items-center justify-between rounded-lg border border-black/5 px-3 py-2">
       <span className="text-sm">{label}</span>

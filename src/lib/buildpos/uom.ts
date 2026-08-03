@@ -7,7 +7,10 @@ import type { ProductUomConversionDto } from "@/lib/api/catalog";
 export type UomOption = { uom: string; factorToStock: number };
 
 /** Every UOM the cashier may sell in: the stock UOM itself (factor 1) plus each configured conversion. */
-export function sellableUoms(stockUom: string, conversions: ProductUomConversionDto[]): UomOption[] {
+export function sellableUoms(
+  stockUom: string,
+  conversions: ProductUomConversionDto[],
+): UomOption[] {
   return [
     { uom: stockUom, factorToStock: 1 },
     ...conversions
@@ -17,7 +20,11 @@ export function sellableUoms(stockUom: string, conversions: ProductUomConversion
 }
 
 /** null = this UOM isn't configured for the product — never assume 1:1 (the server will reject it too). */
-export function factorToStock(sellUom: string, stockUom: string, conversions: ProductUomConversionDto[]): number | null {
+export function factorToStock(
+  sellUom: string,
+  stockUom: string,
+  conversions: ProductUomConversionDto[],
+): number | null {
   if (sellUom.toLowerCase() === stockUom.toLowerCase()) return 1;
   const match = conversions.find((c) => c.uom.toLowerCase() === sellUom.toLowerCase());
   return match && match.factorToStock > 0 ? match.factorToStock : null;
@@ -52,7 +59,7 @@ export function volumeOf(lengthM: number, widthM: number, heightM: number): numb
 // .NET's MidpointRounding.AwayFromZero, which the backend uses for all quantity math.
 function roundAwayFromZero(value: number, decimals: number): number {
   const scale = 10 ** decimals;
-  return Math.sign(value) * Math.round(Math.abs(value) * scale + Number.EPSILON) / scale;
+  return (Math.sign(value) * Math.round(Math.abs(value) * scale + Number.EPSILON)) / scale;
 }
 
 /**
@@ -81,7 +88,10 @@ export function formatUomConversions(conversions: ProductUomConversionDto[]): st
 // The Add/Edit SKU form's single "Cut-to-size" select combines the IsCutToSize flag and
 // CutToSizeUnit into one choice, so picking a unit also turns the feature on — there's no separate
 // toggle to forget to flip.
-export function parseCutToSizeMode(mode: string | undefined): { isCutToSize: boolean; cutToSizeUnit: "Length" | "Area" | "Volume" } {
+export function parseCutToSizeMode(mode: string | undefined): {
+  isCutToSize: boolean;
+  cutToSizeUnit: "Length" | "Area" | "Volume";
+} {
   if (mode === "Length (linear m)") return { isCutToSize: true, cutToSizeUnit: "Length" };
   if (mode === "Volume (m³)") return { isCutToSize: true, cutToSizeUnit: "Volume" };
   if (mode === "Area (m²)") return { isCutToSize: true, cutToSizeUnit: "Area" };
@@ -131,7 +141,11 @@ export function applyUomRule(qty: number, rule: UomRule | undefined): number {
   if (method === "Round Up") out = Math.ceil(out);
   else if (method === "Round Down") out = Math.floor(out);
   else if (method === "Round to Nearest") out = Math.round(out);
-  else if (method === "Full Pack Only" || method === "Full Box Only" || method === "Full Pallet Only") {
+  else if (
+    method === "Full Pack Only" ||
+    method === "Full Box Only" ||
+    method === "Full Pallet Only"
+  ) {
     // Never round a full-pack product DOWN to zero — the customer asked for some of it.
     out = Math.max(1, Math.ceil(out));
   }
@@ -143,9 +157,14 @@ export function applyUomRule(qty: number, rule: UomRule | undefined): number {
 }
 
 /** Human explanation of an adjustment, for the POS line hint. Null when nothing changed. */
-export function explainUomRule(requested: number, applied: number, rule: UomRule | undefined): string | null {
+export function explainUomRule(
+  requested: number,
+  applied: number,
+  rule: UomRule | undefined,
+): string | null {
   if (applied === requested) return null;
-  if (rule?.minQty && applied === rule.minQty) return `Minimum sellable quantity is ${rule.minQty}.`;
+  if (rule?.minQty && applied === rule.minQty)
+    return `Minimum sellable quantity is ${rule.minQty}.`;
   if (rule?.increment) return `Sold in increments of ${rule.increment} — rounded to ${applied}.`;
   return `Rounded to ${applied} (${rule?.rounding ?? "Round to Nearest"}).`;
 }

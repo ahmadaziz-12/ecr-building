@@ -53,7 +53,12 @@ const SEED: StockLocation[] = [
     rack: "Floor Stack",
     bin: "CEM-A",
     floor: "Ground Floor",
-    allowedCategories: ["Cement & Binders", "Steel & Reinforcement", "Aggregates & Sand", "Landscaping"],
+    allowedCategories: [
+      "Cement & Binders",
+      "Steel & Reinforcement",
+      "Aggregates & Sand",
+      "Landscaping",
+    ],
     sellable: true,
     quarantine: false,
     supplierReturnHold: false,
@@ -71,7 +76,13 @@ const SEED: StockLocation[] = [
     rack: "R-04",
     bin: "B-12",
     floor: "Ground Floor",
-    allowedCategories: ["Tiles & Stone", "Paint & Coatings", "Pipes & Plumbing", "Electrical", "Power & Hand Tools"],
+    allowedCategories: [
+      "Tiles & Stone",
+      "Paint & Coatings",
+      "Pipes & Plumbing",
+      "Electrical",
+      "Power & Hand Tools",
+    ],
     sellable: true,
     quarantine: false,
     supplierReturnHold: false,
@@ -107,7 +118,11 @@ type State = {
 };
 
 function nextId(type: LocationType, branch: string, existing: StockLocation[]) {
-  const branchTag = (branch || "GEN").replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase() || "GEN";
+  const branchTag =
+    (branch || "GEN")
+      .replace(/[^A-Za-z]/g, "")
+      .slice(0, 3)
+      .toUpperCase() || "GEN";
   const typeTag = type.split(" ")[0].slice(0, 3).toUpperCase();
   const seq = String(existing.length + 1).padStart(3, "0");
   return `LOC-${branchTag}-${typeTag}-${seq}`;

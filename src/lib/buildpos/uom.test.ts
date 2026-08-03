@@ -1,8 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
-  areaOf, factorToStock, formatCutToSizeMode, formatUomConversions, lengthOf, parseCutToSizeMode,
-  parseUomConversions, sellableUoms, toStockQty, unitPriceFor, volumeOf,
-  applyUomRule, explainUomRule, toMetres, calcSheet, calcTileCoverage, calcLinear,
+  areaOf,
+  factorToStock,
+  formatCutToSizeMode,
+  formatUomConversions,
+  lengthOf,
+  parseCutToSizeMode,
+  parseUomConversions,
+  sellableUoms,
+  toStockQty,
+  unitPriceFor,
+  volumeOf,
+  applyUomRule,
+  explainUomRule,
+  toMetres,
+  calcSheet,
+  calcTileCoverage,
+  calcLinear,
 } from "./uom";
 
 // Module 5 (docs/BRD-GAP-IMPLEMENTATION-PLAN.md) — client-side mirror of the backend's UomMath.cs.
@@ -47,11 +61,20 @@ describe("UOM conversion math", () => {
 
 describe("cut-to-size mode select", () => {
   it("maps each option to the flag + unit the backend expects", () => {
-    expect(parseCutToSizeMode("Not cut-to-size")).toEqual({ isCutToSize: false, cutToSizeUnit: "Area" });
+    expect(parseCutToSizeMode("Not cut-to-size")).toEqual({
+      isCutToSize: false,
+      cutToSizeUnit: "Area",
+    });
     expect(parseCutToSizeMode(undefined)).toEqual({ isCutToSize: false, cutToSizeUnit: "Area" });
-    expect(parseCutToSizeMode("Length (linear m)")).toEqual({ isCutToSize: true, cutToSizeUnit: "Length" });
+    expect(parseCutToSizeMode("Length (linear m)")).toEqual({
+      isCutToSize: true,
+      cutToSizeUnit: "Length",
+    });
     expect(parseCutToSizeMode("Area (m²)")).toEqual({ isCutToSize: true, cutToSizeUnit: "Area" });
-    expect(parseCutToSizeMode("Volume (m³)")).toEqual({ isCutToSize: true, cutToSizeUnit: "Volume" });
+    expect(parseCutToSizeMode("Volume (m³)")).toEqual({
+      isCutToSize: true,
+      cutToSizeUnit: "Volume",
+    });
   });
 
   it("round-trips through formatCutToSizeMode for the edit-form prefill", () => {
@@ -83,7 +106,10 @@ describe("admin conversions field parsing", () => {
   });
 
   it("round-trips through formatUomConversions for the edit-form prefill", () => {
-    const conversions = [{ uom: "Pallet", factorToStock: 50 }, { uom: "Ton", factorToStock: 20 }];
+    const conversions = [
+      { uom: "Pallet", factorToStock: 50 },
+      { uom: "Ton", factorToStock: 20 },
+    ];
     expect(parseUomConversions(formatUomConversions(conversions))).toEqual(conversions);
   });
 });
@@ -115,7 +141,14 @@ describe("§8 dimension engine", () => {
   });
 
   it("prices sheet/panel products with wastage (§8.2 worked example)", () => {
-    const r = calcSheet({ length: 2500, width: 1200, unit: "mm", panels: 4, wastagePct: 8, pricePerSqm: 95 });
+    const r = calcSheet({
+      length: 2500,
+      width: 1200,
+      unit: "mm",
+      panels: 4,
+      wastagePct: 8,
+      pricePerSqm: 95,
+    });
     expect(r.areaPerPanel).toBe(3);
     expect(r.totalArea).toBe(12);
     expect(r.chargeableArea).toBe(12.96);

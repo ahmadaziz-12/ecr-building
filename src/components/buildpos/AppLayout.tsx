@@ -616,7 +616,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       {searchResults.orders.map((o) => (
                         <button
                           key={o.id}
-                          onClick={() => goToSearchResult("/operate/orders", { orderNo: o.orderNo })}
+                          onClick={() =>
+                            goToSearchResult("/operate/orders", { orderNo: o.orderNo })
+                          }
                           className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
                         >
                           <span className="truncate font-mono text-xs">{o.orderNo}</span>
@@ -645,7 +647,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       {searchResults.quotations.map((q) => (
                         <button
                           key={q.id}
-                          onClick={() => goToSearchResult("/operate/orders", { quoteNo: q.quoteNo })}
+                          onClick={() =>
+                            goToSearchResult("/operate/orders", { quoteNo: q.quoteNo })
+                          }
                           className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-canvas"
                         >
                           <span className="truncate font-mono text-xs">{q.quoteNo}</span>
