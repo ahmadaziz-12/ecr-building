@@ -8,6 +8,7 @@ import {
   Circle,
   Shield,
   ChevronDown,
+  MapPin,
   ScanBarcode,
   ShoppingBag,
   Users,
@@ -232,7 +233,7 @@ const nav: Group[] = [
 export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
-  const { user, hasAccess, logout } = useAuth();
+  const { user, hasAccess } = useAuth();
   const { setValue: setDashboardFilter, setActiveTab: setDashboardTab } = useFilters();
   const onDashboard = pathname === "/dashboard";
 
@@ -411,11 +412,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
   // Navigating away closes the mobile drawer — otherwise it stays over the page you just opened.
   useEffect(() => setMobileNavOpen(false), [pathname]);
 
-  async function handleLogout() {
-    await logout();
-    navigate({ to: "/" });
-  }
-
   // Rendered by both the desktop rail and the mobile drawer below, so navigation is identical in
   // either presentation.
   const sidebarInner = (
@@ -514,14 +510,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <p className="truncate font-medium text-white">{user?.name ?? statusBar.user}</p>
               <p className="truncate text-white/50">{user?.role ?? statusBar.role}</p>
             </div>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="grid h-7 w-7 place-items-center rounded-md text-white/50 hover:bg-white/5 hover:text-white"
-              title="Sign out"
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
           </div>
         </div>
       </div>
