@@ -43,8 +43,8 @@ const DEFAULT_PREFS: UserPreferences = {
   theme: "Light",
   timeFormat: "24-hour",
   dateFormat: "DD/MM/YYYY",
-  defaultBranch: statusBar.branch ?? "Riyadh Main Branch",
-  defaultTerminal: statusBar.terminal ?? "TERM-01",
+  defaultBranch: statusBar.branch,
+  defaultTerminal: statusBar.terminal,
   notifyApprovals: true,
   notifyLowStock: true,
 };
@@ -177,7 +177,7 @@ export function ProfileMenu({ onSetPin }: { onSetPin: () => void }) {
             <Row label="Employee ID" value={user?.id != null ? `EMP-${String(user.id).padStart(4, "0")}` : "—"} />
             <Row label="Assigned branch" value={user?.branchName ?? prefs.defaultBranch} />
             <Row label="Assigned terminal" value={prefs.defaultTerminal} />
-            <Row label="Mobile" value={statusBar.phone ?? "—"} />
+            <Row label="Mobile" value="+966 55 000 0000" />
             <Row label="Preferred language" value={prefs.language} />
             <Row label="Active sessions" value="1 (this device)" />
             <Row label="Last login" value={new Date().toLocaleString()} />
@@ -232,7 +232,7 @@ export function ProfileMenu({ onSetPin }: { onSetPin: () => void }) {
             <Pref label="Time format" value={prefs.timeFormat} options={["24-hour", "12-hour"]} onChange={(v) => setPrefs({ ...prefs, timeFormat: v })} />
             <Pref label="Date format" value={prefs.dateFormat} options={["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"]} onChange={(v) => setPrefs({ ...prefs, dateFormat: v })} />
             <Pref label="Default branch" value={prefs.defaultBranch} options={["Riyadh Main Branch", "Jeddah Branch", "Dammam Branch"]} onChange={(v) => setPrefs({ ...prefs, defaultBranch: v })} />
-            <Pref label="Default terminal" value={prefs.defaultTerminal} options={["TERM-01", "TERM-02", "TERM-03"]} onChange={(v) => setPrefs({ ...prefs, defaultTerminal: v })} />
+            <Pref label="Default terminal" value={prefs.defaultTerminal} options={["POS-01", "POS-02", "POS-03"]} onChange={(v) => setPrefs({ ...prefs, defaultTerminal: v })} />
           </div>
           <div className="space-y-2 rounded-lg border border-black/5 p-3 text-sm">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Notifications</p>

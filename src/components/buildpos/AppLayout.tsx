@@ -71,6 +71,7 @@ import { useFilters, categoryToFilter } from "@/lib/buildpos/filter-context";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useAuth } from "@/lib/api/auth";
 import { SetPinDialog } from "@/components/buildpos/SetPinDialog";
+import { ProfileMenu } from "@/components/buildpos/ProfileMenu";
 import { DeliverySync } from "@/lib/api/delivery-sync";
 // HRM module temporarily disabled — see the commented-out "HRMS" nav group below.
 // import { HrSync } from "@/lib/api/hr-sync";
@@ -134,6 +135,7 @@ const nav: Group[] = [
     name: "Stock",
     items: [
       { to: "/stock/warehouses", label: "Warehouse Directory", icon: Warehouse },
+      { to: "/stock/locations", label: "Stock Locations", icon: MapPin },
       { to: "/stock/stocks", label: "Inventory & Stock", icon: Boxes },
       { to: "/stock/branch-stock", label: "Branch Stock", icon: Store },
       { to: "/stock/stock-count", label: "Stock Taking", icon: ClipboardCheck },
@@ -818,36 +820,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-brand text-brand-foreground text-xs font-semibold hover:bg-brand/90">
-                  {(user?.name ?? "?").charAt(0)}
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>
-                  <p className="truncate text-sm font-semibold text-foreground">
-                    {user?.name ?? "—"}
-                  </p>
-                  <p className="truncate text-xs font-normal text-muted-foreground">
-                    {user?.email ?? ""}
-                  </p>
-                  <p className="truncate text-xs font-normal text-muted-foreground">
-                    {user?.role ?? ""}
-                  </p>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {/* BRD §10.2: self-service PIN for register sign-in / idle unlock / authorizations. */}
-                <DropdownMenuItem onClick={() => setPinDialogOpen(true)}>Set PIN…</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={handleLogout}
-                  className="text-critical focus:text-critical"
-                >
-                  Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <ProfileMenu onSetPin={() => setPinDialogOpen(true)} />
             <SetPinDialog open={pinDialogOpen} onOpenChange={setPinDialogOpen} />
           </div>
         </header>
