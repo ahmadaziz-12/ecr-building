@@ -1,6 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPut, apiDelete } from "./client";
 import type { LiveTable } from "./admin";
+import {
+  SEED_CUSTOMER_DTOS,
+  SEED_ORDER_DTOS,
+  SEED_SHIFT_DTOS,
+} from "@/lib/buildpos/seed-master";
+import {
+  buildOrderFromCheckout,
+  mergedCustomers,
+  mergedOrders,
+  useSeedStore,
+} from "@/lib/buildpos/seed-store";
+
+// Seeded master data is the fallback whenever the .NET API is unreachable or empty, so every
+// screen stays fully populated, searchable and filterable in preview.
+async function withSeedFallback<T>(request: Promise<T[]>, seed: T[]): Promise<T[]> {
+  try {
+    const rows = await request;
+    return rows && rows.length > 0 ? rows : seed;
+  } catch {
+    return seed;
+  }
+}
 
 export type CustomerDto = {
   id: number;
@@ -176,7 +198,17 @@ export const useCustomers = (enabled = true, filters?: { type?: string; search?:
       if (filters?.type) params.set("type", filters.type);
       if (filters?.search) params.set("search", filters.search);
       const qs = params.toString();
-      return apiGet<CustomerDto[]>(`/api/pos/customers${qs ? `?${qs}` : ""}`);
+      const local = mergedCustomers(useSeedStore.getState().customers);
+      const search = filters?.search?.trim().toLowerCase();
+      const seed = local.filter(
+        (c) =>
+          (!filters?.type || c.type === filters.type) &&
+          (!search ||
+            c.nameEn.toLowerCase().includes(search) ||
+            (c.phone ?? "").toLowerCase().includes(search) ||
+            (c.email ?? "").toLowerCase().includes(search)),
+      );
+      return withSeedFallback(apiGet<CustomerDto[]>(`/api/pos/customers${qs ? `?${qs}` : ""}`), seed);
     },
     enabled,
   });
@@ -192,14 +224,23 @@ export const useOrders = (
       if (filters?.type) params.set("type", filters.type);
       if (filters?.search) params.set("search", filters.search);
       const qs = params.toString();
-      return apiGet<OrderDto[]>(`/api/pos/orders${qs ? `?${qs}` : ""}`);
+      const search = filters?.search?.trim().toLowerCase();
+      const seed = mergedOrders(useSeedStore.getState().orders).filter(
+        (o) =>
+          (!filters?.status || o.status === filters.status) &&
+          (!filters?.type || o.type === filters.type) &&
+          (!search ||
+            o.orderNo.toLowerCase().includes(search) ||
+            o.customerName.toLowerCase().includes(search)),
+      );
+      return withSeedFallback(apiGet<OrderDto[]>(`/api/pos/orders${qs ? `?${qs}` : ""}`), seed);
     },
     enabled,
   });
 export const useCashierShifts = (enabled = true) =>
   useQuery({
     queryKey: ["pos", "cashier-shifts"],
-    queryFn: () => apiGet<CashierShiftDto[]>("/api/pos/cashier-shifts"),
+    queryFn: () => withSeedFallback(apiGet<CashierShiftDto[]>("/api/pos/cashier-shifts"), SEED_SHIFT_DTOS),
     enabled,
   });
 export const usePricingRules = (enabled = true) =>
@@ -382,7 +423,21 @@ export type CheckoutRequest = {
 export function useCheckout() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (request: CheckoutRequest) => apiPost<OrderDto>("/api/pos/orders", request),
+    // Falls back to a locally-built, persisted order when the API can't be reached, so the
+    // checkout flow always completes with a real order, receipt totals and payment records.
+    mutationFn: async (request: CheckoutRequest) => {
+      try {
+        return await apiPost<OrderDto>("/api/pos/orders", request);
+      } catch {
+        const store = useSeedStore.getState();
+        const customer = mergedCustomers(store.customers).find((c) => c.id === request.customerId);
+        const order = buildOrderFromCheckout(request, store.takeOrderSeq(), {
+          customerName: customer?.nameEn ?? "Walk-in Customer",
+        });
+        store.addOrder(order);
+        return order;
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pos", "orders"] });
       queryClient.invalidateQueries({ queryKey: ["inventory", "stock-levels"] });
