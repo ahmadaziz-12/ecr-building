@@ -1,11 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPut, apiDelete } from "./client";
 import type { LiveTable } from "./admin";
-import {
-  SEED_CUSTOMER_DTOS,
-  SEED_ORDER_DTOS,
-  SEED_SHIFT_DTOS,
-} from "@/lib/buildpos/seed-master";
+import { SEED_SHIFT_DTOS } from "@/lib/buildpos/seed-master";
 import {
   buildOrderFromCheckout,
   mergedCustomers,
@@ -499,8 +495,47 @@ function toUpsertCustomerRequest(request: UpsertCustomerInput) {
 export function useCreateCustomer() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (request: UpsertCustomerInput) =>
-      apiPost<CustomerDto>("/api/pos/customers", toUpsertCustomerRequest(request)),
+    // Persists locally when the API is unreachable so the new customer is immediately
+    // searchable in POS, Customers and every filter.
+    mutationFn: async (request: UpsertCustomerInput) => {
+      try {
+        return await apiPost<CustomerDto>("/api/pos/customers", toUpsertCustomerRequest(request));
+      } catch {
+        const store = useSeedStore.getState();
+        const existing = mergedCustomers(store.customers);
+        const created: CustomerDto = {
+          id: Math.max(2000, ...existing.map((c) => c.id)) + 1,
+          nameEn: request.nameEn,
+          nameAr: request.nameAr ?? null,
+          type: request.type ?? "Retail",
+          phone: request.phone ?? null,
+          email: request.email ?? null,
+          vatNo: request.vatNo ?? null,
+          creditLimit: request.creditLimit ?? 0,
+          outstanding: 0,
+          city: request.city ?? null,
+          district: request.district ?? null,
+          address: request.address ?? null,
+          loyaltyEnrolled: request.loyaltyEnrolled ?? false,
+          loyaltyPoints: 0,
+          loyaltyLifetimePoints: 0,
+          loyaltyTier: "Bronze",
+          status: "Active",
+          lastPurchaseAt: null,
+          projectName: request.projectName ?? null,
+          creditTermDays: request.creditTermDays ?? null,
+          createdAt: new Date().toISOString(),
+          loyaltyLifetimeSpend: 0,
+          accountManagerUserId: null,
+          accountManagerName: null,
+          priorityBilling: false,
+          dateOfBirth: null,
+          pointsExpiringSoon: false,
+          priceListType: request.priceListType ?? "Retail",
+        };
+        return store.addCustomer(created);
+      }
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pos", "customers"] }),
   });
 }
