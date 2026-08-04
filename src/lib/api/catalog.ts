@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPut } from "./client";
 import type { LiveTable } from "./admin";
 import { SEED_CATEGORY_DTOS, SEED_PRODUCT_DTOS } from "@/lib/buildpos/seed-products";
+import { mergedProducts, useSeedStore } from "@/lib/buildpos/seed-store";
 
 // The .NET catalog API isn't reachable in preview/demo (and is empty on a fresh install), which
 // left every product surface blank. Fall back to the seeded building-materials catalog whenever
@@ -166,7 +167,8 @@ export const useProducts = (enabled = true, branchId?: number, refetchIntervalMs
     queryFn: () =>
       withSeedFallback(
         apiGet<ProductDto[]>(`/api/catalog/products${branchId ? `?branchId=${branchId}` : ""}`),
-        SEED_PRODUCT_DTOS,
+        // Locally-completed sales deduct from the seeded availability so POS stock stays honest.
+        mergedProducts(useSeedStore.getState().soldStock, SEED_PRODUCT_DTOS),
       ),
     enabled,
     refetchInterval: refetchIntervalMs,
