@@ -1,6 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPut } from "./client";
 import type { LiveTable } from "./admin";
+import { SEED_PURCHASE_ORDER_DTOS, SEED_SUPPLIER_DTOS } from "@/lib/buildpos/seed-master";
+
+// Seeded supplier/PO master data keeps Procurement fully populated when the API is unreachable.
+async function withSeedFallback<T>(request: Promise<T[]>, seed: T[]): Promise<T[]> {
+  try {
+    const rows = await request;
+    return rows && rows.length > 0 ? rows : seed;
+  } catch {
+    return seed;
+  }
+}
 
 export type SupplierDto = {
   id: number; code: string; nameEn: string; nameAr: string | null; type: string; vatNo: string | null; phone: string | null;
@@ -51,8 +62,8 @@ export type CreateRtsRequest = {
   reason: string; date: string; carrier: string | null; lines: RtsLineInput[];
 };
 
-export const useSuppliers = (enabled = true) => useQuery({ queryKey: ["procurement", "suppliers"], queryFn: () => apiGet<SupplierDto[]>("/api/procurement/suppliers"), enabled });
-export const usePurchaseOrders = (enabled = true) => useQuery({ queryKey: ["procurement", "purchase-orders"], queryFn: () => apiGet<PurchaseOrderDto[]>("/api/procurement/purchase-orders"), enabled });
+export const useSuppliers = (enabled = true) => useQuery({ queryKey: ["procurement", "suppliers"], queryFn: () => withSeedFallback(apiGet<SupplierDto[]>("/api/procurement/suppliers"), SEED_SUPPLIER_DTOS), enabled });
+export const usePurchaseOrders = (enabled = true) => useQuery({ queryKey: ["procurement", "purchase-orders"], queryFn: () => withSeedFallback(apiGet<PurchaseOrderDto[]>("/api/procurement/purchase-orders"), SEED_PURCHASE_ORDER_DTOS), enabled });
 export const useReturnsToSupplier = (enabled = true) => useQuery({ queryKey: ["procurement", "rts"], queryFn: () => apiGet<ReturnToSupplierDto[]>("/api/procurement/rts"), enabled });
 
 export const useSupplierLedger = (id: number | undefined) =>
